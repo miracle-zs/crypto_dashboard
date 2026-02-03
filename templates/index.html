@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP 3.0 MASTER CONSOLE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+    <style>
+        :root {
+            --primary: #0ea5e9; /* Sky Blue */
+            --accent: #10b981;  /* Emerald */
+            --danger: #ef4444;  /* Red */
+            --bg: #030406;
+            --panel: rgba(15, 23, 42, 0.6);
+        }
+        body {
+            font-family: 'Share Tech Mono', monospace; /* 替换为更有科技感的字体 */
+            background-color: var(--bg);
+            color: #e2e8f0;
+            background-image: 
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+        }
+        
+        /* 玻璃拟态 + 霓虹边框 */
+        .cyber-panel {
+            background: var(--panel);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.1);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            position: relative;
+            overflow: hidden;
+        }
+        .cyber-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 2px; height: 100%;
+            background: linear-gradient(to bottom, transparent, var(--primary), transparent);
+            opacity: 0.5;
+        }
+        
+        /* 动态呼吸灯文字 */
+        .pulse-text {
+            animation: pulse-glow 2s infinite;
+        }
+        @keyframes pulse-glow {
+            0% { text-shadow: 0 0 5px rgba(16, 185, 129, 0.2); }
+            50% { text-shadow: 0 0 20px rgba(16, 185, 129, 0.6); }
+            100% { text-shadow: 0 0 5px rgba(16, 185, 129, 0.2); }
+        }
+
+        /* 扫描线动画 */
+        .scan-line {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 5px;
+            background: rgba(56, 189, 248, 0.1);
+            animation: scan 6s linear infinite;
+            pointer-events: none;
+            z-index: 50;
+        }
+        @keyframes scan {
+            0% { top: -10%; opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { top: 110%; opacity: 0; }
+        }
+
+        .metric-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="scan-line"></div>
+
+    <header class="flex justify-between items-end mb-8 border-b border-gray-800 pb-4">
+        <div>
+            <div class="flex items-center gap-2 mb-1">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
+            </div>
+            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+                ZERO_GRAVITY <span class="text-white text-lg font-normal opacity-50">// CONSOLE</span>
+            </h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm">
+            <a href="/" class="text-white font-bold border-b-2 border-cyan-500 pb-1">TRADES</a>
+            <a href="/live-monitor" class="text-gray-500 hover:text-white transition-colors">MONITOR</a>
+        </div>
+        <div class="text-right">
+            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-xl font-bold text-cyan-500 font-mono">X-2026-BULLA-REKT</div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
+        
+        <div class="lg:col-span-4 space-y-6">
+            <div class="cyber-panel rounded-xl p-6">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <div class="metric-label">Total Equity</div>
+                        <div class="text-4xl font-bold text-white mt-1 tracking-tight" id="disp-balance">$Loading</div>
+                    </div>
+                    <i data-lucide="wallet" class="text-gray-600"></i>
+                </div>
+                
+                <div class="flex gap-4">
+                    <div>
+                        <div class="metric-label">Net PnL</div>
+                        <div class="text-xl font-bold pulse-text" id="disp-pnl">--</div>
+                    </div>
+                    <div>
+                        <div class="metric-label">ROI</div>
+                        <div class="text-xl font-bold" id="disp-roi">--%</div>
+                    </div>
+                </div>
+                
+                <div class="mt-4 pt-4 border-t border-gray-800 text-[10px] flex justify-between text-gray-400">
+                    <span>Initial: $24,000</span>
+                    <span>Fees Paid: <span class="text-red-400" id="disp-fees">--</span></span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="cyber-panel rounded-xl p-4 text-center">
+                    <div class="metric-label text-purple-400">Kelly Criterion</div>
+                    <div class="text-2xl font-bold text-white mt-2" id="metric-kelly">--%</div>
+                    <div class="text-[9px] text-gray-500 mt-1">建议仓位比例</div>
+                </div>
+                <div class="cyber-panel rounded-xl p-4 text-center">
+                    <div class="metric-label text-yellow-400">System Quality (SQN)</div>
+                    <div class="text-2xl font-bold text-white mt-2" id="metric-sqn">--</div>
+                    <div class="text-[9px] text-gray-500 mt-1">>2.0 = 优秀</div>
+                </div>
+            </div>
+            
+            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center">
+                <div>
+                    <div class="metric-label">Current Streak</div>
+                    <div class="text-lg font-bold text-white mt-1" id="metric-streak">--</div>
+                </div>
+                <div class="text-right">
+                    <div class="metric-label">Expectancy (EV)</div>
+                    <div class="text-lg font-bold text-blue-400 mt-1" id="metric-ev">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-8 cyber-panel rounded-xl p-6 flex flex-col">
+            <div class="flex justify-between mb-4">
+                <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                    <i data-lucide="activity" class="mr-2 w-4 h-4 text-cyan-400"></i> EQUITY CURVE
+                </h3>
+                <div class="flex gap-2 text-[10px]">
+                    <span class="px-2 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded">WIN: <span id="disp-wins">0</span></span>
+                    <span class="px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded">LOSS: <span id="disp-losses">0</span></span>
+                </div>
+            </div>
+            <div id="equityChart" class="flex-1 w-full min-h-[250px]"></div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500">
+            <div class="metric-label">Win Rate</div>
+            <div class="text-3xl font-bold text-white mt-1" id="metric-winrate">--%</div>
+            <div class="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
+                <div id="bar-winrate" class="bg-blue-500 h-full" style="width: 0%"></div>
+            </div>
+        </div>
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500">
+            <div class="metric-label">Risk / Reward</div>
+            <div class="text-3xl font-bold text-white mt-1" id="metric-rr">--</div>
+            <div class="text-[10px] text-gray-500 mt-1">Target: > 1.5</div>
+        </div>
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500">
+            <div class="metric-label">Profit Factor</div>
+            <div class="text-3xl font-bold text-white mt-1" id="metric-pf">--</div>
+            <div class="text-[10px] text-gray-500 mt-1">Gross Win / Gross Loss</div>
+        </div>
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500">
+            <div class="metric-label">Max Drawdown (Trade)</div>
+            <div class="text-3xl font-bold text-red-400 mt-1" id="metric-mdd">--</div>
+            <div class="text-[10px] text-gray-500 mt-1">单笔最大亏损额</div>
+        </div>
+    </div>
+
+    <div class="cyber-panel rounded-xl overflow-hidden">
+        <table class="w-full text-left text-sm text-gray-400">
+            <thead class="bg-black/40 text-[10px] uppercase text-gray-500 font-bold">
+                <tr>
+                    <th class="px-6 py-4">Time</th>
+                    <th class="px-6 py-4">Symbol</th>
+                    <th class="px-6 py-4">Side</th>
+                    <th class="px-6 py-4">Price</th>
+                    <th class="px-6 py-4 text-right">PnL (Net)</th>
+                    <th class="px-6 py-4 text-right">ROI</th>
+                    <th class="px-6 py-4 text-center">Status</th>
+                </tr>
+            </thead>
+            <tbody id="trade-table-body" class="divide-y divide-gray-800">
+                </tbody>
+        </table>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // ============================================
+        // 1. 数据获取 (Fetch from API)
+        // ============================================
+
+        async function fetchDashboardData() {
+            try {
+                // Check status first
+                const statusRes = await fetch('/api/status');
+                const status = await statusRes.json();
+
+                if (!status.configured) {
+                    alert("System Warning: API Keys not configured in .env file");
+                    return;
+                }
+
+                // Fetch Summary Stats
+                const summaryRes = await fetch('/api/summary');
+                const summaryData = await summaryRes.json();
+
+                // Fetch Trade History
+                const tradesRes = await fetch('/api/trades');
+                const tradesData = await tradesRes.json();
+
+                updateUI(summaryData, tradesData);
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                document.getElementById('disp-balance').innerText = "Error";
+            }
+        }
+
+        // ============================================
+        // 2. UI 更新逻辑
+        // ============================================
+        function updateUI(stats, trades) {
+            // 资金与盈亏
+            const balance = stats.equity_curve[stats.equity_curve.length - 1];
+            document.getElementById('disp-balance').innerText = `$${balance.toLocaleString()}`;
+
+            const pnlEl = document.getElementById('disp-pnl');
+            pnlEl.innerText = `${stats.total_pnl > 0 ? '+' : ''}$${stats.total_pnl.toLocaleString()}`;
+            pnlEl.className = `text-xl font-bold pulse-text ${stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-500'}`;
+
+            // ROI Calculation - uses a fixed initial capital based on the UI text
+            const initialCapital = 24000; 
+            const roi = initialCapital > 0 ? (stats.total_pnl / initialCapital) * 100 : 0;
+            document.getElementById('disp-roi').innerText = `${roi.toFixed(2)}%`;
+            document.getElementById('disp-roi').className = `text-xl font-bold ${roi >= 0 ? 'text-green-400' : 'text-red-500'}`;
+
+            document.getElementById('disp-fees').innerText = `$${stats.total_fees}`;
+            document.getElementById('disp-wins').innerText = stats.win_count;
+            document.getElementById('disp-losses').innerText = stats.loss_count;
+
+            // 高级指标
+            document.getElementById('metric-winrate').innerText = stats.win_rate.toFixed(1) + '%';
+            document.getElementById('bar-winrate').style.width = stats.win_rate + '%';
+
+            document.getElementById('metric-rr').innerText = stats.risk_reward_ratio.toFixed(2);
+            document.getElementById('metric-rr').className = `text-3xl font-bold mt-1 ${stats.risk_reward_ratio >= 1.5 ? 'text-yellow-400' : 'text-gray-500'}`;
+
+            document.getElementById('metric-pf').innerText = stats.profit_factor.toFixed(2);
+            document.getElementById('metric-pf').className = `text-3xl font-bold mt-1 ${stats.profit_factor >= 2 ? 'text-green-400' : 'text-gray-400'}`;
+
+            document.getElementById('metric-ev').innerText = `$${stats.expected_value.toFixed(0)}`;
+
+            // Kelly
+            const kellyPct = (stats.kelly_criterion * 100).toFixed(1);
+            const kellyEl = document.getElementById('metric-kelly');
+            kellyEl.innerText = stats.kelly_criterion > 0 ? `${kellyPct}%` : '0%';
+            kellyEl.className = `text-2xl font-bold mt-2 ${stats.kelly_criterion > 0.2 ? 'text-purple-400' : 'text-gray-500'}`;
+
+            // SQN
+            const sqnEl = document.getElementById('metric-sqn');
+            sqnEl.innerText = stats.sqn.toFixed(2);
+            let sqnColor = 'text-gray-500';
+            if (stats.sqn > 1.6) sqnColor = 'text-blue-400'; // Average
+            if (stats.sqn > 2.0) sqnColor = 'text-green-400'; // Good
+            if (stats.sqn > 3.0) sqnColor = 'text-purple-400'; // Holy Grail
+            sqnEl.className = `text-2xl font-bold mt-2 ${sqnColor}`;
+
+            // Streak & Drawdown
+            const streakEl = document.getElementById('metric-streak');
+            streakEl.innerText = stats.current_streak > 0 ? `+${stats.current_streak} W` : `${stats.current_streak} L`;
+            streakEl.className = `text-lg font-bold mt-1 ${stats.current_streak > 0 ? 'text-green-400' : 'text-red-500'}`;
+
+            document.getElementById('metric-mdd').innerText = `-$${stats.max_drawdown}`;
+
+            renderChart(stats.equity_curve, trades);
+            renderTable(trades);
+        }
+
+        // ============================================
+        // 3. 图表渲染 (ApexCharts)
+        // ============================================
+        function renderChart(dataPoints, trades) {
+            // Extract dates from trades for x-axis if possible, or just use indices
+            // Simplifying to match data points count
+            const categories = dataPoints.map((_, i) => i === 0 ? 'Start' : (trades[i-1] ? trades[i-1].date.substring(4) : i));
+
+            const options = {
+                chart: {
+                    type: 'area',
+                    height: 250,
+                    toolbar: { show: false },
+                    background: 'transparent',
+                    fontFamily: 'Share Tech Mono'
+                },
+                series: [{ name: 'Equity', data: dataPoints }],
+                theme: { mode: 'dark' },
+                stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
+                fill: {
+                    type: 'gradient',
+                    gradient: {
+                        shadeIntensity: 1,
+                        opacityFrom: 0.7,
+                        opacityTo: 0.1,
+                        stops: [0, 90, 100],
+                        colorStops: [{ offset: 0, color: '#0ea5e9', opacity: 0.5 }, { offset: 100, color: '#0ea5e9', opacity: 0 }]
+                    }
+                },
+                dataLabels: { enabled: false },
+                grid: { borderColor: '#1e293b', strokeDashArray: 4 },
+                xaxis: {
+                    categories: categories,
+                    labels: { style: { colors: '#64748b' }, show: false }, // Hide labels if too many
+                    axisBorder: { show: false },
+                    axisTicks: { show: false }
+                },
+                yaxis: {
+                    labels: {
+                        style: { colors: '#64748b' },
+                        formatter: (value) => { return "$" + (value / 1000).toFixed(1) + "k" }
+                    }
+                },
+                tooltip: { theme: 'dark' }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#equityChart"), options);
+            chart.render();
+        }
+
+        // ============================================
+        // 4. 表格渲染
+        // ============================================
+        function renderTable(tradeData) {
+            const tbody = document.getElementById('trade-table-body');
+            tbody.innerHTML = '';
+
+            // Reverse to show latest first
+            const reversedData = [...tradeData].reverse();
+
+            reversedData.forEach(t => {
+                const isWin = t.pnl_net > 0;
+                // Parse date string MM-DD HH:MM
+                const dateParts = t.entry_time.split(' ');
+                const dateStr = dateParts[0].substring(5); // Remove YYYY-
+                const timeStr = dateParts[1].substring(0, 5); // HH:MM
+
+                const row = `
+                    <tr class="hover:bg-white/5 transition-colors border-b border-gray-800">
+                        <td class="px-6 py-4">
+                            <div class="text-white font-bold">${timeStr}</div>
+                            <div class="text-[10px] text-gray-500">${dateStr}</div>
+                        </td>
+                        <td class="px-6 py-4 font-bold text-cyan-400">${t.symbol}</td>
+                        <td class="px-6 py-4">
+                            <span class="${t.side === 'LONG' ? 'text-green-400 border-green-500/30' : 'text-red-400 border-red-500/30'} text-xs border px-1 rounded">
+                                ${t.side}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 text-xs font-mono">${t.entry_price} → ${t.exit_price}</td>
+                        <td class="px-6 py-4 text-right font-mono ${isWin ? 'text-green-400' : 'text-red-500'}">
+                            ${isWin ? '+' : ''}${t.pnl_net}
+                        </td>
+                        <td class="px-6 py-4 text-right font-mono ${isWin ? 'text-green-400' : 'text-red-500'}">
+                            ${t.return_rate}
+                        </td>
+                        <td class="px-6 py-4 text-center">
+                            <span class="text-[10px] px-2 py-1 rounded ${isWin ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}">
+                                ${isWin ? 'WIN' : 'LOSS'}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+
+        // 启动
+        fetchDashboardData();
+
+    </script>
+</body>
+</html>

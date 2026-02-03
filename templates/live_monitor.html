@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP 3.0 LIVE ASSET MONITOR</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+    <style>
+        :root {
+            --primary: #0ea5e9; /* Sky Blue */
+            --success: #10b981; /* Emerald */
+            --danger: #ef4444;  /* Red */
+            --bg: #020617;      /* Slate 950 */
+            --panel: rgba(15, 23, 42, 0.7);
+        }
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background-color: var(--bg);
+            color: #e2e8f0;
+            background-image: radial-gradient(circle at 50% 50%, #1e293b 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        /* 呼吸灯特效 */
+        .live-dot {
+            width: 8px; height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success);
+            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        @keyframes ping {
+            75%, 100% { transform: scale(2); opacity: 0; }
+        }
+
+        /* 玻璃面板 */
+        .glass-panel {
+            background: var(--panel);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(56, 189, 248, 0.1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 进度条动画 */
+        .progress-bar {
+            transition: width 0.5s ease-in-out;
+        }
+
+        /* 终端打字机效果 */
+        .terminal-text::before {
+            content: "> ";
+            color: var(--primary);
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <header class="flex justify-between items-end mb-8 border-b border-gray-800 pb-4">
+        <div>
+            <div class="flex items-center gap-2 mb-1">
+                <div class="live-dot"></div>
+                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
+            </div>
+            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+                ZERO_GRAVITY <span class="text-white text-lg font-normal opacity-50">// CONSOLE</span>
+            </h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm">
+            <a href="/" class="text-gray-500 hover:text-white transition-colors">TRADES</a>
+            <a href="/live-monitor" class="text-white font-bold border-b-2 border-cyan-500 pb-1">MONITOR</a>
+        </div>
+        <div class="text-right">
+            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-xl font-bold text-cyan-500 font-mono">X-2026-BULLA-REKT</div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+        
+        <div class="lg:col-span-3 flex flex-col gap-4">
+            <div class="glass-panel p-6 rounded-xl relative overflow-hidden group">
+                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <i data-lucide="wallet" class="w-16 h-16 text-cyan-400"></i>
+                </div>
+                <div class="text-gray-500 text-xs uppercase tracking-wider">Current Balance</div>
+                <div class="text-4xl font-bold text-white mt-2 tracking-tight" id="disp-balance">
+                    $24,000.00
+                </div>
+                <div class="mt-4 flex justify-between items-end border-t border-gray-700 pt-4">
+                    <div>
+                        <div class="text-[10px] text-gray-500">24H Change</div>
+                        <div class="text-lg font-bold text-green-400" id="disp-change">+$0.00</div>
+                    </div>
+                    <div class="text-[10px] bg-slate-800 px-2 py-1 rounded text-gray-400">
+                        USD-M Futures
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-xl border-t-4 border-t-red-500">
+                <div class="text-gray-500 text-xs uppercase tracking-wider flex justify-between">
+                    <span>Risk Monitor</span>
+                    <i data-lucide="shield-alert" class="w-4 h-4 text-red-500"></i>
+                </div>
+                <div class="mt-4">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-gray-400">Peak Balance</span>
+                        <span class="text-white font-bold" id="disp-peak">$24,000</span>
+                    </div>
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-gray-400">Current DD</span>
+                        <span class="text-red-400 font-bold" id="disp-dd">0.00%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 h-2 rounded-full mt-2 overflow-hidden">
+                        <div id="bar-dd" class="bg-red-500 h-full w-0 transition-all duration-500"></div>
+                    </div>
+                    <div class="text-[10px] text-gray-600 mt-1 text-right">Max Allowed: 10%</div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center justify-center py-8">
+                <div class="relative w-32 h-32">
+                    <svg class="w-full h-full transform -rotate-90">
+                        <circle cx="64" cy="64" r="56" stroke="#1e293b" stroke-width="8" fill="transparent"></circle>
+                        <circle id="health-ring" cx="64" cy="64" r="56" stroke="#10b981" stroke-width="8" fill="transparent" 
+                                stroke-dasharray="351" stroke-dashoffset="0" class="transition-all duration-1000"></circle>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span class="text-3xl font-bold text-white" id="disp-score">100</span>
+                        <span class="text-[10px] text-gray-500 uppercase">Health Score</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-6 glass-panel rounded-xl p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-2 px-2">
+                <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                    <i data-lucide="activity" class="text-cyan-400 w-4 h-4"></i> LIVE EQUITY CURVE
+                </h2>
+                <div class="flex items-center gap-2">
+                    <div class="flex gap-1 text-[10px]">
+                        <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
+                        <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
+                        <button class="time-range-btn px-2 py-1 rounded-md" data-range="1w">1W</button>
+                        <button class="time-range-btn px-2 py-1 rounded-md" data-range="1m">1M</button>
+                        <button class="time-range-btn px-2 py-1 rounded-md" data-range="1y">1Y</button>
+                    </div>
+                    <div class="flex gap-2 text-[10px]">
+                        <span class="flex items-center gap-1"><div class="w-2 h-2 bg-cyan-500 rounded-full"></div> Realtime</span>
+                        <span class="flex items-center gap-1"><div class="w-2 h-2 bg-yellow-500 rounded-full"></div> Projection</span>
+                    </div>
+                </div>
+            </div>
+            <div id="chart-container" class="flex-1 w-full min-h-[300px]"></div>
+        </div>
+
+        <div class="lg:col-span-3 flex flex-col gap-4">
+            
+            <div class="glass-panel p-4 rounded-xl">
+                <div class="text-gray-500 text-[10px] uppercase">Alpha Velocity (Est.)</div>
+                <div class="flex items-end gap-2 mt-2">
+                    <div class="text-2xl font-bold text-yellow-400" id="disp-velocity">$0.00</div>
+                    <div class="text-xs text-gray-500 mb-1">/ Hour</div>
+                </div>
+                <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                    基于最近 10 次数据点推算
+                </div>
+            </div>
+
+            <div class="glass-panel p-4 rounded-xl">
+                <div class="text-gray-500 text-[10px] uppercase">Volatility (StdDev)</div>
+                <div class="flex items-end gap-2 mt-2">
+                    <div class="text-2xl font-bold text-purple-400" id="disp-vol">0.00%</div>
+                </div>
+                <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                    资金曲线平滑度 (越低越稳)
+                </div>
+            </div>
+
+            <div class="glass-panel p-4 rounded-xl flex-1 flex flex-col bg-black/40">
+                <div class="text-gray-500 text-[10px] uppercase border-b border-gray-800 pb-2 mb-2">System Log</div>
+                <div id="system-log" class="flex-1 overflow-y-auto text-[10px] font-mono space-y-1 h-32 custom-scrollbar">
+                    </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // -------------------------------------
+        // 1. Configuration & State
+        // -------------------------------------
+        const UPDATE_INTERVAL = 60000; // 60 seconds
+        let balanceData = []; // Array of {time, value}
+        let chart;
+        let lastFetchTime = 0;
+        let currentTimeRange = '1d'; // Default time range
+        let lastRequestedTimeRange = ''; // To track the last successfully fetched time range
+        const timeRangeButtons = document.querySelectorAll('.time-range-btn');
+
+        timeRangeButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                currentTimeRange = button.dataset.range;
+                timeRangeButtons.forEach(btn => btn.classList.remove('bg-cyan-700', 'text-white'));
+                button.classList.add('bg-cyan-700', 'text-white');
+                fetchData();
+            });
+        });
+
+        // Initialize active button style
+        document.querySelector(`.time-range-btn[data-range="${currentTimeRange}"]`).classList.add('bg-cyan-700', 'text-white');
+
+        // -------------------------------------
+        // 2. API Data Fetching
+        // -------------------------------------
+        async function fetchData() {
+            const startTime = Date.now();
+            try {
+                const response = await fetch(`/api/balance-history?time_range=${currentTimeRange}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    // Check if data is new or time range changed
+                    const latestTime = data[data.length - 1].time;
+                    if (lastRequestedTimeRange !== currentTimeRange || latestTime > lastFetchTime) {
+                        lastFetchTime = latestTime;
+                        lastRequestedTimeRange = currentTimeRange; // Update lastRequestedTimeRange here
+                        balanceData = data;
+                        logToTerminal(`接收到 ${data.length} 条最新余额数据`);
+                        analyzeAndDisplay();
+                    }
+                } else {
+                    logToTerminal("未获取到余额数据", "warn");
+                }
+
+            } catch (error) {
+                console.error("Fetch error:", error);
+                logToTerminal(`数据获取失败: ${error.message}`, "error");
+            }
+        }
+
+        // -------------------------------------
+        // 3. Core Calculation Engine
+        // -------------------------------------
+        function analyzeAndDisplay() {
+            if (balanceData.length === 0) return;
+
+            const initialBalance = balanceData[0].value;
+            const currentBalance = balanceData[balanceData.length - 1].value;
+            const peakBalance = Math.max(...balanceData.map(d => d.value));
+            
+            // 1. Drawdown
+            const drawdown = ((peakBalance - currentBalance) / peakBalance) * 100;
+
+            // 2. Velocity
+            let velocity = 0;
+            const recentData = balanceData.slice(-10);
+            if (recentData.length > 1) {
+                const diff = currentBalance - recentData[0].value;
+                const timeDiffMinutes = (recentData[recentData.length-1].time - recentData[0].time) / 60000;
+                velocity = timeDiffMinutes > 0 ? (diff / timeDiffMinutes) * 60 : 0;
+            }
+
+            // 3. Volatility
+            let volatility = 0;
+            if (balanceData.length > 1) {
+                const returns = [];
+                for (let i = 1; i < balanceData.length; i++) {
+                    returns.push((balanceData[i].value - balanceData[i-1].value) / balanceData[i-1].value);
+                }
+                const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+                const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
+                volatility = Math.sqrt(variance) * 100;
+            }
+
+            // 4. Health Score
+            let score = 100 - (drawdown * 5) - (volatility * 2);
+            score = Math.max(0, Math.min(100, score));
+
+            updateUI({ initialBalance, currentBalance, peakBalance }, drawdown, velocity, volatility, score);
+            updateChart();
+        }
+
+        // -------------------------------------
+        // 4. UI Update
+        // -------------------------------------
+        function updateUI(balances, dd, vel, vol, score) {
+            // Main balance and change
+            document.getElementById('disp-balance').innerText = `$${balances.currentBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            const totalChange = balances.currentBalance - balances.initialBalance;
+            const changeEl = document.getElementById('disp-change');
+            changeEl.innerText = `${totalChange >= 0 ? '+' : ''}$${totalChange.toFixed(2)}`;
+            changeEl.className = `text-lg font-bold ${totalChange >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
+            // Risk monitor
+            document.getElementById('disp-peak').innerText = `$${balances.peakBalance.toFixed(2)}`;
+            document.getElementById('disp-dd').innerText = `${dd.toFixed(2)}%`;
+            document.getElementById('bar-dd').style.width = `${Math.min(dd, 100)}%`;
+
+            // Metrics
+            document.getElementById('disp-velocity').innerText = `$${vel.toFixed(2)}`;
+            document.getElementById('disp-vol').innerText = `${vol.toFixed(2)}%`;
+            
+            // Health score ring
+            const scoreEl = document.getElementById('disp-score');
+            scoreEl.innerText = score.toFixed(0);
+            const healthRing = document.getElementById('health-ring');
+            const circumference = 2 * Math.PI * 56; // 2 * pi * r
+            const offset = circumference - (score / 100) * circumference;
+            healthRing.style.strokeDashoffset = offset;
+            if(score > 80) healthRing.style.stroke = '#10b981'; // green
+            else if(score > 50) healthRing.style.stroke = '#f59e0b'; // yellow
+            else healthRing.style.stroke = '#ef4444'; // red
+        }
+        
+        // -------------------------------------
+        // 5. Chart Rendering
+        // -------------------------------------
+        function updateChart() {
+            const seriesData = balanceData.map(d => ({ x: d.time, y: d.value.toFixed(2) }));
+
+            if (!chart) {
+                const options = {
+                    chart: { type: 'area', height: '100%', background: 'transparent', toolbar: { show: false } },
+                    theme: { mode: 'dark' },
+                    series: [{ name: 'Balance', data: seriesData }],
+                    xaxis: { 
+                        type: 'datetime', 
+                        labels: { 
+                            style: { colors: '#64748b' },
+                            formatter: function(value, timestamp) {
+                                // Display date for the first tick of a new day, otherwise just time
+                                const d = new Date(timestamp);
+                                if (d.getHours() === 0 && d.getMinutes() === 0) {
+                                     return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(timestamp);
+                                }
+                                return new Intl.DateTimeFormat('en-GB', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false,
+                                    timeZone: 'Asia/Shanghai'
+                                }).format(timestamp);
+                            }
+                        } 
+                    },
+                    yaxis: { labels: { formatter: val => `$${val.toLocaleString()}`, style: { colors: '#64748b' } } },
+                    stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
+                    fill: {
+                        type: 'gradient',
+                        gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] }
+                    },
+                    dataLabels: { enabled: false },
+                    grid: { borderColor: '#1e293b', strokeDashArray: 2 },
+                    tooltip: { 
+                        x: { 
+                            formatter: function(value) {
+                                return new Intl.DateTimeFormat('en-GB', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false,
+                                    timeZone: 'Asia/Shanghai'
+                                }).format(value);
+                            }
+                        } 
+                    }
+                };
+                chart = new ApexCharts(document.querySelector("#chart-container"), options);
+                chart.render();
+            } else {
+                chart.updateSeries([{ data: seriesData }]);
+            }
+        }
+        
+        // -------------------------------------
+        // 6. Utility & Initialization
+        // -------------------------------------
+        function logToTerminal(message, type = "info") {
+            const logEl = document.getElementById('system-log');
+            const time = new Date().toLocaleTimeString();
+            let color = "text-cyan-400";
+            if (type === "error") color = "text-red-400";
+            if (type === "warn") color = "text-yellow-400";
+
+            logEl.innerHTML += `<div class="terminal-text ${color}">${time} - ${message}</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function startUpdateCycle() {
+            fetchData(); // Initial fetch
+            setInterval(fetchData, UPDATE_INTERVAL);
+
+            // Update progress bar
+            const updateBar = document.getElementById('update-bar');
+            let width = 100;
+            setInterval(() => {
+                width -= (100 / (UPDATE_INTERVAL / 1000));
+                if (width < 0) width = 100;
+                updateBar.style.width = `${width}%`;
+            }, 1000);
+        }
+
+        // --- Start ---
+        logToTerminal("监控系统初始化...");
+        startUpdateCycle();
+    </script>
