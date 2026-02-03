@@ -54,35 +54,29 @@ class TradeDataScheduler:
             # 更新同步状态为进行中
             self.db.update_sync_status(status='syncing')
 
-            # 获取最后一条交易时间
-            last_entry_time = self.db.get_last_entry_time()
+            # 获取最后一条交易时间（仅作参考，不再用于增量更新）
+            # last_entry_time = self.db.get_last_entry_time()
 
-            # 计算时间范围
-            if last_entry_time:
-                # 增量更新: 从最后一条记录开始
-                print(f"增量更新模式 - 从 {last_entry_time} 开始")
-                # 将字符串时间转换为时间戳
-                last_dt = datetime.strptime(last_entry_time, '%Y-%m-%d %H:%M:%S')
-                since = int(last_dt.timestamp() * 1000)
-            else:
-                # 全量更新: 根据配置决定时间范围
-                if self.start_date:
-                    # 使用自定义起始日期
-                    try:
-                        start_dt = datetime.strptime(self.start_date, '%Y-%m-%d')
-                        start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
-                        since = int(start_dt.timestamp() * 1000)
-                        print(f"全量更新模式 - 从自定义日期 {self.start_date} 开始")
-                    except ValueError as e:
-                        print(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
-                        since = int((datetime.now() - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
-                else:
-                    # 使用DAYS_TO_FETCH
-                    print(f"全量更新模式 - 获取最近 {self.days_to_fetch} 天数据")
+            # 强制使用全量更新模式
+            # 如果配置了 START_DATE，则从 START_DATE 开始
+            # 否则从 DAYS_TO_FETCH 天前开始
+            if self.start_date:
+                # 使用自定义起始日期
+                try:
+                    start_dt = datetime.strptime(self.start_date, '%Y-%m-%d')
+                    start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+                    since = int(start_dt.timestamp() * 1000)
+                    print(f"全量更新模式 - 从自定义日期 {self.start_date} 开始")
+                except ValueError as e:
+                    print(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
                     since = int((datetime.now() - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+            else:
+                # 使用DAYS_TO_FETCH
+                print(f"全量更新模式 - 获取最近 {self.days_to_fetch} 天数据")
+                since = int((datetime.now() - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
 
             # 计算结束时间
-            if self.end_date and not last_entry_time:  # 只在全量更新时使用END_DATE
+            if self.end_date:
                 try:
                     end_dt = datetime.strptime(self.end_date, '%Y-%m-%d')
                     end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
