@@ -70,6 +70,12 @@ async def read_live_monitor(request: Request):
     return templates.TemplateResponse("live_monitor.html", {"request": request})
 
 
+@app.get("/metrics", response_class=HTMLResponse)
+async def read_metrics(request: Request):
+    """Serve the metrics documentation HTML"""
+    return templates.TemplateResponse("metrics.html", {"request": request})
+
+
 @app.get("/api/balance-history", response_model=List[BalanceHistoryItem])
 async def get_balance_history(
     time_range: Optional[str] = Query("1d", description="Time range for balance history (e.g., 1h, 1d, 1w, 1m, 1y)")

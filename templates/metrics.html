@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP 3.0 METRIC DOCS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            --primary: #0ea5e9; /* Sky Blue */
+            --accent: #10b981;  /* Emerald */
+            --danger: #ef4444;  /* Red */
+            --warn: #f97316;    /* Orange */
+            --bg: #030406;
+            --panel: rgba(15, 23, 42, 0.8);
+        }
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: var(--bg);
+            color: #94a3b8;
+            background-image: 
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+        }
+
+        /* 卡片样式 */
+        .doc-card {
+            background: var(--panel);
+            border: 1px solid rgba(56, 189, 248, 0.1);
+            border-left: 4px solid var(--primary);
+            transition: all 0.3s ease;
+        }
+        .doc-card:hover {
+            border-left-color: var(--accent);
+            transform: translateX(5px);
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.1);
+        }
+
+        /* 公式块样式 */
+        .formula-box {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            font-family: 'Share Tech Mono', monospace;
+            color: #e2e8f0;
+        }
+
+        /* 强调高亮 */
+        .highlight { color: var(--accent); font-weight: bold; }
+        .warn { color: var(--danger); font-weight: bold; }
+        .caution { color: var(--warn); font-weight: bold; }
+        .info { color: var(--primary); font-weight: bold; }
+
+        h2 { color: white; letter-spacing: 0.05em; }
+    </style>
+</head>
+<body class="min-h-screen p-6 md:p-12">
+
+    <header class="flex justify-between items-end mb-8 border-b border-gray-800 pb-4">
+        <div>
+            <div class="flex items-center gap-2 mb-1">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
+            </div>
+            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+                ZERO_GRAVITY <span class="text-white text-lg font-normal opacity-50">// CONSOLE</span>
+            </h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm">
+            <a href="/" class="text-gray-500 hover:text-white transition-colors">TRADES</a>
+            <a href="/live-monitor" class="text-gray-500 hover:text-white transition-colors">MONITOR</a>
+            <a href="/metrics" class="text-white font-bold border-b-2 border-cyan-500 pb-1">METRICS</a>
+        </div>
+        <div class="text-right">
+            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-xl font-bold text-cyan-500 font-mono">X-2026-BULLA-REKT</div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+        <div class="doc-card rounded-xl p-6 relative overflow-hidden group">
+            <div class="absolute top-0 right-0 p-4 opacity-10">
+                <i data-lucide="calculator" class="w-24 h-24 text-purple-400"></i>
+            </div>
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-purple-500/10 rounded text-purple-400"><i data-lucide="pie-chart"></i></div>
+                <h2 class="text-xl font-bold">Kelly Criterion (标准版)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                <span class="highlight">资金管理的圣杯。</span>它不告诉你该买什么，只告诉你该买多少。它能算出在当前胜率和赔率下，为了最大化复利增长且不破产，你该下注多少比例的仓位。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div class="mb-2 text-gray-500">// 标准公式 (针对单笔交易)</div>
+                <div class="text-purple-300">K% = W - [ (1 - W) / R ]</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-purple-900/10 p-4 rounded border border-purple-500/20">
+                <div class="font-bold text-purple-400 uppercase mb-1">SOP 3.0 实战解读</div>
+                <p>• <span class="font-bold">W</span> = 胜率 (Win Rate)</p>
+                <p>• <span class="font-bold">R</span> = 盈亏比 (Avg Win / Avg Loss)</p>
+                <p>• <span class="warn">注意：</span> 此结果为<strong>“单笔建议仓位”</strong>。</p>
+                <p>• 如显示 20% 且你开 5 个币，总仓位即 100%。请务必自行把控总风险。</p>
+            </div>
+        </div>
+
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #f97316;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="zap"></i></div>
+                <h2 class="text-xl font-bold">Current Streak (连胜/连败)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                <span class="caution">心理状态温度计。</span>显示你当前是处于“顺风局”（手热）还是“逆风局”（上头）。它是防止报复性交易的第一道防线。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>IF Win: Streak + 1 (正数)</div>
+                <div>IF Loss: Streak = -1 (负数)</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">SOP 3.0 熔断机制</div>
+                <p>• <span class="highlight">+3 连胜</span>: 警惕膨胀。建议<span class="info">减仓或提现</span>，防止把利润还给市场。</p>
+                <p>• <span class="warn">-2 连败</span>: <span class="warn">立即停手</span>。关软件休息 4 小时，这是最容易发生报复性交易的时刻。</p>
+            </div>
+        </div>
+
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #facc15;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-yellow-500/10 rounded text-yellow-400"><i data-lucide="award"></i></div>
+                <h2 class="text-xl font-bold">System Quality (SQN)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                衡量赚钱的<span class="highlight">稳定性</span>。如果你赚了很多钱但波动巨大（如赌博），SQN 会很低。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>SQN = (Expectancy / StdDev) * √N</div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">< 1.6</div>
+                    <div class="warn">很难做</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">2.0 - 3.0</div>
+                    <div class="info">优秀</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">> 3.0</div>
+                    <div class="highlight">圣杯级</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="doc-card rounded-xl p-6">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-blue-500/10 rounded text-blue-400"><i data-lucide="scale"></i></div>
+                <h2 class="text-xl font-bold">Win Rate & R/R Ratio</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                交易的左膀右臂。这两个指标必须<span class="highlight">结合看</span>。
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <div class="text-xs text-gray-400 uppercase mb-1">Win Rate (胜率)</div>
+                    <div class="formula-box p-2 rounded text-xs mb-2">Win / Total_Trades</div>
+                    <p class="text-[10px]"><span class="info">SOP 目标: > 40%</span></p>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-400 uppercase mb-1">R/R Ratio (盈亏比)</div>
+                    <div class="formula-box p-2 rounded text-xs mb-2">Avg_Win / Avg_Loss</div>
+                    <p class="text-[10px]"><span class="info">SOP 目标: > 2.0</span></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #10b981;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-green-500/10 rounded text-green-400"><i data-lucide="trending-up"></i></div>
+                <h2 class="text-xl font-bold">Profit Factor (盈利因子)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                <span class="highlight">每亏 1 美元，能赚回多少？</span>
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>PF = Gross_Win / Gross_Loss</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-green-900/10 p-4 rounded border border-green-500/20">
+                <p>• <span class="font-bold">< 1.0</span>: 亏钱系统。</p>
+                <p>• <span class="font-bold">1.0 - 1.5</span>: 勉强盈利。</p>
+                <p>• <span class="font-bold">> 2.0</span>: <span class="highlight">健康</span> (SOP 3.0 目标)。</p>
+            </div>
+        </div>
+
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #ec4899;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-pink-500/10 rounded text-pink-400"><i data-lucide="crosshair"></i></div>
+                <h2 class="text-xl font-bold">Expectancy (单笔期望)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                <span class="highlight">每次开单的平均预期收益。</span>
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>EV = (Win% × Avg_Win) - (Loss% × Avg_Loss)</div>
+            </div>
+
+            <p class="text-xs text-gray-400">
+                只要 EV > 0，长期坚持执行即可获利。
+            </p>
+        </div>
+
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #ef4444;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="activity"></i></div>
+                <h2 class="text-xl font-bold">Max Drawdown (最大回撤)</h2>
+            </div>
+            
+            <p class="text-sm mb-4">
+                <span class="warn">疼痛指数。</span>资产从最高点跌到最低点的幅度。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>MDD% = (Peak - Valley) / Peak</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-red-900/10 p-4 rounded border border-red-500/20">
+                <p>• 亏 <span class="font-bold">50%</span>，需涨 <span class="font-bold">100%</span> 回本。</p>
+                <p>• SOP 3.0 红线: <span class="warn">20%</span>。</p>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="mt-12 pt-8 border-t border-gray-800 text-center text-xs text-gray-600 font-mono">
+        SOP 3.0 TRADING SYSTEM // DOCUMENTATION // AUTHORIZED PERSONNEL ONLY
+    </div>
+
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
