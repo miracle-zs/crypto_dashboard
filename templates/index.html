@@ -201,6 +201,7 @@
                 <tr>
                     <th class="px-6 py-4">Time</th>
                     <th class="px-6 py-4">Symbol</th>
+                    <th class="px-6 py-4">Holding Time</th>
                     <th class="px-6 py-4">Side</th>
                     <th class="px-6 py-4">Price</th>
                     <th class="px-6 py-4 text-right">PnL (Net)</th>
@@ -381,6 +382,7 @@
                             <div class="text-[10px] text-gray-500">${dateStr}</div>
                         </td>
                         <td class="px-6 py-4 font-bold text-cyan-400">${t.symbol}</td>
+                        <td class="px-6 py-4 text-xs font-mono">${t.holding_time}</td>
                         <td class="px-6 py-4">
                             <span class="${t.side === 'LONG' ? 'text-green-400 border-green-500/30' : 'text-red-400 border-red-500/30'} text-xs border px-1 rounded">
                                 ${t.side}
