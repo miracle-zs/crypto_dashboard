@@ -35,6 +35,10 @@ class Database:
     def _init_database(self):
         """初始化数据库表结构"""
         conn = self._get_connection()
+
+        # 开启 WAL 模式以支持更高并发
+        conn.execute("PRAGMA journal_mode=WAL;")
+
         cursor = conn.cursor()
 
         # 创建交易记录表
