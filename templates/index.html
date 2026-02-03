@@ -155,6 +155,16 @@
                     <div class="text-lg font-bold text-blue-400 mt-1" id="metric-ev">--</div>
                 </div>
             </div>
+
+            <!-- Hourly Analysis Chart -->
+            <div class="cyber-panel rounded-xl p-4 mt-6">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="clock" class="mr-2 w-4 h-4 text-pink-400"></i> HOURLY PERFORMANCE
+                    </h3>
+                </div>
+                <div id="hourlyChart" class="w-full min-h-[180px]"></div>
+            </div>
         </div>
 
         <div class="lg:col-span-8 cyber-panel rounded-xl p-6 flex flex-col">
@@ -320,6 +330,7 @@
 
             renderChart(stats.equity_curve, trades);
             renderDurationChart(trades);
+            renderHourlyChart(trades);
             renderTable(trades);
         }
 
@@ -440,6 +451,96 @@
             };
 
             const chart = new ApexCharts(document.querySelector("#durationChart"), options);
+            chart.render();
+        }
+
+        function renderHourlyChart(trades) {
+            // 1. Aggregate Data by Hour (0-23)
+            const hourlyPnL = new Array(24).fill(0);
+
+            trades.forEach(t => {
+                if (!t.entry_time) return;
+                // Format matches "YYYY-MM-DD HH:MM:SS"
+                const timePart = t.entry_time.split(' ')[1];
+                if (timePart) {
+                    const hour = parseInt(timePart.split(':')[0], 10);
+                    if (hour >= 0 && hour < 24) {
+                        hourlyPnL[hour] += t.pnl_net;
+                    }
+                }
+            });
+
+            // 2. Configure Chart
+            const options = {
+                chart: {
+                    type: 'bar',
+                    height: 200,
+                    toolbar: { show: false },
+                    fontFamily: 'Share Tech Mono',
+                    background: 'transparent'
+                },
+                series: [{
+                    name: 'Net PnL',
+                    data: hourlyPnL
+                }],
+                colors: ['#0ea5e9'],
+                plotOptions: {
+                    bar: {
+                        borderRadius: 2,
+                        columnWidth: '60%',
+                        colors: {
+                            ranges: [{
+                                from: -Infinity,
+                                to: -0.01,
+                                color: '#ef4444' // Red for Loss
+                            }, {
+                                from: 0,
+                                to: Infinity,
+                                color: '#10b981' // Green for Profit
+                            }]
+                        }
+                    }
+                },
+                dataLabels: { enabled: false },
+                grid: {
+                    borderColor: '#1e293b',
+                    strokeDashArray: 4,
+                    yaxis: { lines: { show: true } },
+                    xaxis: { lines: { show: false } }
+                },
+                xaxis: {
+                    categories: Array.from({length: 24}, (_, i) => i),
+                    labels: {
+                        style: { colors: '#64748b', fontSize: '10px' },
+                        // Show every 4th hour to avoid clutter (0, 4, 8...)
+                        formatter: function(val) {
+                            return val % 4 === 0 ? val + 'h' : '';
+                        }
+                    },
+                    axisBorder: { show: false },
+                    axisTicks: { show: false }
+                },
+                yaxis: {
+                    labels: {
+                        style: { colors: '#64748b', fontSize: '10px' },
+                        formatter: (val) => {
+                            return val >= 1000 || val <= -1000
+                                ? (val/1000).toFixed(1) + 'k'
+                                : val.toFixed(0);
+                        }
+                    }
+                },
+                tooltip: {
+                    theme: 'dark',
+                    y: {
+                        formatter: function (val) {
+                            return "$" + val.toLocaleString();
+                        }
+                    }
+                }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#hourlyChart"), options);
             chart.render();
         }
 
