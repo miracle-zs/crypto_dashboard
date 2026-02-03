@@ -4,6 +4,7 @@ Services module - 从数据库读取交易数据
 from app.database import Database
 from app.models import Trade, TradeSummary
 from typing import List
+from datetime import datetime
 import numpy as np
 
 
@@ -117,12 +118,21 @@ class BinanceOrderAnalyzer:
 
         trades = []
         for _, row in df.iterrows():
+            # Calculate duration in minutes
+            try:
+                entry_dt = datetime.strptime(str(row['Entry_Time']), "%Y-%m-%d %H:%M:%S")
+                exit_dt = datetime.strptime(str(row['Exit_Time']), "%Y-%m-%d %H:%M:%S")
+                duration_min = (exit_dt - entry_dt).total_seconds() / 60.0
+            except Exception:
+                duration_min = 0.0
+
             trade = Trade(
                 no=int(row['No']),
                 date=str(row['Date']),
                 entry_time=str(row['Entry_Time']),
                 exit_time=str(row['Exit_Time']),
                 holding_time=str(row['Holding_Time']),
+                duration_minutes=float(duration_min),
                 symbol=str(row['Symbol']),
                 side=str(row['Side']),
                 price_change_pct=float(row['Price_Change_Pct']),

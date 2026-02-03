@@ -168,6 +168,17 @@
                 </div>
             </div>
             <div id="equityChart" class="flex-1 w-full min-h-[250px]"></div>
+
+            <!-- Duration Scatter Plot -->
+            <div class="mt-8 pt-6 border-t border-gray-800">
+                <div class="flex justify-between mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="scatter-chart" class="mr-2 w-4 h-4 text-purple-400"></i> DURATION ANALYSIS
+                    </h3>
+                    <span class="text-[10px] text-gray-500">Cut Losses Short, Let Profits Run</span>
+                </div>
+                <div id="durationChart" class="w-full min-h-[200px]"></div>
+            </div>
         </div>
     </div>
 
@@ -308,6 +319,7 @@
             document.getElementById('metric-mdd').innerText = `-$${stats.max_drawdown}`;
 
             renderChart(stats.equity_curve, trades);
+            renderDurationChart(trades);
             renderTable(trades);
         }
 
@@ -358,6 +370,76 @@
             };
 
             const chart = new ApexCharts(document.querySelector("#equityChart"), options);
+            chart.render();
+        }
+
+        function renderDurationChart(trades) {
+            // Prepare Data: [Duration(min), PnL($)]
+            const wins = [];
+            const losses = [];
+
+            trades.forEach(t => {
+                const duration = t.duration_minutes || 0;
+                // Add some jitter to x-axis to prevent total overlap
+                const xVal = parseFloat(duration.toFixed(1));
+                const yVal = t.pnl_net;
+
+                if (yVal >= 0) {
+                    wins.push({ x: xVal, y: yVal, symbol: t.symbol, time: t.holding_time });
+                } else {
+                    losses.push({ x: xVal, y: yVal, symbol: t.symbol, time: t.holding_time });
+                }
+            });
+
+            const options = {
+                chart: {
+                    type: 'scatter',
+                    height: 200,
+                    toolbar: { show: false },
+                    background: 'transparent',
+                    fontFamily: 'Share Tech Mono',
+                    zoom: { enabled: true, type: 'xy' }
+                },
+                series: [
+                    { name: 'Wins', data: wins },
+                    { name: 'Losses', data: losses }
+                ],
+                colors: ['#10b981', '#ef4444'], // Green, Red
+                grid: {
+                    borderColor: '#1e293b',
+                    strokeDashArray: 4,
+                    xaxis: { lines: { show: true } },
+                    yaxis: { lines: { show: true } },
+                },
+                xaxis: {
+                    type: 'numeric',
+                    tickAmount: 10,
+                    labels: {
+                        style: { colors: '#64748b' },
+                        formatter: (val) => { return val < 60 ? val.toFixed(0) + 'm' : (val/60).toFixed(1) + 'h' }
+                    },
+                    title: { text: 'Duration', style: { color: '#475569', fontSize: '10px' } }
+                },
+                yaxis: {
+                    labels: { style: { colors: '#64748b' } },
+                },
+                markers: { size: 4, strokeWidth: 0, hover: { size: 6 } },
+                tooltip: {
+                    theme: 'dark',
+                    custom: function({series, seriesIndex, dataPointIndex, w}) {
+                        const data = w.config.series[seriesIndex].data[dataPointIndex];
+                        return `
+                            <div class="px-2 py-1 bg-slate-800 border border-gray-700 text-xs">
+                                <div class="font-bold text-white">${data.symbol}</div>
+                                <div class="text-gray-400">Time: ${data.time}</div>
+                                <div class="${data.y >= 0 ? 'text-green-400' : 'text-red-400'}">PnL: $${data.y}</div>
+                            </div>
+                        `;
+                    }
+                }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#durationChart"), options);
             chart.render();
         }
 

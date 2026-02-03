@@ -22,6 +22,7 @@ class Trade(BaseModel):
     pnl_before_fees: float
     entry_order_id: int
     exit_order_id: str
+    duration_minutes: float
 
 class TradeSummary(BaseModel):
     total_pnl: float
