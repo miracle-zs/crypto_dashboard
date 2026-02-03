@@ -59,13 +59,13 @@
 </head>
 <body class="min-h-screen p-4 md:p-8">
 
-    <header class="flex justify-between items-end mb-8 border-b border-gray-800 pb-4">
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0">
         <div>
             <div class="flex items-center gap-2 mb-1">
                 <div class="live-dot"></div>
                 <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
             </div>
-            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+            <h1 class="text-2xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
                 ZERO_GRAVITY <span class="text-white text-lg font-normal opacity-50">// CONSOLE</span>
             </h1>
         </div>
@@ -88,7 +88,7 @@
                     <i data-lucide="wallet" class="w-16 h-16 text-cyan-400"></i>
                 </div>
                 <div class="text-gray-500 text-xs uppercase tracking-wider">Current Balance</div>
-                <div class="text-4xl font-bold text-white mt-2 tracking-tight" id="disp-balance">
+                <div class="text-3xl md:text-4xl font-bold text-white mt-2 tracking-tight" id="disp-balance">
                     $24,000.00
                 </div>
                 <div class="mt-4 flex justify-between items-end border-t border-gray-700 pt-4">
@@ -139,12 +139,12 @@
         </div>
 
         <div class="lg:col-span-6 glass-panel rounded-xl p-4 flex flex-col">
-            <div class="flex justify-between items-center mb-2 px-2">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-2 px-2 gap-4 md:gap-0">
                 <h2 class="text-sm font-bold text-white flex items-center gap-2">
                     <i data-lucide="activity" class="text-cyan-400 w-4 h-4"></i> LIVE EQUITY CURVE
                 </h2>
-                <div class="flex items-center gap-2">
-                    <div class="flex gap-1 text-[10px]">
+                <div class="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
+                    <div class="flex justify-center gap-1 text-[10px] w-full md:w-auto mb-2 md:mb-0">
                         <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                         <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
                         <button class="time-range-btn px-2 py-1 rounded-md" data-range="1w">1W</button>
