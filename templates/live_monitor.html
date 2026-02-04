@@ -264,10 +264,12 @@
 
             // 2. Velocity
             let velocity = 0;
-            const recentData = balanceData.slice(-10);
+            // 修正：从取最近10个点(10分钟)改为取最近60个点(1小时)，使数据更平滑真实
+            const recentData = balanceData.slice(-60);
             if (recentData.length > 1) {
                 const diff = currentBalance - recentData[0].value;
                 const timeDiffMinutes = (recentData[recentData.length-1].time - recentData[0].time) / 60000;
+                // 如果时间跨度不足1小时(如刚启动)，依然通过公式归一化为时速
                 velocity = timeDiffMinutes > 0 ? (diff / timeDiffMinutes) * 60 : 0;
             }
 
