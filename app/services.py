@@ -56,11 +56,8 @@ class BinanceOrderAnalyzer:
             else:
                 break
 
-        # 最大回撤
-        cumulative = df['PNL_Net'].cumsum()
-        running_max = cumulative.expanding().max()
-        drawdown = cumulative - running_max
-        max_drawdown = float(drawdown.min()) if len(drawdown) > 0 else 0.0
+        # 最大单笔亏损 (Max Single Loss)
+        max_drawdown = float(df['PNL_Net'].min()) if not df.empty else 0.0
 
         # 盈亏比
         total_wins = float(df[df['PNL_Net'] > 0]['PNL_Net'].sum())

@@ -228,20 +228,20 @@
         <div class="doc-card rounded-xl p-6" style="border-left-color: #ef4444;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="activity"></i></div>
-                <h2 class="text-xl font-bold">Max Drawdown (最大回撤)</h2>
+                <h2 class="text-xl font-bold">Max Single Loss (单笔最大亏损)</h2>
             </div>
-            
+
             <p class="text-sm mb-4">
-                <span class="warn">疼痛指数。</span>资产从最高点跌到最低点的幅度。
+                <span class="warn">风控底线。</span>历史上单笔交易造成的最大资金损失金额。
             </p>
 
             <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
-                <div>MDD% = (Peak - Valley) / Peak</div>
+                <div>Max_Loss = Min(PnL_Net)</div>
             </div>
 
             <div class="text-xs space-y-2 bg-red-900/10 p-4 rounded border border-red-500/20">
-                <p>• 亏 <span class="font-bold">50%</span>，需涨 <span class="font-bold">100%</span> 回本。</p>
-                <p>• SOP 3.0 红线: <span class="warn">20%</span>。</p>
+                <p>• 关注单笔亏损是否超过 <span class="warn">预期风险</span>。</p>
+                <p>• 避免出现 "一单回到解放前" 的情况。</p>
             </div>
         </div>
 
