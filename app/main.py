@@ -99,25 +99,45 @@ async def get_balance_history(
         start_time = end_time - timedelta(hours=2)
 
     history_data = db.get_balance_history(start_time=start_time, end_time=end_time)
-    
+
+    # 获取出入金记录
+    transfers = db.get_transfers()
+
     # 转换数据：从数据库的UTC时间转换为UTC+8时区，再生成时间戳
     transformed_data = []
     for item in history_data:
         # 1. 解析来自数据库的ISO格式时间字符串（我们知道它是UTC）
         utc_dt_naive = datetime.fromisoformat(item['timestamp'])
-        
+
         # 2. 将其设置为UTC时区（使其成为一个"aware"的datetime对象）
         utc_dt_aware = utc_dt_naive.replace(tzinfo=timezone.utc)
-        
+
         # 3. 转换为UTC+8时区
         utc8_dt = utc_dt_aware.astimezone(UTC8)
-        
-        # 4. 生成前端需要的时间戳（毫秒）
+        current_ts = int(utc8_dt.timestamp() * 1000)
+
+        # 4. 计算累计净值 (Cumulative Equity)
+        # 逻辑：Cumulative = Actual Balance - Net Deposits
+        # 比如：余额 14000，之前提了 10000 (Net Deposit = -10000)
+        # Cumulative = 14000 - (-10000) = 24000
+
+        net_deposits = 0.0
+        for t in transfers:
+            # 只统计在这个时间点之前的转账
+            # 解析transfer的时间
+            t_dt = datetime.fromisoformat(t['timestamp']).replace(tzinfo=timezone.utc)
+            if t_dt <= utc_dt_aware:
+                net_deposits += t['amount']
+
+        cumulative_val = item['balance'] - net_deposits
+
+        # 5. 生成前端需要的时间戳（毫秒）
         transformed_data.append({
-            "time": int(utc8_dt.timestamp() * 1000),
-            "value": item['balance']
+            "time": current_ts,
+            "value": item['balance'],
+            "cumulative_equity": cumulative_val
         })
-        
+
     return transformed_data
 
 

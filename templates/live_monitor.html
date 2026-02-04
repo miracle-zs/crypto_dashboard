@@ -144,6 +144,12 @@
                     <i data-lucide="activity" class="text-cyan-400 w-4 h-4"></i> LIVE EQUITY CURVE
                 </h2>
                 <div class="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
+                    <!-- View Switcher -->
+                    <div class="flex bg-slate-800 rounded p-1 mr-2">
+                        <button id="btn-view-equity" class="px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all">累计净值</button>
+                        <button id="btn-view-balance" class="px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
+                    </div>
+
                     <div class="flex justify-center gap-1 text-[10px] w-full md:w-auto mb-2 md:mb-0">
                         <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                         <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
@@ -198,13 +204,18 @@
         // 1. Configuration & State
         // -------------------------------------
         const UPDATE_INTERVAL = 60000; // 60 seconds
-        let balanceData = []; // Array of {time, value}
+        let balanceData = []; // Array of {time, value, cumulative_equity}
         let chart;
         let lastFetchTime = 0;
         let currentTimeRange = '1d'; // Default time range
-        let lastRequestedTimeRange = ''; // To track the last successfully fetched time range
-        const timeRangeButtons = document.querySelectorAll('.time-range-btn');
+        let currentView = 'equity'; // Default view: 'equity' (cumulative) or 'balance' (actual)
+        let lastRequestedTimeRange = '';
 
+        const timeRangeButtons = document.querySelectorAll('.time-range-btn');
+        const btnViewEquity = document.getElementById('btn-view-equity');
+        const btnViewBalance = document.getElementById('btn-view-balance');
+
+        // Time Range Click Handlers
         timeRangeButtons.forEach(button => {
             button.addEventListener('click', () => {
                 currentTimeRange = button.dataset.range;
@@ -214,7 +225,27 @@
             });
         });
 
-        // Initialize active button style
+        // View Switcher Click Handlers
+        btnViewEquity.addEventListener('click', () => { switchView('equity'); });
+        btnViewBalance.addEventListener('click', () => { switchView('balance'); });
+
+        function switchView(view) {
+            currentView = view;
+
+            // Update Button Styles
+            if (view === 'equity') {
+                btnViewEquity.className = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
+                btnViewBalance.className = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
+            } else {
+                btnViewEquity.className = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
+                btnViewBalance.className = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
+            }
+
+            // Re-render chart with new view mode
+            updateChart();
+        }
+
+        // Initialize active button style for time range
         document.querySelector(`.time-range-btn[data-range="${currentTimeRange}"]`).classList.add('bg-cyan-700', 'text-white');
 
         // -------------------------------------
@@ -329,7 +360,13 @@
         // 5. Chart Rendering
         // -------------------------------------
         function updateChart() {
-            const seriesData = balanceData.map(d => ({ x: d.time, y: d.value.toFixed(2) }));
+            const seriesData = balanceData.map(d => {
+                let val = d.value;
+                if (currentView === 'equity' && d.cumulative_equity !== undefined && d.cumulative_equity !== null) {
+                    val = d.cumulative_equity;
+                }
+                return { x: d.time, y: val.toFixed(2) };
+            });
 
             if (!chart) {
                 const options = {

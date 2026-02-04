@@ -3,7 +3,7 @@
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 import sys
@@ -126,10 +126,61 @@ class TradeDataScheduler:
 
         try:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 尝试同步账户余额...")
-            balance = self.analyzer.get_account_balance()
-            if balance is not None:
-                self.db.save_balance_history(balance)
-                print(f"  → 成功获取并存储余额: {balance:.2f} USDT")
+            # balance_info returns {'margin_balance': float, 'wallet_balance': float}
+            balance_info = self.analyzer.get_account_balance()
+
+            if balance_info:
+                current_margin = balance_info['margin_balance']
+                current_wallet = balance_info['wallet_balance']
+
+                # --- 自动检测出入金逻辑 ---
+                try:
+                    # 获取最近一条记录进行对比
+                    history = self.db.get_balance_history(limit=1)
+                    if history:
+                        last_record = history[0]
+                        # 只有当上一条记录也有wallet_balance时才进行对比
+                        # 注意：数据库中新加的列默认为0，需排除0的情况(除非真的破产)或根据逻辑判断
+                        last_wallet = last_record.get('wallet_balance', 0)
+                        last_ts_str = last_record.get('timestamp')
+
+                        if last_wallet > 0:
+                            # 解析时间 (兼容带微秒和不带微秒的格式)
+                            try:
+                                last_ts = datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
+                            except ValueError:
+                                # 尝试解析带微秒的格式
+                                try:
+                                    last_ts = datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S.%f')
+                                except ValueError:
+                                    print(f"  ⚠️ 无法解析时间戳格式: {last_ts_str}")
+                                    raise ValueError("Invalid timestamp format")
+
+                            # 转为毫秒时间戳 (视为UTC)
+                            last_ts = last_ts.replace(tzinfo=timezone.utc)
+                            last_ts_ms = int(last_ts.timestamp() * 1000)
+
+                            # 1. 计算钱包余额变化
+                            wallet_diff = current_wallet - last_wallet
+
+                            # 2. 获取该时间段内的交易资金流 (PnL + Fees)
+                            # 额外往前多取1秒，防止边界遗漏
+                            trading_flow = self.analyzer.get_recent_financial_flow(start_time=last_ts_ms - 1000)
+
+                            # 3. 计算"无法解释的差额" (疑似出入金)
+                            transfer_est = wallet_diff - trading_flow
+
+                            # 4. 阈值判断 (> 1000 USDT)
+                            if abs(transfer_est) > 1000:
+                                print(f"  ★ 监测到资金异动: 钱包变动 {wallet_diff:.2f}, 交易流 {trading_flow:.2f}, 差额 {transfer_est:.2f}")
+                                self.db.save_transfer(amount=transfer_est, type='auto', description="Auto-detected > 1000U")
+
+                except Exception as e:
+                    print(f"  ⚠️ 出入金检测出错: {e}")
+
+                # 保存当前状态
+                self.db.save_balance_history(current_margin, current_wallet)
+                print(f"  → 成功获取并存储余额: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
             else:
                 print("  → 获取余额失败，balance为 None。检查API连接或响应。")
         except Exception as e:

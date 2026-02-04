@@ -43,3 +43,4 @@ class TradeSummary(BaseModel):
 class BalanceHistoryItem(BaseModel):
     time: int
     value: float
+    cumulative_equity: Optional[float] = None

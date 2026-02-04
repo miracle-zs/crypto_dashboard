@@ -62,13 +62,41 @@ class BinanceOrderAnalyzer:
                 print(f"Response: {e.response.text}")
             return None
 
-    def get_account_balance(self) -> Optional[float]:
-        """Get USD-M Futures account balance."""
+    def get_recent_financial_flow(self, start_time: int) -> float:
+        """
+        Calculate the sum of Realized PnL, Commission, and Funding Fees since start_time.
+        Used to distinguish between trading PnL and Deposit/Withdrawal.
+        """
+        endpoint = '/fapi/v1/income'
+        params = {
+            'startTime': start_time,
+            'limit': 1000
+        }
+
+        income_data = self._request('GET', endpoint, params)
+        if not income_data:
+            return 0.0
+
+        flow = 0.0
+        for item in income_data:
+            # TRANSFER is explicitly excluded here because we want to detect it via balance diff
+            # (or we could rely on this if it's reliable, but user asked for balance diff)
+            # We want to know how much balance change is EXPLAINED by trading.
+            if item['incomeType'] in ['REALIZED_PNL', 'COMMISSION', 'FUNDING_FEE']:
+                flow += float(item['income'])
+
+        return flow
+
+    def get_account_balance(self) -> Dict[str, float]:
+        """Get USD-M Futures account balance (Margin & Wallet)."""
         endpoint = '/fapi/v2/account'
         account_info = self._request('GET', endpoint)
 
-        if account_info and 'totalMarginBalance' in account_info:
-            return float(account_info['totalMarginBalance'])
+        if account_info:
+            return {
+                'margin_balance': float(account_info.get('totalMarginBalance', 0)),
+                'wallet_balance': float(account_info.get('totalWalletBalance', 0))
+            }
         else:
             print("Could not retrieve account balance.")
             return None

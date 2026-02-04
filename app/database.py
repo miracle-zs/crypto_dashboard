@@ -106,11 +106,36 @@ class Database:
             CREATE TABLE IF NOT EXISTS balance_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                balance REAL NOT NULL
+                balance REAL NOT NULL,
+                wallet_balance REAL DEFAULT 0.0
             )
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_balance_timestamp ON balance_history(timestamp)
+        """)
+
+        # 检查是否需要迁移 wallet_balance 列 (针对旧数据库)
+        try:
+            cursor.execute("SELECT wallet_balance FROM balance_history LIMIT 1")
+        except sqlite3.OperationalError:
+            print("正在迁移数据库: 添加 wallet_balance 列...")
+            try:
+                cursor.execute("ALTER TABLE balance_history ADD COLUMN wallet_balance REAL DEFAULT 0.0")
+            except Exception as e:
+                print(f"列添加失败(可能已存在): {e}")
+
+        # 创建出入金记录表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                amount REAL NOT NULL,
+                type TEXT DEFAULT 'auto',
+                description TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_transfers_timestamp ON transfers(timestamp)
         """)
 
         conn.commit()
@@ -365,16 +390,37 @@ class Database:
             'unique_symbols': unique_symbols
         }
 
-    def save_balance_history(self, balance: float):
+    def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
         """保存新的余额记录"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO balance_history (timestamp, balance) VALUES (?, ?)",
-            (datetime.utcnow(), balance)
+            "INSERT INTO balance_history (timestamp, balance, wallet_balance) VALUES (?, ?, ?)",
+            (datetime.utcnow(), balance, wallet_balance)
         )
         conn.commit()
         conn.close()
+
+    def save_transfer(self, amount: float, type: str = 'auto', description: str = None):
+        """保存出入金记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO transfers (timestamp, amount, type, description) VALUES (?, ?, ?, ?)",
+            (datetime.utcnow(), amount, type, description)
+        )
+        conn.commit()
+        conn.close()
+        print(f"已记录出入金: {amount} ({type})")
+
+    def get_transfers(self) -> List[Dict]:
+        """获取所有出入金记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM transfers ORDER BY timestamp ASC")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def get_balance_history(self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict]:
         """
@@ -383,7 +429,7 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT timestamp, balance FROM balance_history WHERE 1=1"
+        query = "SELECT timestamp, balance, wallet_balance FROM balance_history WHERE 1=1"
         params = []
 
         if start_time:
@@ -398,7 +444,7 @@ class Database:
         if limit:
             query += " LIMIT ?"
             params.append(limit)
-            
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
