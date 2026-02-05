@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
+from app.logger import logger, read_logs
 
 # Load environment variables
 load_dotenv()
@@ -44,9 +45,9 @@ async def startup_event():
     if api_key and api_secret:
         scheduler = get_scheduler()
         scheduler.start()
-        print("✓ 定时任务调度器已启动")
+        logger.info("定时任务调度器已启动")
     else:
-        print("⚠ 警告: 未配置API密钥，定时任务未启动")
+        logger.warning("未配置API密钥，定时任务未启动")
 
 
 @app.on_event("shutdown")
@@ -55,7 +56,7 @@ async def shutdown_event():
     global scheduler
     if scheduler:
         scheduler.stop()
-        print("✓ 定时任务调度器已停止")
+        logger.info("定时任务调度器已停止")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,6 +75,19 @@ async def read_live_monitor(request: Request):
 async def read_metrics(request: Request):
     """Serve the metrics documentation HTML"""
     return templates.TemplateResponse("metrics.html", {"request": request})
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def read_logs_page(request: Request):
+    """Serve the logs viewer HTML"""
+    return templates.TemplateResponse("logs.html", {"request": request})
+
+
+@app.get("/api/logs")
+async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
+    """获取最近的日志"""
+    log_lines = read_logs(lines)
+    return {"logs": log_lines}
 
 
 @app.get("/api/balance-history", response_model=List[BalanceHistoryItem])

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 import os
 from pathlib import Path
+from app.logger import logger
 
 
 class Database:
@@ -118,11 +119,11 @@ class Database:
         try:
             cursor.execute("SELECT wallet_balance FROM balance_history LIMIT 1")
         except sqlite3.OperationalError:
-            print("正在迁移数据库: 添加 wallet_balance 列...")
+            logger.info("正在迁移数据库: 添加 wallet_balance 列...")
             try:
                 cursor.execute("ALTER TABLE balance_history ADD COLUMN wallet_balance REAL DEFAULT 0.0")
             except Exception as e:
-                print(f"列添加失败(可能已存在): {e}")
+                logger.warning(f"列添加失败(可能已存在): {e}")
 
         # 创建出入金记录表
         cursor.execute("""
@@ -246,7 +247,7 @@ class Database:
         conn.commit()
         conn.close()
 
-        print(f"数据库操作完成: 新增 {inserted_count} 条, 更新 {updated_count} 条")
+        logger.info(f"数据库操作完成: 新增 {inserted_count} 条, 更新 {updated_count} 条")
         return inserted_count + updated_count
 
     def get_all_trades(self, limit: int = None) -> pd.DataFrame:
@@ -400,7 +401,7 @@ class Database:
         conn.commit()
         conn.close()
 
-        print("所有交易记录已清空")
+        logger.info("所有交易记录已清空")
 
     def get_statistics(self) -> Dict:
         """获取数据库统计信息"""
@@ -446,7 +447,7 @@ class Database:
         )
         conn.commit()
         conn.close()
-        print(f"已记录出入金: {amount} ({type})")
+        logger.info(f"已记录出入金: {amount} ({type})")
 
     def get_transfers(self) -> List[Dict]:
         """获取所有出入金记录"""

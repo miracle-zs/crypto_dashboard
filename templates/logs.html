@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOP 3.0 SYSTEM LOGS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            --primary: #0ea5e9;
+            --accent: #10b981;
+            --danger: #ef4444;
+            --warn: #f97316;
+            --bg: #030406;
+            --panel: rgba(15, 23, 42, 0.8);
+        }
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background-color: var(--bg);
+            color: #94a3b8;
+            background-image:
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+        }
+
+        .log-panel {
+            background: var(--panel);
+            border: 1px solid rgba(56, 189, 248, 0.1);
+        }
+
+        .log-line {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .log-line:hover {
+            background: rgba(255,255,255,0.02);
+        }
+
+        .log-info { color: #94a3b8; }
+        .log-warn { color: #f59e0b; }
+        .log-error { color: #ef4444; }
+        .log-debug { color: #6b7280; }
+
+        .log-time { color: #64748b; }
+        .log-level { font-weight: bold; }
+
+        /* 自动刷新指示器 */
+        .refresh-indicator {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0">
+        <div>
+            <div class="flex items-center gap-2 mb-1">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM LOGS</span>
+            </div>
+            <h1 class="text-2xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+                ZERO_GRAVITY <span class="text-white text-lg font-normal opacity-50">// LOGS</span>
+            </h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm">
+            <a href="/" class="text-gray-500 hover:text-white transition-colors">TRADES</a>
+            <a href="/live-monitor" class="text-gray-500 hover:text-white transition-colors">MONITOR</a>
+            <a href="/metrics" class="text-gray-500 hover:text-white transition-colors">METRICS</a>
+            <a href="/logs" class="text-white font-bold border-b-2 border-cyan-500 pb-1">LOGS</a>
+        </div>
+        <div class="text-right">
+            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-xl font-bold text-cyan-500 font-mono">X-2026-BULLA-REKT</div>
+        </div>
+    </header>
+
+    <!-- 控制栏 -->
+    <div class="log-panel rounded-xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <i data-lucide="terminal" class="w-5 h-5 text-cyan-400"></i>
+                <span class="text-white font-bold">System Logs</span>
+            </div>
+            <div class="text-[10px] text-gray-500">
+                <span id="log-count">0</span> lines
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- 筛选 -->
+            <select id="levelFilter" class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm text-gray-300 focus:outline-none focus:border-cyan-500">
+                <option value="all">All Levels</option>
+                <option value="ERROR">ERROR</option>
+                <option value="WARN">WARNING</option>
+                <option value="INFO">INFO</option>
+            </select>
+
+            <!-- 搜索 -->
+            <input type="text" id="searchInput" placeholder="Search..."
+                class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm text-gray-300 w-40 focus:outline-none focus:border-cyan-500">
+
+            <!-- 自动刷新 -->
+            <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                <input type="checkbox" id="autoRefresh" class="accent-cyan-500" checked>
+                <span>Auto Refresh</span>
+                <span id="refreshIndicator" class="w-2 h-2 bg-green-500 rounded-full refresh-indicator"></span>
+            </label>
+
+            <!-- 手动刷新 -->
+            <button onclick="fetchLogs()" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-sm transition-colors">
+                <i data-lucide="refresh-cw" class="w-4 h-4 inline"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 日志内容 -->
+    <div class="log-panel rounded-xl overflow-hidden">
+        <div id="logContainer" class="p-4 max-h-[70vh] overflow-y-auto">
+            <div class="text-gray-500 text-center py-8">Loading logs...</div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        let allLogs = [];
+        let refreshInterval = null;
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/api/logs?lines=500');
+                const data = await res.json();
+                allLogs = data.logs || [];
+                renderLogs();
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                document.getElementById('logContainer').innerHTML =
+                    '<div class="text-red-400 text-center py-8">Failed to load logs</div>';
+            }
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('logContainer');
+            const levelFilter = document.getElementById('levelFilter').value;
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+
+            let filteredLogs = allLogs;
+
+            // 按级别筛选
+            if (levelFilter !== 'all') {
+                filteredLogs = filteredLogs.filter(line => line.includes(`| ${levelFilter}`));
+            }
+
+            // 按关键词搜索
+            if (searchText) {
+                filteredLogs = filteredLogs.filter(line => line.toLowerCase().includes(searchText));
+            }
+
+            document.getElementById('log-count').innerText = filteredLogs.length;
+
+            if (filteredLogs.length === 0) {
+                container.innerHTML = '<div class="text-gray-500 text-center py-8">No logs found</div>';
+                return;
+            }
+
+            const html = filteredLogs.map(line => {
+                let levelClass = 'log-info';
+                if (line.includes('| ERROR')) levelClass = 'log-error';
+                else if (line.includes('| WARN')) levelClass = 'log-warn';
+                else if (line.includes('| DEBUG')) levelClass = 'log-debug';
+
+                // 高亮时间戳
+                const formatted = line
+                    .replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/, '<span class="log-time">$1</span>')
+                    .replace(/\| (INFO|WARN|ERROR|DEBUG)/, '| <span class="log-level">$1</span>');
+
+                return `<div class="log-line ${levelClass} px-2 py-1">${formatted}</div>`;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function toggleAutoRefresh() {
+            const checkbox = document.getElementById('autoRefresh');
+            const indicator = document.getElementById('refreshIndicator');
+
+            if (checkbox.checked) {
+                refreshInterval = setInterval(fetchLogs, 5000);
+                indicator.classList.add('refresh-indicator');
+                indicator.classList.remove('bg-gray-500');
+                indicator.classList.add('bg-green-500');
+            } else {
+                if (refreshInterval) clearInterval(refreshInterval);
+                indicator.classList.remove('refresh-indicator');
+                indicator.classList.remove('bg-green-500');
+                indicator.classList.add('bg-gray-500');
+            }
+        }
+
+        // 事件绑定
+        document.getElementById('levelFilter').addEventListener('change', renderLogs);
+        document.getElementById('searchInput').addEventListener('input', renderLogs);
+        document.getElementById('autoRefresh').addEventListener('change', toggleAutoRefresh);
+
+        // 初始化
+        fetchLogs();
+        toggleAutoRefresh();
+    </script>
+</body>
+</html>

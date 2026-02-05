@@ -15,6 +15,7 @@ import hmac
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 import time
+from app.logger import logger
 
 
 class BinanceOrderAnalyzer:
@@ -57,9 +58,9 @@ class BinanceOrderAnalyzer:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            print(f"API request failed: {e}")
+            logger.error(f"API request failed: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                print(f"Response: {e.response.text}")
+                logger.error(f"Response: {e.response.text}")
             return None
 
     def get_recent_financial_flow(self, start_time: int) -> float:
@@ -98,7 +99,7 @@ class BinanceOrderAnalyzer:
                 'wallet_balance': float(account_info.get('totalWalletBalance', 0))
             }
         else:
-            print("Could not retrieve account balance.")
+            logger.warning("Could not retrieve account balance.")
             return None
 
     def get_all_orders(self, symbol: str, limit: int = 1000, start_time: int = None) -> List[Dict]:
@@ -115,9 +116,9 @@ class BinanceOrderAnalyzer:
         result = self._request('GET', endpoint, params)
 
         if result is None:
-            print(f"    WARNING: API request failed for {symbol}")
+            logger.warning(f"API request failed for {symbol}")
         elif isinstance(result, list) and len(result) == 0:
-            print(f"    INFO: No orders in time range for {symbol}")
+            logger.debug(f"No orders in time range for {symbol}")
 
         return result if result else []
 
@@ -130,7 +131,7 @@ class BinanceOrderAnalyzer:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"Get exchange info failed: {e}")
+            logger.error(f"Get exchange info failed: {e}")
             return {}
 
     def get_all_symbols(self) -> List[str]:
@@ -371,7 +372,7 @@ class BinanceOrderAnalyzer:
 
     def get_traded_symbols(self, since: int, until: int) -> List[str]:
         """Get symbols that have actual trades using income history"""
-        print("Fetching your traded symbols from income history...")
+        logger.info("Fetching traded symbols from income history...")
 
         endpoint = '/fapi/v1/income'
         symbols = set()
@@ -386,7 +387,7 @@ class BinanceOrderAnalyzer:
 
             result = self._request('GET', endpoint, params)
             if not result or len(result) == 0:
-                print("Failed to fetch income history")
+                logger.warning("Failed to fetch income history")
                 break
 
             # Extract unique symbols from income records
@@ -403,11 +404,11 @@ class BinanceOrderAnalyzer:
             time.sleep(0.1)            
 
         symbols_list = list(symbols)
-        
+
         if symbols_list:
-            print(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")
+            logger.info(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")
         else:
-            print("No symbols found in income history")
+            logger.warning("No symbols found in income history")
 
         return symbols_list
 
@@ -418,50 +419,49 @@ class BinanceOrderAnalyzer:
         traded_symbols = self.get_traded_symbols(since, until)
 
         if not traded_symbols:
-            print("No trading history found in the specified period")
+            logger.warning("No trading history found in the specified period")
             return pd.DataFrame()
 
-        print(f"\nAnalyzing {len(traded_symbols)} symbols...")
-        print()
+        logger.info(f"Analyzing {len(traded_symbols)} symbols...")
 
         all_positions = []
         processed = 0
 
         for symbol in traded_symbols:
             processed += 1
-            print(f"[{processed}/{len(traded_symbols)}] Processing {symbol}...")
+            logger.info(f"[{processed}/{len(traded_symbols)}] Processing {symbol}...")
 
             # Get all orders without time filter (API limit issue)
             orders = self.get_all_orders(symbol, limit=1000, start_time=None)
             if not orders:
-                print(f"  → No orders found")
+                logger.debug(f"No orders found for {symbol}")
                 continue
 
             # Filter by time range and status
             filled_orders = [o for o in orders if o['status'] == 'FILLED' and o['updateTime'] >= since]
-            print(f"  → Found {len(filled_orders)} filled orders in time range")
+            logger.debug(f"Found {len(filled_orders)} filled orders in time range for {symbol}")
 
             if len(filled_orders) < 1:
                 continue
 
             # Get fees for this symbol
-            print(f"  → Fetching fees...")
+            logger.debug(f"Fetching fees for {symbol}...")
             fees_map = self.get_fees_for_symbol(symbol, since, until)
             total_fees = sum(fees_map.values())
-            print(f"  → Total fees: {total_fees:.2f} USDT")
+            logger.debug(f"Total fees for {symbol}: {total_fees:.2f} USDT")
 
             positions = self.match_orders_to_positions(filled_orders, symbol, fees_map)
             all_positions.extend(positions)
 
             if positions:
-                print(f"  → Found {len(positions)} closed positions")
+                logger.debug(f"Found {len(positions)} closed positions for {symbol}")
 
             time.sleep(0.1)
 
-        print(f"\nFound {len(all_positions)} closed positions")
+        logger.info(f"Found {len(all_positions)} closed positions total")
 
         if not all_positions:
-            print("No closed positions found")
+            logger.warning("No closed positions found")
             return pd.DataFrame()
 
         trades_data = []
@@ -545,21 +545,21 @@ class BinanceOrderAnalyzer:
                 })
 
                 if idx % 20 == 0:
-                    print(f"Processed {idx}/{len(all_positions)} positions...")
+                    logger.info(f"Processed {idx}/{len(all_positions)} positions...")
 
             except Exception as e:
-                print(f"Parse position failed: {e}")
+                logger.error(f"Parse position failed: {e}")
                 continue
 
         df = pd.DataFrame(trades_data)
         df = df.sort_values('Entry_Time', ascending=True)
 
-        print(f"\nSuccessfully parsed {len(df)} positions")
+        logger.info(f"Successfully parsed {len(df)} positions")
 
         # Post-processing: Merge positions with same symbol and entry time
-        print("Post-processing: Merging positions with same entry time...")
+        logger.info("Post-processing: Merging positions with same entry time...")
         df = self.merge_same_entry_positions(df)
-        print(f"After merging: {len(df)} positions")
+        logger.info(f"After merging: {len(df)} positions")
 
         return df
 
@@ -668,8 +668,8 @@ class BinanceOrderAnalyzer:
                     col_letter = chr(ord('A') + df.columns.get_loc('PNL_Net'))
                     worksheet[f'{col_letter}{last_row}'] = df['PNL_Net'].sum()
 
-            print(f"\nExported to: {filename}")
-            print(f"Total records: {len(df)}")
+            logger.info(f"Exported to: {filename}")
+            logger.info(f"Total records: {len(df)}")
 
             if 'PNL_Net' in df.columns:
                 pnl_before_fees = df['PNL_Before_Fees'].sum() if 'PNL_Before_Fees' in df.columns else 0
@@ -679,13 +679,13 @@ class BinanceOrderAnalyzer:
                 loss_count = len(df[df['PNL_Net'] < 0])
                 win_rate = win_count / len(df) * 100 if len(df) > 0 else 0
 
-                print(f"PNL Before Fees: {pnl_before_fees:.2f} USDT")
-                print(f"Total Fees (Commission + Funding): {total_fees:.2f} USDT")
-                print(f"Net PNL: {pnl_net:.2f} USDT")
-                print(f"Win Rate: {win_rate:.2f}% ({win_count} wins / {loss_count} losses)")
+                logger.info(f"PNL Before Fees: {pnl_before_fees:.2f} USDT")
+                logger.info(f"Total Fees (Commission + Funding): {total_fees:.2f} USDT")
+                logger.info(f"Net PNL: {pnl_net:.2f} USDT")
+                logger.info(f"Win Rate: {win_rate:.2f}% ({win_count} wins / {loss_count} losses)")
 
         except Exception as e:
-            print(f"Export to Excel failed: {e}")
+            logger.error(f"Export to Excel failed: {e}")
             import traceback
             traceback.print_exc()
 
@@ -831,8 +831,8 @@ def main():
                 until = int(datetime.now().timestamp() * 1000)
                 time_range_desc = f"from {start_date_str} to now"
         except ValueError as e:
-            print(f"Error parsing date: {e}")
-            print("Date format should be YYYY-MM-DD")
+            logger.error(f"Error parsing date: {e}")
+            logger.error("Date format should be YYYY-MM-DD")
             return
     else:
         # Use days_to_fetch
@@ -841,34 +841,32 @@ def main():
         time_range_desc = f"Last {days_to_fetch} days"
 
     if not api_key or not api_secret:
-        print("Please configure API keys first!")
-        print("1. Copy .env.template to .env")
-        print("2. Fill in your Binance API keys in .env file")
+        logger.error("Please configure API keys first!")
+        logger.error("1. Copy .env.template to .env")
+        logger.error("2. Fill in your Binance API keys in .env file")
         return
 
-    print("=" * 60)
-    print("Binance Futures Order Analyzer")
-    print("Analyzing based on ORDER level (not individual trades)")
-    print("=" * 60)
-    print(f"Query range: {time_range_desc}")
-    print(f"Start timestamp: {since} ({datetime.fromtimestamp(since/1000).strftime('%Y-%m-%d %H:%M:%S')})")
-    print(f"End timestamp: {until} ({datetime.fromtimestamp(until/1000).strftime('%Y-%m-%d %H:%M:%S')})")
-    print()
+    logger.info("=" * 60)
+    logger.info("Binance Futures Order Analyzer")
+    logger.info("Analyzing based on ORDER level (not individual trades)")
+    logger.info("=" * 60)
+    logger.info(f"Query range: {time_range_desc}")
+    logger.info(f"Start timestamp: {since} ({datetime.fromtimestamp(since/1000).strftime('%Y-%m-%d %H:%M:%S')})")
+    logger.info(f"End timestamp: {until} ({datetime.fromtimestamp(until/1000).strftime('%Y-%m-%d %H:%M:%S')})")
 
     analyzer = BinanceOrderAnalyzer(api_key, api_secret)
 
-    print("Note: This may take several minutes depending on trading history...")
-    print()
+    logger.info("Note: This may take several minutes depending on trading history...")
 
     df = analyzer.analyze_orders(since=since, until=until)
 
     if df.empty:
-        print("No order data found")
+        logger.warning("No order data found")
         return
 
     analyzer.export_to_excel(df)
 
-    print("\nDone!")
+    logger.info("Done!")
 
 
 if __name__ == "__main__":
