@@ -95,7 +95,7 @@
                 <span id="log-count">0</span> lines
             </div>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex flex-wrap items-center gap-2 md:gap-4">
             <!-- 筛选 -->
             <select id="levelFilter" class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm text-gray-300 focus:outline-none focus:border-cyan-500">
                 <option value="all">All Levels</option>
@@ -106,12 +106,13 @@
 
             <!-- 搜索 -->
             <input type="text" id="searchInput" placeholder="Search..."
-                class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm text-gray-300 w-40 focus:outline-none focus:border-cyan-500">
+                class="bg-gray-900 border border-gray-700 rounded px-3 py-1 text-sm text-gray-300 w-32 md:w-40 focus:outline-none focus:border-cyan-500">
 
             <!-- 自动刷新 -->
-            <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+            <label class="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-gray-400 cursor-pointer">
                 <input type="checkbox" id="autoRefresh" class="accent-cyan-500" checked>
-                <span>Auto Refresh</span>
+                <span class="hidden sm:inline">Auto Refresh</span>
+                <span class="sm:hidden">Auto</span>
                 <span id="refreshIndicator" class="w-2 h-2 bg-green-500 rounded-full refresh-indicator"></span>
             </label>
 
