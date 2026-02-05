@@ -138,6 +138,41 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_transfers_timestamp ON transfers(timestamp)
         """)
 
+        # 创建未平仓订单表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS open_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT,
+                symbol TEXT,
+                side TEXT,
+                entry_time TEXT,
+                entry_price REAL,
+                qty REAL,
+                entry_amount REAL,
+                order_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, order_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_date ON open_positions(date)
+        """)
+
+        # 创建用户设置表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                monthly_target REAL DEFAULT 30000,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 初始化设置记录
+        cursor.execute("""
+            INSERT OR IGNORE INTO user_settings (id, monthly_target)
+            VALUES (1, 30000)
+        """)
+
         conn.commit()
         conn.close()
 
@@ -421,6 +456,164 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def get_daily_stats(self) -> List[Dict]:
+        """
+        获取每日交易统计（开单数量、开单金额、盈亏等）
+        包含已平仓和未平仓的订单
+
+        Returns:
+            List[Dict]: 每日统计数据列表
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 合并已平仓和未平仓订单的统计
+        cursor.execute("""
+            SELECT
+                date,
+                SUM(trade_count) as trade_count,
+                SUM(total_amount) as total_amount,
+                SUM(total_pnl) as total_pnl,
+                SUM(win_count) as win_count,
+                SUM(loss_count) as loss_count
+            FROM (
+                -- 已平仓交易
+                SELECT
+                    date,
+                    COUNT(*) as trade_count,
+                    SUM(entry_amount) as total_amount,
+                    SUM(pnl_net) as total_pnl,
+                    SUM(CASE WHEN pnl_net > 0 THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN pnl_net < 0 THEN 1 ELSE 0 END) as loss_count
+                FROM trades
+                GROUP BY date
+
+                UNION ALL
+
+                -- 未平仓订单
+                SELECT
+                    date,
+                    COUNT(*) as trade_count,
+                    SUM(entry_amount) as total_amount,
+                    0 as total_pnl,
+                    0 as win_count,
+                    0 as loss_count
+                FROM open_positions
+                GROUP BY date
+            )
+            GROUP BY date
+            ORDER BY date DESC
+        """)
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for row in rows:
+            trade_count = row['trade_count']
+            win_count = row['win_count']
+            win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0.0
+
+            results.append({
+                'date': row['date'],
+                'trade_count': trade_count,
+                'total_amount': float(row['total_amount'] or 0),
+                'total_pnl': float(row['total_pnl'] or 0),
+                'win_count': win_count,
+                'loss_count': row['loss_count'],
+                'win_rate': round(win_rate, 2)
+            })
+
+        return results
+
+    def save_open_positions(self, positions: List[Dict]) -> int:
+        """
+        保存未平仓订单（全量替换）
+
+        Args:
+            positions: 未平仓订单列表
+
+        Returns:
+            int: 保存的记录数
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 清空现有未平仓记录
+        cursor.execute("DELETE FROM open_positions")
+
+        # 插入新记录
+        for pos in positions:
+            cursor.execute("""
+                INSERT INTO open_positions (
+                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pos['date'],
+                pos['symbol'],
+                pos['side'],
+                pos['entry_time'],
+                pos['entry_price'],
+                pos['qty'],
+                pos['entry_amount'],
+                pos['order_id']
+            ))
+
+        conn.commit()
+        conn.close()
+
+        return len(positions)
+
+    def get_open_positions(self) -> List[Dict]:
+        """获取所有未平仓订单"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_monthly_target(self) -> float:
+        """获取月度目标"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT monthly_target FROM user_settings WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        return row['monthly_target'] if row else 30000
+
+    def set_monthly_target(self, target: float):
+        """设置月度目标"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE user_settings
+            SET monthly_target = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        """, (target,))
+        conn.commit()
+        conn.close()
+
+    def get_monthly_pnl(self) -> float:
+        """获取本月盈亏"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 获取本月第一天的日期格式 YYYYMM01
+        from datetime import datetime
+        now = datetime.now()
+        month_start = now.strftime('%Y%m01')
+
+        cursor.execute("""
+            SELECT COALESCE(SUM(pnl_net), 0) as monthly_pnl
+            FROM trades
+            WHERE date >= ?
+        """, (month_start,))
+
+        row = cursor.fetchone()
+        conn.close()
+        return float(row['monthly_pnl']) if row else 0.0
 
     def get_balance_history(self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict]:
         """

@@ -690,6 +690,117 @@ class BinanceOrderAnalyzer:
             traceback.print_exc()
 
 
+    def get_open_positions(self, since: int, until: int) -> List[Dict]:
+        """
+        获取未平仓的入场订单（已开仓但未平仓）
+
+        Returns:
+            List[Dict]: 未平仓订单列表
+        """
+        traded_symbols = self.get_traded_symbols(since, until)
+        if not traded_symbols:
+            return []
+
+        open_positions = []
+
+        for symbol in traded_symbols:
+            orders = self.get_all_orders(symbol, limit=1000, start_time=since)
+            if not orders:
+                continue
+
+            # 过滤已成交的订单
+            filled_orders = [o for o in orders if o['status'] == 'FILLED' and o['updateTime'] >= since]
+
+            # 分别追踪 LONG 和 SHORT 的持仓
+            long_qty = 0.0
+            long_entries = []
+            short_qty = 0.0
+            short_entries = []
+
+            for order in sorted(filled_orders, key=lambda x: x['updateTime']):
+                side = order['side']
+                position_side = order['positionSide']
+                qty = float(order['executedQty'])
+                price = float(order['avgPrice'])
+                order_time = order['updateTime']
+
+                # LONG 仓位
+                if (position_side == 'LONG' and side == 'BUY') or \
+                   (position_side == 'BOTH' and side == 'BUY'):
+                    long_qty += qty
+                    long_entries.append({
+                        'price': price,
+                        'qty': qty,
+                        'time': order_time,
+                        'order_id': order['orderId']
+                    })
+                elif (position_side == 'LONG' and side == 'SELL') or \
+                     (position_side == 'BOTH' and side == 'SELL'):
+                    # 平仓，FIFO 扣减
+                    remaining = qty
+                    while remaining > 0 and long_entries:
+                        entry = long_entries[0]
+                        close_qty = min(remaining, entry['qty'])
+                        entry['qty'] -= close_qty
+                        remaining -= close_qty
+                        long_qty -= close_qty
+                        if entry['qty'] <= 0.0001:
+                            long_entries.pop(0)
+
+                # SHORT 仓位
+                if position_side == 'SHORT' and side == 'SELL':
+                    short_qty += qty
+                    short_entries.append({
+                        'price': price,
+                        'qty': qty,
+                        'time': order_time,
+                        'order_id': order['orderId']
+                    })
+                elif position_side == 'SHORT' and side == 'BUY':
+                    remaining = qty
+                    while remaining > 0 and short_entries:
+                        entry = short_entries[0]
+                        close_qty = min(remaining, entry['qty'])
+                        entry['qty'] -= close_qty
+                        remaining -= close_qty
+                        short_qty -= close_qty
+                        if entry['qty'] <= 0.0001:
+                            short_entries.pop(0)
+
+            # 收集未平仓的入场订单
+            base = symbol[:-4] if symbol.endswith('USDT') else symbol
+
+            for entry in long_entries:
+                if entry['qty'] > 0.0001:
+                    dt = datetime.fromtimestamp(entry['time'] / 1000)
+                    open_positions.append({
+                        'date': dt.strftime('%Y%m%d'),
+                        'symbol': base,
+                        'side': 'LONG',
+                        'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                        'entry_price': entry['price'],
+                        'qty': entry['qty'],
+                        'entry_amount': round(entry['price'] * entry['qty']),
+                        'order_id': entry['order_id']
+                    })
+
+            for entry in short_entries:
+                if entry['qty'] > 0.0001:
+                    dt = datetime.fromtimestamp(entry['time'] / 1000)
+                    open_positions.append({
+                        'date': dt.strftime('%Y%m%d'),
+                        'symbol': base,
+                        'side': 'SHORT',
+                        'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                        'entry_price': entry['price'],
+                        'qty': entry['qty'],
+                        'entry_amount': round(entry['price'] * entry['qty']),
+                        'order_id': entry['order_id']
+                    })
+
+        return open_positions
+
+
 def main():
     """Main function"""
     load_dotenv()

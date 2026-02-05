@@ -156,14 +156,44 @@
                 </div>
             </div>
 
-            <!-- Hourly Analysis Chart -->
+            <!-- Daily Trade Stats Chart -->
             <div class="cyber-panel rounded-xl p-4 mt-6">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
-                        <i data-lucide="clock" class="mr-2 w-4 h-4 text-pink-400"></i> HOURLY PERFORMANCE
+                        <i data-lucide="bar-chart-3" class="mr-2 w-4 h-4 text-cyan-400"></i> DAILY TRADES
                     </h3>
+                    <span class="text-[10px] text-gray-500">开单数量 & 金额</span>
                 </div>
-                <div id="hourlyChart" class="w-full min-h-[180px]"></div>
+                <div id="dailyTradesChart" class="w-full min-h-[180px]"></div>
+            </div>
+
+            <!-- Monthly Target Progress -->
+            <div class="cyber-panel rounded-xl p-4 mt-6">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="target" class="mr-2 w-4 h-4 text-emerald-400"></i> MONTHLY TARGET
+                    </h3>
+                    <button onclick="openTargetModal()" class="text-[10px] text-gray-500 hover:text-cyan-400 transition-colors">
+                        <i data-lucide="settings" class="w-3 h-3 inline"></i> 设置
+                    </button>
+                </div>
+                <div class="flex justify-between items-end mb-2">
+                    <div>
+                        <div class="text-[10px] text-gray-500">本月盈亏</div>
+                        <div class="text-2xl font-bold" id="monthly-current">$0</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[10px] text-gray-500">目标</div>
+                        <div class="text-lg font-bold text-gray-400" id="monthly-target">$30,000</div>
+                    </div>
+                </div>
+                <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                    <div id="monthly-progress-bar" class="h-full rounded-full transition-all duration-500" style="width: 0%; background: linear-gradient(90deg, #10b981, #34d399);"></div>
+                </div>
+                <div class="flex justify-between mt-2 text-[10px]">
+                    <span class="text-gray-500">进度: <span id="monthly-progress-pct" class="text-emerald-400">0%</span></span>
+                    <span class="text-gray-500">剩余: <span id="monthly-remaining" class="text-yellow-400">$30,000</span></span>
+                </div>
             </div>
         </div>
 
@@ -177,17 +207,52 @@
                     <span class="px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded">LOSS: <span id="disp-losses">0</span></span>
                 </div>
             </div>
-            <div id="equityChart" class="flex-1 w-full min-h-[250px]"></div>
+            <div id="equityChart" class="w-full min-h-[200px]"></div>
+
+            <!-- Hourly Analysis Chart -->
+            <div class="mt-6 pt-6 border-t border-gray-800">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="clock" class="mr-2 w-4 h-4 text-pink-400"></i> HOURLY PERFORMANCE
+                    </h3>
+                </div>
+                <div id="hourlyChart" class="w-full min-h-[160px]"></div>
+            </div>
 
             <!-- Duration Scatter Plot -->
-            <div class="mt-8 pt-6 border-t border-gray-800">
+            <div class="mt-6 pt-6 border-t border-gray-800">
                 <div class="flex justify-between mb-2">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
                         <i data-lucide="scatter-chart" class="mr-2 w-4 h-4 text-purple-400"></i> DURATION ANALYSIS
                     </h3>
                     <span class="text-[10px] text-gray-500">Cut Losses Short, Let Profits Run</span>
                 </div>
-                <div id="durationChart" class="w-full min-h-[200px]"></div>
+                <div id="durationChart" class="w-full min-h-[160px]"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Target Setting Modal -->
+    <div id="targetModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div class="cyber-panel rounded-xl p-6 w-80">
+            <h3 class="text-lg font-bold text-white mb-4 flex items-center">
+                <i data-lucide="target" class="mr-2 w-5 h-5 text-emerald-400"></i> 设置月度目标
+            </h3>
+            <div class="mb-4">
+                <label class="text-[10px] text-gray-500 uppercase tracking-wider">目标金额 (USDT)</label>
+                <input type="number" id="targetInput"
+                    class="w-full mt-2 px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-white text-xl font-bold focus:border-cyan-500 focus:outline-none"
+                    placeholder="30000" min="1" step="1000">
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeTargetModal()"
+                    class="flex-1 px-4 py-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-700 transition-colors">
+                    取消
+                </button>
+                <button onclick="saveTarget()"
+                    class="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition-colors font-bold">
+                    保存
+                </button>
             </div>
         </div>
     </div>
@@ -264,7 +329,11 @@
                 const tradesRes = await fetch('/api/trades');
                 const tradesData = await tradesRes.json();
 
-                updateUI(summaryData, tradesData);
+                // Fetch Daily Stats
+                const dailyStatsRes = await fetch('/api/daily-stats');
+                const dailyStatsData = await dailyStatsRes.json();
+
+                updateUI(summaryData, tradesData, dailyStatsData);
 
             } catch (error) {
                 console.error("Error fetching data:", error);
@@ -275,7 +344,7 @@
         // ============================================
         // 2. UI 更新逻辑
         // ============================================
-        function updateUI(stats, trades) {
+        function updateUI(stats, trades, dailyStats) {
             // 资金与盈亏
             const balance = stats.equity_curve[stats.equity_curve.length - 1];
             document.getElementById('disp-balance').innerText = `$${balance.toLocaleString()}`;
@@ -331,6 +400,7 @@
             renderChart(stats.equity_curve, trades);
             renderDurationChart(trades);
             renderHourlyChart(trades);
+            renderDailyTradesChart(dailyStats);
             renderTable(trades);
         }
 
@@ -544,6 +614,114 @@
             chart.render();
         }
 
+        function renderDailyTradesChart(dailyStats) {
+            if (!dailyStats || dailyStats.length === 0) return;
+
+            // 按日期正序排列（API返回的是倒序）
+            const sortedData = [...dailyStats].reverse();
+
+            // 只显示最近14天
+            const recentData = sortedData.slice(-14);
+
+            const dates = recentData.map(d => d.date.substring(5)); // MM-DD
+            const tradeCounts = recentData.map(d => d.trade_count);
+            const totalAmounts = recentData.map(d => d.total_amount);
+
+            const options = {
+                chart: {
+                    type: 'line',
+                    height: 180,
+                    toolbar: { show: false },
+                    fontFamily: 'Share Tech Mono',
+                    background: 'transparent'
+                },
+                series: [
+                    {
+                        name: '开单数量',
+                        type: 'column',
+                        data: tradeCounts
+                    },
+                    {
+                        name: '开单金额',
+                        type: 'line',
+                        data: totalAmounts
+                    }
+                ],
+                colors: ['#0ea5e9', '#f59e0b'],
+                stroke: {
+                    width: [0, 3],
+                    curve: 'smooth'
+                },
+                plotOptions: {
+                    bar: {
+                        borderRadius: 3,
+                        columnWidth: '50%'
+                    }
+                },
+                dataLabels: { enabled: false },
+                grid: {
+                    borderColor: '#1e293b',
+                    strokeDashArray: 4
+                },
+                xaxis: {
+                    categories: dates,
+                    labels: {
+                        style: { colors: '#64748b', fontSize: '9px' },
+                        rotate: -45,
+                        rotateAlways: true
+                    },
+                    axisBorder: { show: false },
+                    axisTicks: { show: false }
+                },
+                yaxis: [
+                    {
+                        title: {
+                            text: '数量',
+                            style: { color: '#0ea5e9', fontSize: '10px' }
+                        },
+                        labels: {
+                            style: { colors: '#64748b', fontSize: '10px' },
+                            formatter: (val) => val.toFixed(0)
+                        }
+                    },
+                    {
+                        opposite: true,
+                        title: {
+                            text: '金额',
+                            style: { color: '#f59e0b', fontSize: '10px' }
+                        },
+                        labels: {
+                            style: { colors: '#64748b', fontSize: '10px' },
+                            formatter: (val) => {
+                                return val >= 1000 ? (val/1000).toFixed(0) + 'k' : val.toFixed(0);
+                            }
+                        }
+                    }
+                ],
+                legend: {
+                    show: true,
+                    position: 'top',
+                    horizontalAlign: 'right',
+                    fontSize: '10px',
+                    labels: { colors: '#94a3b8' },
+                    markers: { width: 8, height: 8 }
+                },
+                tooltip: {
+                    theme: 'dark',
+                    shared: true,
+                    y: {
+                        formatter: function (val, { seriesIndex }) {
+                            if (seriesIndex === 0) return val + ' 笔';
+                            return '$' + val.toLocaleString();
+                        }
+                    }
+                }
+            };
+
+            const chart = new ApexCharts(document.querySelector("#dailyTradesChart"), options);
+            chart.render();
+        }
+
         // ============================================
         // 4. 表格渲染
         // ============================================
@@ -594,6 +772,98 @@
 
         // 启动
         fetchDashboardData();
+        fetchMonthlyProgress();
+
+        // ============================================
+        // 5. 月度目标进度
+        // ============================================
+        async function fetchMonthlyProgress() {
+            try {
+                const res = await fetch('/api/monthly-progress');
+                const data = await res.json();
+                updateMonthlyProgress(data);
+            } catch (error) {
+                console.error("Error fetching monthly progress:", error);
+            }
+        }
+
+        function updateMonthlyProgress(data) {
+            const currentEl = document.getElementById('monthly-current');
+            const targetEl = document.getElementById('monthly-target');
+            const progressBar = document.getElementById('monthly-progress-bar');
+            const progressPct = document.getElementById('monthly-progress-pct');
+            const remainingEl = document.getElementById('monthly-remaining');
+
+            const current = data.current;
+            const target = data.target;
+            const progress = Math.min(Math.max(data.progress, 0), 100);
+            const remaining = Math.max(target - current, 0);
+
+            // 更新显示
+            currentEl.innerText = `$${current.toLocaleString()}`;
+            currentEl.className = `text-2xl font-bold ${current >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+
+            targetEl.innerText = `$${target.toLocaleString()}`;
+            progressBar.style.width = `${progress}%`;
+            progressPct.innerText = `${progress.toFixed(1)}%`;
+            remainingEl.innerText = `$${remaining.toLocaleString()}`;
+
+            // 根据进度改变颜色
+            if (progress >= 100) {
+                progressBar.style.background = 'linear-gradient(90deg, #10b981, #34d399, #fbbf24)';
+                progressPct.className = 'text-yellow-400';
+            } else if (progress >= 75) {
+                progressBar.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
+            } else if (progress >= 50) {
+                progressBar.style.background = 'linear-gradient(90deg, #0ea5e9, #10b981)';
+            } else {
+                progressBar.style.background = 'linear-gradient(90deg, #6366f1, #0ea5e9)';
+            }
+        }
+
+        function openTargetModal() {
+            const modal = document.getElementById('targetModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            // 获取当前目标值填入输入框
+            fetch('/api/monthly-progress')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('targetInput').value = data.target;
+                });
+        }
+
+        function closeTargetModal() {
+            const modal = document.getElementById('targetModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function saveTarget() {
+            const input = document.getElementById('targetInput');
+            const target = parseFloat(input.value);
+
+            if (!target || target <= 0) {
+                alert('请输入有效的目标金额');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/monthly-target?target=${target}`, {
+                    method: 'POST'
+                });
+
+                if (res.ok) {
+                    closeTargetModal();
+                    fetchMonthlyProgress();
+                } else {
+                    alert('保存失败');
+                }
+            } catch (error) {
+                console.error("Error saving target:", error);
+                alert('保存失败');
+            }
+        }
 
     </script>
 </body>

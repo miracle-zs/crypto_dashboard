@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.services import BinanceOrderAnalyzer
-from app.models import Trade, TradeSummary, BalanceHistoryItem
+from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats
 from app.scheduler import get_scheduler
 from app.database import Database
 import os
@@ -219,3 +219,34 @@ async def get_database_stats():
         "statistics": stats,
         "sync_status": sync_status
     }
+
+
+@app.get("/api/daily-stats", response_model=List[DailyStats])
+async def get_daily_stats():
+    """获取每日交易统计（开单数量、开单金额）"""
+    daily_stats = db.get_daily_stats()
+    return daily_stats
+
+
+@app.get("/api/monthly-progress")
+async def get_monthly_progress():
+    """获取本月目标进度"""
+    target = db.get_monthly_target()
+    current_pnl = db.get_monthly_pnl()
+    progress = (current_pnl / target * 100) if target > 0 else 0
+
+    return {
+        "target": target,
+        "current": current_pnl,
+        "progress": round(progress, 1)
+    }
+
+
+@app.post("/api/monthly-target")
+async def set_monthly_target(target: float = Query(..., description="Monthly target amount")):
+    """设置月度目标"""
+    if target <= 0:
+        raise HTTPException(status_code=400, detail="目标金额必须大于0")
+
+    db.set_monthly_target(target)
+    return {"message": "目标已更新", "target": target}

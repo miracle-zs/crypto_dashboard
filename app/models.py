@@ -44,3 +44,13 @@ class BalanceHistoryItem(BaseModel):
     time: int
     value: float
     cumulative_equity: Optional[float] = None
+
+
+class DailyStats(BaseModel):
+    date: str
+    trade_count: int
+    total_amount: float
+    total_pnl: float
+    win_count: int
+    loss_count: int
+    win_rate: float

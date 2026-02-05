@@ -100,6 +100,17 @@ class TradeDataScheduler:
             print(f"保存 {len(df)} 条记录到数据库...")
             saved_count = self.db.save_trades(df)
 
+            # 同步未平仓订单
+            print(f"同步未平仓订单...")
+            open_positions = self.analyzer.get_open_positions(since, until)
+            if open_positions:
+                open_count = self.db.save_open_positions(open_positions)
+                print(f"保存 {open_count} 条未平仓订单")
+            else:
+                # 清空未平仓记录（如果没有未平仓订单）
+                self.db.save_open_positions([])
+                print(f"当前无未平仓订单")
+
             # 更新同步状态
             self.db.update_sync_status(status='idle')
 
