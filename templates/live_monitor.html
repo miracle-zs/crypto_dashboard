@@ -76,7 +76,7 @@
             <a href="/logs" class="text-gray-500 hover:text-white transition-colors">LOGS</a>
         </div>
         <div class="text-right">
-            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-[10px] text-gray-500">TRADING PHILOSOPHY</div>
             <div class="text-base font-bold text-cyan-500 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
     </header>
@@ -94,7 +94,7 @@
                 </div>
                 <div class="mt-4 flex justify-between items-end border-t border-gray-700 pt-4">
                     <div>
-                        <div class="text-[10px] text-gray-500">24H Change</div>
+                        <div class="text-[10px] text-gray-500" id="disp-change-label">1D Change</div>
                         <div class="text-lg font-bold text-green-400" id="disp-change">+$0.00</div>
                     </div>
                     <div class="text-[10px] bg-slate-800 px-2 py-1 rounded text-gray-400">
@@ -142,6 +142,7 @@
             </div>
 
             <div class="glass-panel p-6 rounded-xl flex flex-col items-center justify-center py-8">
+                <div class="text-gray-500 text-[10px] uppercase tracking-wider mb-4">Account Health <span class="text-gray-600">账户健康度</span></div>
                 <div class="relative w-32 h-32">
                     <svg class="w-full h-full transform -rotate-90">
                         <circle cx="64" cy="64" r="56" stroke="#1e293b" stroke-width="8" fill="transparent"></circle>
@@ -166,19 +167,16 @@
                         <!-- View Switcher -->
                         <div class="flex bg-slate-800 rounded p-1 mr-2">
                             <button id="btn-view-equity" class="px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all">累计净值</button>
+                            <button id="btn-view-percent" class="px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all">净收益率</button>
                             <button id="btn-view-balance" class="px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
                         </div>
 
-                        <div class="flex justify-center gap-1 text-[10px] w-full md:w-auto mb-2 md:mb-0">
+                        <div class="flex justify-center gap-1 text-[10px] w-full md:w-auto">
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1w">1W</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1m">1M</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1y">1Y</button>
-                        </div>
-                        <div class="flex gap-2 text-[10px]">
-                            <span class="flex items-center gap-1"><div class="w-2 h-2 bg-cyan-500 rounded-full"></div> Realtime</span>
-                            <span class="flex items-center gap-1"><div class="w-2 h-2 bg-yellow-500 rounded-full"></div> Projection</span>
                         </div>
                     </div>
                 </div>
@@ -187,7 +185,7 @@
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Sharpe Ratio</div>
+                    <div class="text-gray-500 text-[10px] uppercase">Sharpe Ratio <span class="text-gray-600">夏普比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-blue-400" id="disp-sharpe">0.00</div>
                     </div>
@@ -197,7 +195,7 @@
                 </div>
 
                 <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Calmar Ratio</div>
+                    <div class="text-gray-500 text-[10px] uppercase">Calmar Ratio <span class="text-gray-600">卡玛比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-orange-400" id="disp-calmar">0.00</div>
                     </div>
@@ -207,7 +205,7 @@
                 </div>
 
                 <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Win Rate (Time)</div>
+                    <div class="text-gray-500 text-[10px] uppercase">Win Rate (Time) <span class="text-gray-600">时间胜率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-emerald-400" id="disp-winrate">0.00%</div>
                     </div>
@@ -221,7 +219,7 @@
         <div class="lg:col-span-3 flex flex-col gap-4">
             
             <div class="glass-panel p-4 rounded-xl">
-                <div class="text-gray-500 text-[10px] uppercase">Alpha Velocity (Est.)</div>
+                <div class="text-gray-500 text-[10px] uppercase">Alpha Velocity (Est.) <span class="text-gray-600">收益速度</span></div>
                 <div class="flex items-end gap-2 mt-2">
                     <div class="text-2xl font-bold text-yellow-400" id="disp-velocity">$0.00</div>
                     <div class="text-xs text-gray-500 mb-1">/ Hour</div>
@@ -232,7 +230,7 @@
             </div>
 
             <div class="glass-panel p-4 rounded-xl">
-                <div class="text-gray-500 text-[10px] uppercase">Volatility (StdDev)</div>
+                <div class="text-gray-500 text-[10px] uppercase">Volatility (StdDev) <span class="text-gray-600">波动率</span></div>
                 <div class="flex items-end gap-2 mt-2">
                     <div class="text-2xl font-bold text-purple-400" id="disp-vol">0.00%</div>
                 </div>
@@ -243,7 +241,7 @@
 
             <div class="glass-panel p-4 rounded-xl flex flex-col bg-black/40">
                 <div class="text-gray-500 text-[10px] uppercase border-b border-gray-800 pb-2 mb-2">System Log</div>
-                <div id="system-log" class="overflow-y-auto text-[10px] font-mono space-y-1 h-32 custom-scrollbar">
+                <div id="system-log" class="overflow-y-auto text-[10px] font-mono space-y-1 h-32">
                     </div>
             </div>
         </div>
@@ -265,6 +263,7 @@
 
         const timeRangeButtons = document.querySelectorAll('.time-range-btn');
         const btnViewEquity = document.getElementById('btn-view-equity');
+        const btnViewPercent = document.getElementById('btn-view-percent');
         const btnViewBalance = document.getElementById('btn-view-balance');
 
         // Time Range Click Handlers
@@ -279,19 +278,19 @@
 
         // View Switcher Click Handlers
         btnViewEquity.addEventListener('click', () => { switchView('equity'); });
+        btnViewPercent.addEventListener('click', () => { switchView('percent'); });
         btnViewBalance.addEventListener('click', () => { switchView('balance'); });
 
         function switchView(view) {
             currentView = view;
 
             // Update Button Styles
-            if (view === 'equity') {
-                btnViewEquity.className = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
-                btnViewBalance.className = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
-            } else {
-                btnViewEquity.className = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
-                btnViewBalance.className = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
-            }
+            const inactiveClass = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
+            const activeClass = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
+
+            btnViewEquity.className = view === 'equity' ? activeClass : inactiveClass;
+            btnViewPercent.className = view === 'percent' ? activeClass : inactiveClass;
+            btnViewBalance.className = view === 'balance' ? activeClass : inactiveClass;
 
             // Re-render chart with new view mode
             updateChart();
@@ -442,6 +441,10 @@
             changeEl.innerText = `${totalChange >= 0 ? '+' : ''}$${totalChange.toFixed(2)}`;
             changeEl.className = `text-lg font-bold ${totalChange >= 0 ? 'text-green-400' : 'text-red-400'}`;
 
+            // Update change label based on current time range
+            const rangeLabelMap = {'1h': '1H', '1d': '1D', '1w': '1W', '1m': '1M', '1y': '1Y'};
+            document.getElementById('disp-change-label').innerText = `${rangeLabelMap[currentTimeRange] || '1D'} Change`;
+
             // Risk monitor
             document.getElementById('disp-peak').innerText = `$${balances.peakBalance.toFixed(2)}`;
             document.getElementById('disp-dd').innerText = `${dd.toFixed(2)}%`;
@@ -473,26 +476,54 @@
         // 5. Chart Rendering
         // -------------------------------------
         function updateChart() {
+            // Get initial equity for percent calculation
+            let initialEquity = null;
+            if (balanceData.length > 0) {
+                const first = balanceData[0];
+                initialEquity = (first.cumulative_equity !== undefined && first.cumulative_equity !== null)
+                    ? first.cumulative_equity : first.value;
+            }
+
             const seriesData = balanceData.map(d => {
                 let val = d.value;
-                if (currentView === 'equity' && d.cumulative_equity !== undefined && d.cumulative_equity !== null) {
+                if ((currentView === 'equity' || currentView === 'percent') && d.cumulative_equity !== undefined && d.cumulative_equity !== null) {
                     val = d.cumulative_equity;
                 }
-                return { x: d.time, y: val.toFixed(2) };
+                // Convert to percentage if percent view
+                if (currentView === 'percent' && initialEquity && initialEquity !== 0) {
+                    val = ((val - initialEquity) / initialEquity) * 100;
+                }
+                return { x: d.time, y: currentView === 'percent' ? val.toFixed(4) : val.toFixed(2) };
             });
+
+            // Determine y-axis formatter based on view
+            const yAxisFormatter = currentView === 'percent'
+                ? (val => `${val >= 0 ? '+' : ''}${parseFloat(val).toFixed(2)}%`)
+                : (val => `$${parseFloat(val).toLocaleString()}`);
 
             if (!chart) {
                 const options = {
                     chart: { type: 'area', height: '100%', background: 'transparent', toolbar: { show: false } },
                     theme: { mode: 'dark' },
-                    series: [{ name: 'Balance', data: seriesData }],
-                    xaxis: { 
-                        type: 'datetime', 
-                        labels: { 
+                    series: [{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }],
+                    xaxis: {
+                        type: 'datetime',
+                        labels: {
                             style: { colors: '#64748b' },
                             formatter: function(value, timestamp) {
-                                // Display date for the first tick of a new day, otherwise just time
                                 const d = new Date(timestamp);
+                                // For longer time ranges, show date + time
+                                if (['1w', '1m', '1y'].includes(currentTimeRange)) {
+                                    return new Intl.DateTimeFormat('zh-CN', {
+                                        month: 'numeric',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: false,
+                                        timeZone: 'Asia/Shanghai'
+                                    }).format(timestamp);
+                                }
+                                // For shorter ranges, show time but date at midnight
                                 if (d.getHours() === 0 && d.getMinutes() === 0) {
                                      return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(timestamp);
                                 }
@@ -503,9 +534,9 @@
                                     timeZone: 'Asia/Shanghai'
                                 }).format(timestamp);
                             }
-                        } 
+                        }
                     },
-                    yaxis: { labels: { formatter: val => `$${val.toLocaleString()}`, style: { colors: '#64748b' } } },
+                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } },
                     stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
                     fill: {
                         type: 'gradient',
@@ -513,8 +544,8 @@
                     },
                     dataLabels: { enabled: false },
                     grid: { borderColor: '#1e293b', strokeDashArray: 2 },
-                    tooltip: { 
-                        x: { 
+                    tooltip: {
+                        x: {
                             formatter: function(value) {
                                 return new Intl.DateTimeFormat('en-GB', {
                                     day: '2-digit',
@@ -526,13 +557,16 @@
                                     timeZone: 'Asia/Shanghai'
                                 }).format(value);
                             }
-                        } 
+                        }
                     }
                 };
                 chart = new ApexCharts(document.querySelector("#chart-container"), options);
                 chart.render();
             } else {
-                chart.updateSeries([{ data: seriesData }]);
+                chart.updateOptions({
+                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } }
+                });
+                chart.updateSeries([{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }]);
             }
         }
         
@@ -553,15 +587,6 @@
         function startUpdateCycle() {
             fetchData(); // Initial fetch
             setInterval(fetchData, UPDATE_INTERVAL);
-
-            // Update progress bar
-            const updateBar = document.getElementById('update-bar');
-            let width = 100;
-            setInterval(() => {
-                width -= (100 / (UPDATE_INTERVAL / 1000));
-                if (width < 0) width = 100;
-                updateBar.style.width = `${width}%`;
-            }, 1000);
         }
 
         // --- Start ---

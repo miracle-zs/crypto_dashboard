@@ -99,7 +99,7 @@
             <a href="/logs" class="text-gray-500 hover:text-white transition-colors">LOGS</a>
         </div>
         <div class="text-right">
-            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-[10px] text-gray-500">TRADING PHILOSOPHY</div>
             <div class="text-base font-bold text-cyan-500 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
     </header>
@@ -135,12 +135,12 @@
 
             <div class="grid grid-cols-2 gap-4">
                 <div class="cyber-panel rounded-xl p-4 text-center">
-                    <div class="metric-label text-purple-400">Kelly Criterion</div>
+                    <div class="metric-label text-purple-400">Kelly Criterion <span class="text-gray-600">凯利公式</span></div>
                     <div class="text-2xl font-bold text-white mt-2" id="metric-kelly">--%</div>
                     <div class="text-[9px] text-gray-500 mt-1">建议仓位比例</div>
                 </div>
                 <div class="cyber-panel rounded-xl p-4 text-center">
-                    <div class="metric-label text-yellow-400">System Quality (SQN)</div>
+                    <div class="metric-label text-yellow-400">System Quality (SQN) <span class="text-gray-600">系统质量</span></div>
                     <div class="text-2xl font-bold text-white mt-2" id="metric-sqn">--</div>
                     <div class="text-[9px] text-gray-500 mt-1">>2.0 = 优秀</div>
                 </div>
@@ -148,11 +148,11 @@
             
             <div class="cyber-panel rounded-xl p-4 flex justify-between items-center">
                 <div>
-                    <div class="metric-label">Current Streak</div>
+                    <div class="metric-label">Current Streak <span class="text-gray-600">连胜/连败</span></div>
                     <div class="text-lg font-bold text-white mt-1" id="metric-streak">--</div>
                 </div>
                 <div class="text-right">
-                    <div class="metric-label">Expectancy (EV)</div>
+                    <div class="metric-label">Expectancy (EV) <span class="text-gray-600">单笔期望</span></div>
                     <div class="text-lg font-bold text-blue-400 mt-1" id="metric-ev">--</div>
                 </div>
             </div>
@@ -260,24 +260,24 @@
 
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500">
-            <div class="metric-label">Win Rate</div>
+            <div class="metric-label">Win Rate <span class="text-gray-600">胜率</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-winrate">--%</div>
             <div class="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
                 <div id="bar-winrate" class="bg-blue-500 h-full" style="width: 0%"></div>
             </div>
         </div>
         <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500">
-            <div class="metric-label">Risk / Reward</div>
+            <div class="metric-label">R/R Ratio <span class="text-gray-600">盈亏比</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-rr">--</div>
             <div class="text-[10px] text-gray-500 mt-1">Target: > 1.5</div>
         </div>
         <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500">
-            <div class="metric-label">Profit Factor</div>
+            <div class="metric-label">Profit Factor <span class="text-gray-600">盈利因子</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-pf">--</div>
             <div class="text-[10px] text-gray-500 mt-1">Gross Win / Gross Loss</div>
         </div>
         <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500">
-            <div class="metric-label">Max Single Loss</div>
+            <div class="metric-label">Max Single Loss <span class="text-gray-600">单笔最大亏损</span></div>
             <div class="text-3xl font-bold text-red-400 mt-1" id="metric-mdd">--</div>
             <div class="text-[10px] text-gray-500 mt-1">单笔最大亏损额</div>
         </div>
@@ -408,6 +408,11 @@
         // ============================================
         // 3. 图表渲染 (ApexCharts)
         // ============================================
+        let equityChartInstance = null;
+        let durationChartInstance = null;
+        let hourlyChartInstance = null;
+        let dailyTradesChartInstance = null;
+
         function renderChart(dataPoints, trades) {
             // Extract dates from trades for x-axis if possible, or just use indices
             // Simplifying to match data points count
@@ -451,8 +456,11 @@
                 tooltip: { theme: 'dark' }
             };
 
-            const chart = new ApexCharts(document.querySelector("#equityChart"), options);
-            chart.render();
+            if (equityChartInstance) {
+                equityChartInstance.destroy();
+            }
+            equityChartInstance = new ApexCharts(document.querySelector("#equityChart"), options);
+            equityChartInstance.render();
         }
 
         function renderDurationChart(trades) {
@@ -521,8 +529,11 @@
                 }
             };
 
-            const chart = new ApexCharts(document.querySelector("#durationChart"), options);
-            chart.render();
+            if (durationChartInstance) {
+                durationChartInstance.destroy();
+            }
+            durationChartInstance = new ApexCharts(document.querySelector("#durationChart"), options);
+            durationChartInstance.render();
         }
 
         function renderHourlyChart(trades) {
@@ -611,8 +622,11 @@
                 }
             };
 
-            const chart = new ApexCharts(document.querySelector("#hourlyChart"), options);
-            chart.render();
+            if (hourlyChartInstance) {
+                hourlyChartInstance.destroy();
+            }
+            hourlyChartInstance = new ApexCharts(document.querySelector("#hourlyChart"), options);
+            hourlyChartInstance.render();
         }
 
         function renderDailyTradesChart(dailyStats) {
@@ -719,8 +733,11 @@
                 }
             };
 
-            const chart = new ApexCharts(document.querySelector("#dailyTradesChart"), options);
-            chart.render();
+            if (dailyTradesChartInstance) {
+                dailyTradesChartInstance.destroy();
+            }
+            dailyTradesChartInstance = new ApexCharts(document.querySelector("#dailyTradesChart"), options);
+            dailyTradesChartInstance.render();
         }
 
         // ============================================

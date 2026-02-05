@@ -21,7 +21,7 @@
             font-family: 'Share Tech Mono', monospace;
             background-color: var(--bg);
             color: #94a3b8;
-            background-image: 
+            background-image:
                 linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
                 linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
             background-size: 100% 2px, 3px 100%;
@@ -55,6 +55,12 @@
         .info { color: var(--primary); font-weight: bold; }
 
         h2 { color: white; letter-spacing: 0.05em; }
+
+        /* 分组标题 */
+        .section-title {
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.2), transparent);
+            border-left: 4px solid var(--primary);
+        }
     </style>
 </head>
 <body class="min-h-screen p-4 md:p-8">
@@ -76,22 +82,33 @@
             <a href="/logs" class="text-gray-500 hover:text-white transition-colors">LOGS</a>
         </div>
         <div class="text-right">
-            <div class="text-[10px] text-gray-500">SESSION ID</div>
+            <div class="text-[10px] text-gray-500">TRADING PHILOSOPHY</div>
             <div class="text-base font-bold text-cyan-500 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8">
+    <!-- ==================== TRADES 指标组 ==================== -->
+    <div class="section-title px-4 py-3 mb-6 rounded-r-lg">
+        <h2 class="text-lg font-bold flex items-center gap-2">
+            <i data-lucide="bar-chart-2" class="w-5 h-5 text-cyan-400"></i>
+            TRADES 交易指标
+            <span class="text-xs text-gray-500 font-normal ml-2">基于历史交易记录计算</span>
+        </h2>
+    </div>
 
-        <div class="doc-card rounded-xl p-6 relative overflow-hidden group">
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12">
+
+        <!-- Row 1: Kelly Criterion + Current Streak (两个高卡片) -->
+        <!-- Kelly Criterion -->
+        <div class="doc-card rounded-xl p-6 relative overflow-hidden group" style="border-left-color: #a855f7;">
             <div class="absolute top-0 right-0 p-4 opacity-10">
                 <i data-lucide="calculator" class="w-24 h-24 text-purple-400"></i>
             </div>
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-purple-500/10 rounded text-purple-400"><i data-lucide="pie-chart"></i></div>
-                <h2 class="text-xl font-bold">Kelly Criterion (标准版)</h2>
+                <h2 class="text-xl font-bold">Kelly Criterion <span class="text-gray-500 text-sm">凯利公式</span></h2>
             </div>
-            
+
             <p class="text-sm mb-4">
                 <span class="highlight">资金管理的圣杯。</span>它不告诉你该买什么，只告诉你该买多少。它能算出在当前胜率和赔率下，为了最大化复利增长且不破产，你该下注多少比例的仓位。
             </p>
@@ -105,19 +122,20 @@
                 <div class="font-bold text-purple-400 uppercase mb-1">SOP 3.0 实战解读</div>
                 <p>• <span class="font-bold">W</span> = 胜率 (Win Rate)</p>
                 <p>• <span class="font-bold">R</span> = 盈亏比 (Avg Win / Avg Loss)</p>
-                <p>• <span class="warn">注意：</span> 此结果为<strong>“单笔建议仓位”</strong>。</p>
+                <p>• <span class="warn">注意：</span> 此结果为<strong>"单笔建议仓位"</strong>。</p>
                 <p>• 如显示 20% 且你开 5 个币，总仓位即 100%。请务必自行把控总风险。</p>
             </div>
         </div>
 
+        <!-- Current Streak -->
         <div class="doc-card rounded-xl p-6" style="border-left-color: #f97316;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="zap"></i></div>
-                <h2 class="text-xl font-bold">Current Streak (连胜/连败)</h2>
+                <h2 class="text-xl font-bold">Current Streak <span class="text-gray-500 text-sm">连胜/连败</span></h2>
             </div>
-            
+
             <p class="text-sm mb-4">
-                <span class="caution">心理状态温度计。</span>显示你当前是处于“顺风局”（手热）还是“逆风局”（上头）。它是防止报复性交易的第一道防线。
+                <span class="caution">心理状态温度计。</span>显示你当前是处于"顺风局"（手热）还是"逆风局"（上头）。它是防止报复性交易的第一道防线。
             </p>
 
             <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
@@ -132,12 +150,58 @@
             </div>
         </div>
 
+        <!-- Row 2: Profit Factor + Max Single Loss (两个中等卡片，都有列表) -->
+        <!-- Profit Factor -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #10b981;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-green-500/10 rounded text-green-400"><i data-lucide="trending-up"></i></div>
+                <h2 class="text-xl font-bold">Profit Factor <span class="text-gray-500 text-sm">盈利因子</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">每亏 1 美元，能赚回多少？</span>
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>PF = Gross_Win / Gross_Loss</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-green-900/10 p-4 rounded border border-green-500/20">
+                <p>• <span class="font-bold">< 1.0</span>: 亏钱系统。</p>
+                <p>• <span class="font-bold">1.0 - 1.5</span>: 勉强盈利。</p>
+                <p>• <span class="font-bold">> 2.0</span>: <span class="highlight">健康</span> (SOP 3.0 目标)。</p>
+            </div>
+        </div>
+
+        <!-- Max Single Loss -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #ef4444;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="alert-triangle"></i></div>
+                <h2 class="text-xl font-bold">Max Single Loss <span class="text-gray-500 text-sm">单笔最大亏损</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="warn">风控底线。</span>历史上单笔交易造成的最大资金损失金额。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Max_Loss = Min(PnL_Net)</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-red-900/10 p-4 rounded border border-red-500/20">
+                <p>• 关注单笔亏损是否超过 <span class="warn">预期风险</span>。</p>
+                <p>• 避免出现 "一单回到解放前" 的情况。</p>
+            </div>
+        </div>
+
+        <!-- Row 3: SQN + Win Rate & R/R (两个有评级格子的中等卡片) -->
+        <!-- SQN -->
         <div class="doc-card rounded-xl p-6" style="border-left-color: #facc15;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-yellow-500/10 rounded text-yellow-400"><i data-lucide="award"></i></div>
-                <h2 class="text-xl font-bold">System Quality (SQN)</h2>
+                <h2 class="text-xl font-bold">System Quality (SQN) <span class="text-gray-500 text-sm">系统质量</span></h2>
             </div>
-            
+
             <p class="text-sm mb-4">
                 衡量赚钱的<span class="highlight">稳定性</span>。如果你赚了很多钱但波动巨大（如赌博），SQN 会很低。
             </p>
@@ -162,17 +226,18 @@
             </div>
         </div>
 
+        <!-- Win Rate & R/R Ratio -->
         <div class="doc-card rounded-xl p-6">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-blue-500/10 rounded text-blue-400"><i data-lucide="scale"></i></div>
-                <h2 class="text-xl font-bold">Win Rate & R/R Ratio</h2>
+                <h2 class="text-xl font-bold">Win Rate & R/R Ratio <span class="text-gray-500 text-sm">胜率与盈亏比</span></h2>
             </div>
-            
+
             <p class="text-sm mb-4">
                 交易的左膀右臂。这两个指标必须<span class="highlight">结合看</span>。
             </p>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-4">
                 <div>
                     <div class="text-xs text-gray-400 uppercase mb-1">Win Rate (胜率)</div>
                     <div class="formula-box p-2 rounded text-xs mb-2">Win / Total_Trades</div>
@@ -186,33 +251,14 @@
             </div>
         </div>
 
-        <div class="doc-card rounded-xl p-6" style="border-left-color: #10b981;">
-            <div class="flex items-center gap-3 mb-4">
-                <div class="p-2 bg-green-500/10 rounded text-green-400"><i data-lucide="trending-up"></i></div>
-                <h2 class="text-xl font-bold">Profit Factor (盈利因子)</h2>
-            </div>
-            
-            <p class="text-sm mb-4">
-                <span class="highlight">每亏 1 美元，能赚回多少？</span>
-            </p>
-
-            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
-                <div>PF = Gross_Win / Gross_Loss</div>
-            </div>
-
-            <div class="text-xs space-y-2 bg-green-900/10 p-4 rounded border border-green-500/20">
-                <p>• <span class="font-bold">< 1.0</span>: 亏钱系统。</p>
-                <p>• <span class="font-bold">1.0 - 1.5</span>: 勉强盈利。</p>
-                <p>• <span class="font-bold">> 2.0</span>: <span class="highlight">健康</span> (SOP 3.0 目标)。</p>
-            </div>
-        </div>
-
+        <!-- Row 4: Expectancy + ROI (两个简短卡片) -->
+        <!-- Expectancy -->
         <div class="doc-card rounded-xl p-6" style="border-left-color: #ec4899;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-pink-500/10 rounded text-pink-400"><i data-lucide="crosshair"></i></div>
-                <h2 class="text-xl font-bold">Expectancy (单笔期望)</h2>
+                <h2 class="text-xl font-bold">Expectancy (EV) <span class="text-gray-500 text-sm">单笔期望</span></h2>
             </div>
-            
+
             <p class="text-sm mb-4">
                 <span class="highlight">每次开单的平均预期收益。</span>
             </p>
@@ -226,24 +272,236 @@
             </p>
         </div>
 
-        <div class="doc-card rounded-xl p-6" style="border-left-color: #ef4444;">
+        <!-- ROI -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #06b6d4;">
             <div class="flex items-center gap-3 mb-4">
-                <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="activity"></i></div>
-                <h2 class="text-xl font-bold">Max Single Loss (单笔最大亏损)</h2>
+                <div class="p-2 bg-cyan-500/10 rounded text-cyan-400"><i data-lucide="percent"></i></div>
+                <h2 class="text-xl font-bold">ROI <span class="text-gray-500 text-sm">投资回报率</span></h2>
             </div>
 
             <p class="text-sm mb-4">
-                <span class="warn">风控底线。</span>历史上单笔交易造成的最大资金损失金额。
+                <span class="highlight">衡量投资效率。</span>相对于初始本金，你赚了多少百分比。
             </p>
 
             <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
-                <div>Max_Loss = Min(PnL_Net)</div>
+                <div>ROI = (Total_PnL / Initial_Capital) × 100%</div>
+            </div>
+
+            <p class="text-xs text-gray-400">
+                ROI 越高，说明资金利用效率越高。但也要结合风险指标一起看。
+            </p>
+        </div>
+
+    </div>
+
+    <!-- ==================== MONITOR 指标组 ==================== -->
+    <div class="section-title px-4 py-3 mb-6 rounded-r-lg" style="background: linear-gradient(90deg, rgba(16, 185, 129, 0.2), transparent); border-left-color: #10b981;">
+        <h2 class="text-lg font-bold flex items-center gap-2">
+            <i data-lucide="activity" class="w-5 h-5 text-emerald-400"></i>
+            MONITOR 监控指标
+            <span class="text-xs text-gray-500 font-normal ml-2">基于实时资金曲线计算</span>
+        </h2>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12">
+
+        <!-- Row 1: Drawdown + Health Score (两个高卡片，都有详细说明列表) -->
+        <!-- Drawdown -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #ef4444;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="trending-down"></i></div>
+                <h2 class="text-xl font-bold">Drawdown <span class="text-gray-500 text-sm">回撤</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="warn">风险的核心度量。</span>从峰值下跌了多少百分比。回撤越大，恢复越难。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div class="mb-2 text-gray-500">// Current Drawdown 当前回撤</div>
+                <div class="text-red-300">DD = (Peak_Equity - Current_Equity) / Peak_Equity × 100%</div>
+                <div class="mt-3 text-gray-500">// Max DD (Period) 周期最大回撤</div>
+                <div class="text-orange-300">Max_DD = Max(DD) in selected period</div>
             </div>
 
             <div class="text-xs space-y-2 bg-red-900/10 p-4 rounded border border-red-500/20">
-                <p>• 关注单笔亏损是否超过 <span class="warn">预期风险</span>。</p>
-                <p>• 避免出现 "一单回到解放前" 的情况。</p>
+                <div class="font-bold text-red-400 uppercase mb-1">回撤恢复难度</div>
+                <p>• <span class="font-bold">10% 回撤</span>: 需要 11.1% 收益恢复</p>
+                <p>• <span class="font-bold">20% 回撤</span>: 需要 25% 收益恢复</p>
+                <p>• <span class="font-bold">50% 回撤</span>: 需要 <span class="warn">100%</span> 收益恢复</p>
             </div>
+        </div>
+
+        <!-- Health Score -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #10b981;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-emerald-500/10 rounded text-emerald-400"><i data-lucide="heart-pulse"></i></div>
+                <h2 class="text-xl font-bold">Health Score <span class="text-gray-500 text-sm">账户健康度</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">综合评估账户状态的指标。</span>结合当前回撤和波动率，评估账户的整体健康程度。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div class="mb-2 text-gray-500">// 计算公式</div>
+                <div class="text-emerald-300">Score = 100 - (Drawdown × 5) - (Volatility × 2)</div>
+                <div class="mt-2 text-gray-500">// 结果限制在 0 ~ 100 之间</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-emerald-900/10 p-4 rounded border border-emerald-500/20">
+                <div class="font-bold text-emerald-400 uppercase mb-1">健康度等级</div>
+                <p>• <span class="highlight">> 80</span>: 健康 (绿色) - 账户状态良好</p>
+                <p>• <span class="caution">50 - 80</span>: 警戒 (黄色) - 需要关注风险</p>
+                <p>• <span class="warn">< 50</span>: 危险 (红色) - 建议减仓或停止交易</p>
+            </div>
+        </div>
+
+        <!-- Row 2: Sharpe + Calmar (两个有评级格子的中等卡片) -->
+        <!-- Sharpe Ratio -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #3b82f6;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-blue-500/10 rounded text-blue-400"><i data-lucide="line-chart"></i></div>
+                <h2 class="text-xl font-bold">Sharpe Ratio <span class="text-gray-500 text-sm">夏普比率</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">风险调整后的收益。</span>每承担一单位风险，能获得多少超额收益。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Sharpe = (Mean_Return / StdDev) × √(Periods_Per_Year)</div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">< 1.0</div>
+                    <div class="warn">较差</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">1.0 - 2.0</div>
+                    <div class="info">良好</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">> 2.0</div>
+                    <div class="highlight">优秀</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Calmar Ratio -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #f97316;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="flame"></i></div>
+                <h2 class="text-xl font-bold">Calmar Ratio <span class="text-gray-500 text-sm">卡玛比率</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">收益与最大回撤的比值。</span>衡量你为获得收益承受了多大的痛苦。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Calmar = Annualized_Return / Max_Drawdown</div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">< 1.0</div>
+                    <div class="warn">较差</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">1.0 - 2.0</div>
+                    <div class="info">良好</div>
+                </div>
+                <div class="bg-gray-800 p-2 rounded border border-gray-700">
+                    <div class="text-gray-400">> 2.0</div>
+                    <div class="highlight">优秀</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 3: Volatility + Alpha Velocity (两个中等卡片) -->
+        <!-- Volatility -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #a855f7;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-purple-500/10 rounded text-purple-400"><i data-lucide="waves"></i></div>
+                <h2 class="text-xl font-bold">Volatility <span class="text-gray-500 text-sm">波动率</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">资金曲线的颠簸程度。</span>波动率越低，曲线越平滑，心态越稳定。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Volatility = StdDev(Period_Returns) × 100%</div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-purple-900/10 p-4 rounded border border-purple-500/20">
+                <p>• <span class="highlight">越低越好</span>：低波动意味着稳定盈利</p>
+                <p>• 高波动可能带来高收益，但也意味着高风险</p>
+            </div>
+        </div>
+
+        <!-- Alpha Velocity -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #eab308;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-yellow-500/10 rounded text-yellow-400"><i data-lucide="rocket"></i></div>
+                <h2 class="text-xl font-bold">Alpha Velocity <span class="text-gray-500 text-sm">收益速度</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">每小时的预估收益。</span>基于近期数据推算的盈利速度。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div class="mb-2 text-gray-500">// 基于最近 60 个数据点 (约1小时)</div>
+                <div class="text-yellow-300">Velocity = (Current - Start) / Time_Span × 60</div>
+            </div>
+
+            <p class="text-xs text-gray-400">
+                正值表示资金在增长，负值表示资金在流失。仅供参考，不代表未来表现。
+            </p>
+        </div>
+
+        <!-- Row 4: Win Rate (Time) + Peak Equity (两个简短卡片) -->
+        <!-- Win Rate (Time) -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #10b981;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-emerald-500/10 rounded text-emerald-400"><i data-lucide="clock"></i></div>
+                <h2 class="text-xl font-bold">Win Rate (Time) <span class="text-gray-500 text-sm">时间胜率</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">净值增长的时间占比。</span>不同于交易胜率，这衡量的是资金曲线向上的时间比例。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Time_Win_Rate = Positive_Returns_Count / Total_Periods × 100%</div>
+            </div>
+
+            <p class="text-xs text-gray-400">
+                高时间胜率意味着资金曲线更平滑向上，心理压力更小。
+            </p>
+        </div>
+
+        <!-- Peak Equity -->
+        <div class="doc-card rounded-xl p-6" style="border-left-color: #06b6d4;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-cyan-500/10 rounded text-cyan-400"><i data-lucide="mountain"></i></div>
+                <h2 class="text-xl font-bold">Peak Equity <span class="text-gray-500 text-sm">峰值净值</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">历史最高点。</span>累计净值曾经达到的最高值，是计算回撤的基准。
+            </p>
+
+            <div class="formula-box p-4 rounded mb-4 text-xs md:text-sm">
+                <div>Peak = Max(Cumulative_Equity) in selected period</div>
+            </div>
+
+            <p class="text-xs text-gray-400">
+                每次创新高都值得庆祝，但更重要的是守住利润，控制回撤。
+            </p>
         </div>
 
     </div>
@@ -255,5 +513,6 @@
     <script>
         lucide.createIcons();
     </script>
+
 </body>
 </html>
