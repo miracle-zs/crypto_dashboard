@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 import time
 from app.logger import logger
 
+# 定义北京时区 UTC+8
+UTC8 = timezone(timedelta(hours=8))
+
 
 class BinanceOrderAnalyzer:
     """Binance Order Analyzer"""
@@ -473,12 +476,12 @@ class BinanceOrderAnalyzer:
 
                 open_price = self.get_price_change_from_utc_start(symbol, entry_time)
 
-                dt = datetime.fromtimestamp(entry_time / 1000)
+                dt = datetime.fromtimestamp(entry_time / 1000, tz=UTC8)
                 date_str = dt.strftime('%Y-%m-%d %H:%M:%S')
                 utc_day = dt.strftime('%Y%m%d')
 
                 # 计算出场时间
-                exit_dt = datetime.fromtimestamp(exit_time / 1000)
+                exit_dt = datetime.fromtimestamp(exit_time / 1000, tz=UTC8)
                 exit_time_str = exit_dt.strftime('%Y-%m-%d %H:%M:%S')
 
                 # 计算持仓时间
@@ -772,7 +775,7 @@ class BinanceOrderAnalyzer:
 
             for entry in long_entries:
                 if entry['qty'] > 0.0001:
-                    dt = datetime.fromtimestamp(entry['time'] / 1000)
+                    dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
                     open_positions.append({
                         'date': dt.strftime('%Y%m%d'),
                         'symbol': base,
@@ -786,7 +789,7 @@ class BinanceOrderAnalyzer:
 
             for entry in short_entries:
                 if entry['qty'] > 0.0001:
-                    dt = datetime.fromtimestamp(entry['time'] / 1000)
+                    dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
                     open_positions.append({
                         'date': dt.strftime('%Y%m%d'),
                         'symbol': base,
