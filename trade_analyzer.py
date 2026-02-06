@@ -31,6 +31,8 @@ class BinanceOrderAnalyzer:
         self.headers = {
             'X-MBX-APIKEY': api_key
         }
+        self._last_request_ts = 0.0
+        self._min_request_interval = float(os.getenv('BINANCE_MIN_REQUEST_INTERVAL', 0.3))
 
     def _generate_signature(self, params: dict) -> str:
         """Generate signature for authenticated requests"""
@@ -53,6 +55,13 @@ class BinanceOrderAnalyzer:
         backoff_seconds = 1
 
         for attempt in range(1, max_retries + 1):
+            # Global rate limit: ensure minimum interval between requests
+            now = time.time()
+            elapsed = now - self._last_request_ts
+            if elapsed < self._min_request_interval:
+                time.sleep(self._min_request_interval - elapsed)
+            self._last_request_ts = time.time()
+
             params['timestamp'] = int(time.time() * 1000)
             params['signature'] = self._generate_signature(params)
 
