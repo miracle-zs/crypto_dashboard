@@ -26,10 +26,21 @@
                 linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
             background-size: 100% 2px, 3px 100%;
         }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(1200px 600px at 15% -10%, rgba(14, 165, 233, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 85% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+                radial-gradient(800px 700px at 50% 120%, rgba(56, 189, 248, 0.12), transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
 
         .log-panel {
-            background: var(--panel);
-            border: 1px solid rgba(56, 189, 248, 0.1);
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(2, 6, 23, 0.6));
+            border: 1px solid rgba(56, 189, 248, 0.08);
         }
 
         .log-line {
@@ -58,15 +69,39 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 11px;
+            color: #94a3b8;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.6), transparent);
+        }
+
+        .panel-reveal {
+            animation: rise-in 0.6s ease both;
+        }
+        @keyframes rise-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
+<body class="min-h-screen p-4 md:p-8 relative">
 
-    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0">
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0 relative z-10">
         <div>
             <div class="flex items-center gap-2 mb-1">
                 <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM LOGS</span>
+                <span class="text-[11px] text-green-500 font-bold tracking-widest">SYSTEM LOGS</span>
             </div>
             <h1 class="text-2xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
                 慢就是快 <span class="text-white text-lg font-normal opacity-50">// LOGS</span>
@@ -79,19 +114,21 @@
             <a href="/logs" class="text-white font-bold border-b-2 border-cyan-500 pb-1">LOGS</a>
         </div>
         <div class="text-right">
-            <div class="text-[10px] text-gray-500">TRADING PHILOSOPHY</div>
+            <div class="text-[11px] text-gray-500">TRADING PHILOSOPHY</div>
             <div class="text-base font-bold text-cyan-500 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
     </header>
 
+    <div class="section-label mb-4 relative z-10">LOG STREAM</div>
+
     <!-- 控制栏 -->
-    <div class="log-panel rounded-xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+    <div class="log-panel rounded-xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4 relative z-10 panel-reveal">
         <div class="flex items-center gap-4">
             <div class="flex items-center gap-2">
                 <i data-lucide="terminal" class="w-5 h-5 text-cyan-400"></i>
                 <span class="text-white font-bold">System Logs</span>
             </div>
-            <div class="text-[10px] text-gray-500">
+            <div class="text-[11px] text-gray-500">
                 <span id="log-count">0</span> lines
             </div>
         </div>
@@ -124,14 +161,14 @@
     </div>
 
     <!-- 日志内容 -->
-    <div class="log-panel rounded-xl overflow-hidden">
+    <div class="log-panel rounded-xl overflow-hidden relative z-10 panel-reveal">
         <div id="logContainer" class="p-4 max-h-[70vh] overflow-y-auto">
             <div class="text-gray-500 text-center py-8">Loading logs...</div>
         </div>
     </div>
 
     <script>
-        lucide.createIcons();
+        lucide.createIcons({ attrs: { 'stroke-width': 1.6 } });
 
         let allLogs = [];
         let refreshInterval = null;

@@ -26,10 +26,21 @@
                 linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
             background-size: 100% 2px, 3px 100%;
         }
-        
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(1200px 600px at 15% -10%, rgba(14, 165, 233, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 85% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+                radial-gradient(800px 700px at 50% 120%, rgba(56, 189, 248, 0.12), transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
         /* 玻璃拟态 + 霓虹边框 */
         .cyber-panel {
-            background: var(--panel);
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.75), rgba(2, 6, 23, 0.55));
             backdrop-filter: blur(12px);
             border: 1px solid rgba(56, 189, 248, 0.08);
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
@@ -76,13 +87,74 @@
             letter-spacing: 0.1em;
             color: #64748b;
         }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 11px;
+            color: #94a3b8;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.6), transparent);
+        }
+
+        .panel-reveal {
+            animation: rise-in 0.6s ease both;
+        }
+        @keyframes rise-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .table-row:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .kpi-card {
+            min-height: 110px;
+            cursor: pointer;
+            transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .kpi-card.kpi-muted {
+            opacity: 0.35;
+            filter: saturate(0.7);
+        }
+        .kpi-card.kpi-active {
+            box-shadow: 0 0 25px rgba(14, 165, 233, 0.25);
+            border-color: rgba(14, 165, 233, 0.45);
+        }
+
+        .update-flash {
+            animation: update-glow 0.6s ease;
+        }
+        @keyframes update-glow {
+            0% { color: #94a3b8; text-shadow: none; }
+            50% { color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.6); }
+            100% { color: #94a3b8; text-shadow: none; }
+        }
+
+        body.mood-down::before {
+            opacity: 0.35;
+            filter: saturate(0.6);
+        }
+        body.mood-down .scan-line {
+            opacity: 0.35;
+        }
+        body.mood-down .cyber-panel {
+            border-color: rgba(148, 163, 184, 0.08);
+        }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
+<body class="min-h-screen p-4 md:p-8 relative">
 
     <div class="scan-line"></div>
 
-    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0">
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0 relative z-10">
         <div>
             <div class="flex items-center gap-2 mb-1">
                 <div class="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
@@ -105,10 +177,11 @@
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-10">
         
         <div class="lg:col-span-4 space-y-6">
-            <div class="cyber-panel rounded-xl p-6">
+            <div class="section-label">CORE METRICS</div>
+            <div class="cyber-panel rounded-xl p-6 panel-reveal kpi-card">
                 <div class="flex justify-between items-start mb-4">
                     <div>
                         <div class="metric-label">Total Equity</div>
@@ -135,19 +208,19 @@
             </div>
 
             <div class="grid grid-cols-2 gap-4">
-                <div class="cyber-panel rounded-xl p-4 text-center">
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card">
                     <div class="metric-label text-purple-400">Kelly Criterion <span class="text-gray-600">凯利公式</span></div>
                     <div class="text-2xl font-bold text-white mt-2" id="metric-kelly">--%</div>
                     <div class="text-[11px] text-gray-500 mt-1">建议仓位比例</div>
                 </div>
-                <div class="cyber-panel rounded-xl p-4 text-center">
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card">
                     <div class="metric-label text-yellow-400">System Quality (SQN) <span class="text-gray-600">系统质量</span></div>
                     <div class="text-2xl font-bold text-white mt-2" id="metric-sqn">--</div>
                     <div class="text-[11px] text-gray-500 mt-1">>2.0 = 优秀</div>
                 </div>
             </div>
             
-            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center">
+            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center panel-reveal kpi-card">
                 <div>
                     <div class="metric-label">Current Streak <span class="text-gray-600">连胜/连败</span></div>
                     <div class="text-lg font-bold text-white mt-1" id="metric-streak">--</div>
@@ -159,7 +232,7 @@
             </div>
 
             <!-- Daily Trade Stats Chart -->
-            <div class="cyber-panel rounded-xl p-4 mt-6">
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
                         <i data-lucide="bar-chart-3" class="mr-2 w-4 h-4 text-cyan-400"></i> DAILY TRADES
@@ -170,7 +243,7 @@
             </div>
 
             <!-- Monthly Target Progress -->
-            <div class="cyber-panel rounded-xl p-4 mt-6">
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
                         <i data-lucide="target" class="mr-2 w-4 h-4 text-emerald-400"></i> MONTHLY TARGET
@@ -199,7 +272,9 @@
             </div>
         </div>
 
-        <div class="lg:col-span-8 cyber-panel rounded-xl p-6 flex flex-col">
+        <div class="lg:col-span-8">
+            <div class="section-label mb-4">ANALYSIS</div>
+            <div class="cyber-panel rounded-xl p-6 flex flex-col panel-reveal">
             <div class="flex justify-between mb-4">
                 <h3 class="text-sm font-bold text-gray-300 flex items-center">
                     <i data-lucide="activity" class="mr-2 w-4 h-4 text-cyan-400"></i> EQUITY CURVE
@@ -231,6 +306,8 @@
                 </div>
                 <div id="durationChart" class="w-full min-h-[160px]"></div>
             </div>
+            </div>
+
         </div>
     </div>
 
@@ -259,35 +336,37 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500">
+    <div class="section-label mb-4 relative z-10">STRATEGY METRICS</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-10">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500 panel-reveal kpi-card">
             <div class="metric-label">Win Rate <span class="text-gray-600">胜率</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-winrate">--%</div>
             <div class="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
                 <div id="bar-winrate" class="bg-blue-500 h-full" style="width: 0%"></div>
             </div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500 panel-reveal kpi-card">
             <div class="metric-label">R/R Ratio <span class="text-gray-600">盈亏比</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-rr">--</div>
             <div class="text-[11px] text-gray-500 mt-1">Target: > 1.5</div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500 panel-reveal kpi-card">
             <div class="metric-label">Profit Factor <span class="text-gray-600">盈利因子</span></div>
             <div class="text-3xl font-bold text-white mt-1" id="metric-pf">--</div>
             <div class="text-[11px] text-gray-500 mt-1">Gross Win / Gross Loss</div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500 panel-reveal kpi-card">
             <div class="metric-label">Max Single Loss <span class="text-gray-600">单笔最大亏损</span></div>
             <div class="text-3xl font-bold text-red-400 mt-1" id="metric-mdd">--</div>
             <div class="text-[11px] text-gray-500 mt-1">单笔最大亏损额</div>
         </div>
     </div>
 
-    <div class="cyber-panel rounded-xl overflow-hidden">
+    <div class="section-label mb-4 relative z-10">TRADE LOG</div>
+    <div class="cyber-panel rounded-xl overflow-hidden relative z-10 panel-reveal">
         <div class="overflow-x-auto">
             <table class="w-full text-left text-sm text-gray-400 min-w-[600px] md:min-w-full">
-                <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold">
+                <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold sticky top-0 z-10 backdrop-blur">
                     <tr>
                         <th class="px-6 py-4">Time</th>
                         <th class="px-6 py-4">Symbol</th>
@@ -306,7 +385,7 @@
     </div>
 
     <script>
-        lucide.createIcons();
+        lucide.createIcons({ attrs: { 'stroke-width': 1.6 } });
 
         // ============================================
         // 1. 数据获取 (Fetch from API)
@@ -348,6 +427,8 @@
         // 2. UI 更新逻辑
         // ============================================
         function updateUI(stats, trades, dailyStats) {
+            applyMood(stats);
+
             // 资金与盈亏
             const balance = stats.equity_curve[stats.equity_curve.length - 1];
             document.getElementById('disp-balance').innerText = `$${balance.toLocaleString()}`;
@@ -405,6 +486,7 @@
             renderHourlyChart(trades);
             renderDailyTradesChart(dailyStats);
             renderTable(trades);
+            initKpiFocus();
         }
 
         function updateLastUpdated() {
@@ -412,7 +494,16 @@
             if (!el) return;
             const ts = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
             el.innerText = ts;
+            el.classList.remove('update-flash');
+            void el.offsetWidth;
+            el.classList.add('update-flash');
         }
+
+        function applyMood(stats) {
+            const down = stats && stats.total_pnl < 0;
+            document.body.classList.toggle('mood-down', down);
+        }
+
 
         // ============================================
         // 3. 图表渲染 (ApexCharts)
@@ -784,7 +875,7 @@
                 const timeStr = dateParts[1].substring(0, 5); // HH:MM
 
                 const row = `
-                    <tr class="hover:bg-white/5 transition-colors border-b border-gray-800">
+                    <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800">
                         <td class="px-6 py-4">
                             <div class="text-white font-bold">${timeStr}</div>
                             <div class="text-[11px] text-gray-500">${dateStr}</div>
@@ -811,6 +902,25 @@
                     </tr>
                 `;
                 tbody.innerHTML += row;
+            });
+
+        }
+
+        let kpiBound = false;
+        function initKpiFocus() {
+            if (kpiBound) return;
+            const cards = document.querySelectorAll('.kpi-card');
+            if (!cards.length) return;
+            kpiBound = true;
+            cards.forEach(card => {
+                card.addEventListener('click', () => {
+                    const isActive = card.classList.contains('kpi-active');
+                    cards.forEach(c => c.classList.remove('kpi-active', 'kpi-muted'));
+                    if (!isActive) {
+                        cards.forEach(c => { if (c !== card) c.classList.add('kpi-muted'); });
+                        card.classList.add('kpi-active');
+                    }
+                });
             });
         }
 

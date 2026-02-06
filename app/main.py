@@ -242,6 +242,8 @@ async def get_daily_stats():
     return daily_stats
 
 
+
+
 @app.get("/api/monthly-progress")
 async def get_monthly_progress():
     """获取本月目标进度"""

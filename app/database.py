@@ -528,6 +528,7 @@ class Database:
 
         return results
 
+
     def save_open_positions(self, positions: List[Dict]) -> int:
         """
         保存未平仓订单（全量替换）

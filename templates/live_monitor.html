@@ -24,6 +24,17 @@
             background-image: radial-gradient(circle at 50% 50%, #1e293b 1px, transparent 1px);
             background-size: 24px 24px;
         }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(1200px 600px at 15% -10%, rgba(14, 165, 233, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 85% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+                radial-gradient(800px 700px at 50% 120%, rgba(56, 189, 248, 0.12), transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
 
         /* 呼吸灯特效 */
         .live-dot {
@@ -39,9 +50,9 @@
 
         /* 玻璃面板 */
         .glass-panel {
-            background: var(--panel);
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.78), rgba(2, 6, 23, 0.6));
             backdrop-filter: blur(8px);
-            border: 1px solid rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.08);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
         }
 
@@ -55,15 +66,58 @@
             content: "> ";
             color: var(--primary);
         }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 11px;
+            color: #94a3b8;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.6), transparent);
+        }
+
+        .panel-reveal {
+            animation: rise-in 0.6s ease both;
+        }
+        @keyframes rise-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .metric-card {
+            min-height: 110px;
+        }
+
+        #chart-container {
+            transition: opacity 150ms ease;
+        }
+        #chart-container.fade-swap {
+            opacity: 0.4;
+        }
+
+        body.mood-down::before {
+            opacity: 0.35;
+            filter: saturate(0.6);
+        }
+        body.mood-down .glass-panel {
+            border-color: rgba(148, 163, 184, 0.08);
+        }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
+<body class="min-h-screen p-4 md:p-8 relative">
 
-    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0">
+    <header class="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 border-b border-gray-800 pb-4 gap-4 md:gap-0 relative z-10">
         <div>
             <div class="flex items-center gap-2 mb-1">
                 <div class="live-dot"></div>
-                <span class="text-[10px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
+                <span class="text-[11px] text-green-500 font-bold tracking-widest">SYSTEM ONLINE</span>
             </div>
             <h1 class="text-2xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
                 慢就是快 <span class="text-white text-lg font-normal opacity-50">// MONITOR</span>
@@ -76,15 +130,16 @@
             <a href="/logs" class="text-gray-500 hover:text-white transition-colors">LOGS</a>
         </div>
         <div class="text-right">
-            <div class="text-[10px] text-gray-500">TRADING PHILOSOPHY</div>
+            <div class="text-[11px] text-gray-500">TRADING PHILOSOPHY</div>
             <div class="text-base font-bold text-cyan-500 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 relative z-10">
         
         <div class="lg:col-span-3 flex flex-col gap-4">
-            <div class="glass-panel p-6 rounded-xl relative overflow-hidden group">
+            <div class="section-label">ACCOUNT STATUS</div>
+            <div class="glass-panel p-6 rounded-xl relative overflow-hidden group panel-reveal">
                 <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                     <i data-lucide="wallet" class="w-16 h-16 text-cyan-400"></i>
                 </div>
@@ -94,16 +149,16 @@
                 </div>
                 <div class="mt-4 flex justify-between items-end border-t border-gray-700 pt-4">
                     <div>
-                        <div class="text-[10px] text-gray-500" id="disp-change-label">1D Change</div>
+                        <div class="text-[11px] text-gray-500" id="disp-change-label">1D Change</div>
                         <div class="text-lg font-bold text-green-400" id="disp-change">+$0.00</div>
                     </div>
-                    <div class="text-[10px] bg-slate-800 px-2 py-1 rounded text-gray-400">
+                    <div class="text-[11px] bg-slate-800 px-2 py-1 rounded text-gray-400">
                         USD-M Futures
                     </div>
                 </div>
             </div>
 
-            <div class="glass-panel p-6 rounded-xl border-t-4 border-t-red-500 relative overflow-hidden">
+            <div class="glass-panel p-6 rounded-xl border-t-4 border-t-red-500 relative overflow-hidden panel-reveal">
                 <!-- Decorative Background -->
                 <div class="absolute -right-6 -top-6 w-24 h-24 bg-red-500/10 rounded-full blur-xl pointer-events-none"></div>
 
@@ -116,7 +171,7 @@
                 </div>
 
                 <div class="relative z-10 mb-6">
-                    <div class="text-[10px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
+                    <div class="text-[11px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
                     <div class="flex items-baseline gap-2">
                         <span class="text-4xl font-bold text-white tracking-tighter" id="disp-dd">0.00%</span>
                         <span class="text-xs text-gray-500">/ 10% Limit</span>
@@ -131,18 +186,18 @@
 
                 <div class="grid grid-cols-2 gap-4 border-t border-gray-800 pt-4 relative z-10">
                     <div>
-                        <div class="text-[10px] text-gray-500 mb-1">PEAK EQUITY</div>
+                        <div class="text-[11px] text-gray-500 mb-1">PEAK EQUITY</div>
                         <div class="text-sm font-bold text-gray-300 font-mono" id="disp-peak">$24,000</div>
                     </div>
                     <div class="text-right">
-                         <div class="text-[10px] text-gray-500 mb-1">MAX DD (PERIOD)</div>
+                         <div class="text-[11px] text-gray-500 mb-1">MAX DD (PERIOD)</div>
                          <div class="text-sm font-bold text-orange-400 font-mono" id="disp-max-dd">0.00%</div>
                     </div>
                 </div>
             </div>
 
-            <div class="glass-panel p-6 rounded-xl flex flex-col items-center justify-center py-8">
-                <div class="text-gray-500 text-[10px] uppercase tracking-wider mb-4">Account Health <span class="text-gray-600">账户健康度</span></div>
+            <div class="glass-panel p-6 rounded-xl flex flex-col items-center justify-center py-8 panel-reveal">
+                <div class="text-gray-500 text-[11px] uppercase tracking-wider mb-4">Account Health <span class="text-gray-600">账户健康度</span></div>
                 <div class="relative w-32 h-32">
                     <svg class="w-full h-full transform -rotate-90">
                         <circle cx="64" cy="64" r="56" stroke="#1e293b" stroke-width="8" fill="transparent"></circle>
@@ -151,14 +206,15 @@
                     </svg>
                     <div class="absolute inset-0 flex flex-col items-center justify-center">
                         <span class="text-3xl font-bold text-white" id="disp-score">100</span>
-                        <span class="text-[10px] text-gray-500 uppercase">Health Score</span>
+                        <span class="text-[11px] text-gray-500 uppercase">Health Score</span>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="lg:col-span-6 flex flex-col gap-4">
-            <div class="glass-panel rounded-xl p-4 flex flex-col flex-1">
+            <div class="section-label">EQUITY & PERFORMANCE</div>
+            <div class="glass-panel rounded-xl p-4 flex flex-col flex-1 panel-reveal">
                 <div class="flex flex-col md:flex-row justify-between items-center mb-2 px-2 gap-4 md:gap-0">
                     <h2 class="text-sm font-bold text-white flex items-center gap-2">
                         <i data-lucide="activity" class="text-cyan-400 w-4 h-4"></i> LIVE EQUITY CURVE
@@ -166,12 +222,12 @@
                     <div class="flex flex-col md:flex-row items-center gap-2 w-full md:w-auto">
                         <!-- View Switcher -->
                         <div class="flex bg-slate-800 rounded p-1 mr-2">
-                            <button id="btn-view-equity" class="px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all">累计净值</button>
-                            <button id="btn-view-percent" class="px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all">净收益率</button>
-                            <button id="btn-view-balance" class="px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
+                            <button id="btn-view-equity" class="px-3 py-1 text-[11px] rounded bg-cyan-600 text-white font-bold transition-all">累计净值</button>
+                            <button id="btn-view-percent" class="px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all">净收益率</button>
+                            <button id="btn-view-balance" class="px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
                         </div>
 
-                        <div class="flex justify-center gap-1 text-[10px] w-full md:w-auto">
+                        <div class="flex justify-center gap-1 text-[11px] w-full md:w-auto">
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1w">1W</button>
@@ -184,32 +240,32 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Sharpe Ratio <span class="text-gray-600">夏普比率</span></div>
+                <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
+                    <div class="text-gray-500 text-[11px] uppercase">Sharpe Ratio <span class="text-gray-600">夏普比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-blue-400" id="disp-sharpe">0.00</div>
                     </div>
-                    <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                    <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         风险调整收益 (>1.0)
                     </div>
                 </div>
 
-                <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Calmar Ratio <span class="text-gray-600">卡玛比率</span></div>
+                <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
+                    <div class="text-gray-500 text-[11px] uppercase">Calmar Ratio <span class="text-gray-600">卡玛比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-orange-400" id="disp-calmar">0.00</div>
                     </div>
-                    <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                    <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         收益回撤比 (>2.0)
                     </div>
                 </div>
 
-                <div class="glass-panel p-4 rounded-xl">
-                    <div class="text-gray-500 text-[10px] uppercase">Win Rate (Time) <span class="text-gray-600">时间胜率</span></div>
+                <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
+                    <div class="text-gray-500 text-[11px] uppercase">Win Rate (Time) <span class="text-gray-600">时间胜率</span></div>
                     <div class="flex items-end gap-2 mt-2">
                         <div class="text-2xl font-bold text-emerald-400" id="disp-winrate">0.00%</div>
                     </div>
-                    <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                    <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         净值增长时间占比
                     </div>
                 </div>
@@ -217,38 +273,38 @@
         </div>
 
         <div class="lg:col-span-3 flex flex-col gap-4">
-            
-            <div class="glass-panel p-4 rounded-xl">
-                <div class="text-gray-500 text-[10px] uppercase">Alpha Velocity (Est.) <span class="text-gray-600">收益速度</span></div>
+            <div class="section-label">SYSTEM SIGNALS</div>
+            <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
+                <div class="text-gray-500 text-[11px] uppercase">Alpha Velocity (Est.) <span class="text-gray-600">收益速度</span></div>
                 <div class="flex items-end gap-2 mt-2">
                     <div class="text-2xl font-bold text-yellow-400" id="disp-velocity">$0.00</div>
                     <div class="text-xs text-gray-500 mb-1">/ Hour</div>
                 </div>
-                <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                     基于最近 60 次数据点 (1H) 推算
                 </div>
             </div>
 
-            <div class="glass-panel p-4 rounded-xl">
-                <div class="text-gray-500 text-[10px] uppercase">Volatility (StdDev) <span class="text-gray-600">波动率</span></div>
+            <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
+                <div class="text-gray-500 text-[11px] uppercase">Volatility (StdDev) <span class="text-gray-600">波动率</span></div>
                 <div class="flex items-end gap-2 mt-2">
                     <div class="text-2xl font-bold text-purple-400" id="disp-vol">0.00%</div>
                 </div>
-                <div class="text-[10px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
+                <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                     资金曲线平滑度 (越低越稳)
                 </div>
             </div>
 
-            <div class="glass-panel p-4 rounded-xl flex flex-col bg-black/40">
-                <div class="text-gray-500 text-[10px] uppercase border-b border-gray-800 pb-2 mb-2">System Log</div>
-                <div id="system-log" class="overflow-y-auto text-[10px] font-mono space-y-1 h-32">
+            <div class="glass-panel p-4 rounded-xl flex flex-col bg-black/40 panel-reveal">
+                <div class="text-gray-500 text-[11px] uppercase border-b border-gray-800 pb-2 mb-2">System Log</div>
+                <div id="system-log" class="overflow-y-auto text-[11px] font-mono space-y-1 h-32">
                     </div>
             </div>
         </div>
     </div>
 
     <script>
-        lucide.createIcons();
+        lucide.createIcons({ attrs: { 'stroke-width': 1.6 } });
 
         // -------------------------------------
         // 1. Configuration & State
@@ -285,15 +341,16 @@
             currentView = view;
 
             // Update Button Styles
-            const inactiveClass = 'px-3 py-1 text-[10px] rounded text-gray-400 hover:text-white transition-all';
-            const activeClass = 'px-3 py-1 text-[10px] rounded bg-cyan-600 text-white font-bold transition-all';
+            const inactiveClass = 'px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all';
+            const activeClass = 'px-3 py-1 text-[11px] rounded bg-cyan-600 text-white font-bold transition-all';
 
             btnViewEquity.className = view === 'equity' ? activeClass : inactiveClass;
             btnViewPercent.className = view === 'percent' ? activeClass : inactiveClass;
             btnViewBalance.className = view === 'balance' ? activeClass : inactiveClass;
 
             // Re-render chart with new view mode
-            updateChart();
+            fadeChart();
+            setTimeout(updateChart, 150);
         }
 
         // Initialize active button style for time range
@@ -440,6 +497,7 @@
             const changeEl = document.getElementById('disp-change');
             changeEl.innerText = `${totalChange >= 0 ? '+' : ''}$${totalChange.toFixed(2)}`;
             changeEl.className = `text-lg font-bold ${totalChange >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            document.body.classList.toggle('mood-down', totalChange < 0);
 
             // Update change label based on current time range
             const rangeLabelMap = {'1h': '1H', '1d': '1D', '1w': '1W', '1m': '1M', '1y': '1Y'};
@@ -470,6 +528,7 @@
             if(score > 80) healthRing.style.stroke = '#10b981'; // green
             else if(score > 50) healthRing.style.stroke = '#f59e0b'; // yellow
             else healthRing.style.stroke = '#ef4444'; // red
+
         }
         
         // -------------------------------------
@@ -568,6 +627,13 @@
                 });
                 chart.updateSeries([{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }]);
             }
+        }
+
+        function fadeChart() {
+            const container = document.getElementById('chart-container');
+            if (!container) return;
+            container.classList.add('fade-swap');
+            setTimeout(() => container.classList.remove('fade-swap'), 160);
         }
         
         // -------------------------------------
