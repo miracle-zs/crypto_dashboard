@@ -442,11 +442,12 @@ class BinanceOrderAnalyzer:
 
         return symbols_list
 
-    def analyze_orders(self, since: int, until: int) -> pd.DataFrame:
+    def analyze_orders(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> pd.DataFrame:
         """Analyze orders and convert to DataFrame"""
 
         # 获取有交易记录的币种
-        traded_symbols = self.get_traded_symbols(since, until)
+        if traded_symbols is None:
+            traded_symbols = self.get_traded_symbols(since, until)
 
         if not traded_symbols:
             logger.warning("No trading history found in the specified period")
@@ -720,14 +721,15 @@ class BinanceOrderAnalyzer:
             traceback.print_exc()
 
 
-    def get_open_positions(self, since: int, until: int) -> List[Dict]:
+    def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> List[Dict]:
         """
         获取未平仓的入场订单（已开仓但未平仓）
 
         Returns:
             List[Dict]: 未平仓订单列表
         """
-        traded_symbols = self.get_traded_symbols(since, until)
+        if traded_symbols is None:
+            traded_symbols = self.get_traded_symbols(since, until)
         if not traded_symbols:
             return []
 

@@ -92,7 +92,8 @@ class TradeDataScheduler:
 
             # 从Binance获取数据
             logger.info("从Binance API抓取数据...")
-            df = self.analyzer.analyze_orders(since=since, until=until)
+            traded_symbols = self.analyzer.get_traded_symbols(since, until)
+            df = self.analyzer.analyze_orders(since=since, until=until, traded_symbols=traded_symbols)
 
             if df.empty:
                 logger.info("没有新数据需要更新")
@@ -105,7 +106,7 @@ class TradeDataScheduler:
 
             # 同步未平仓订单
             logger.info("同步未平仓订单...")
-            open_positions = self.analyzer.get_open_positions(since, until)
+            open_positions = self.analyzer.get_open_positions(since, until, traded_symbols=traded_symbols)
             if open_positions:
                 open_count = self.db.save_open_positions(open_positions)
                 logger.info(f"保存 {open_count} 条未平仓订单")
