@@ -638,7 +638,15 @@
             // 只显示最近14天
             const recentData = sortedData.slice(-14);
 
-            const dates = recentData.map(d => d.date.substring(5)); // MM-DD
+            const dates = recentData.map(d => {
+                const raw = String(d.date || '');
+                if (raw.length === 8) {
+                    // YYYYMMDD -> MM-DD
+                    return `${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+                }
+                // Fallback for YYYY-MM-DD or other formats
+                return raw.substring(5);
+            });
             const tradeCounts = recentData.map(d => d.trade_count);
             const totalAmounts = recentData.map(d => d.total_amount);
 
