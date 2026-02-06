@@ -83,6 +83,19 @@
             background: linear-gradient(90deg, rgba(14, 165, 233, 0.6), transparent);
         }
 
+        .text-l1 {
+            font-size: clamp(2.75rem, 3vw, 3rem);
+            line-height: 1;
+        }
+        .text-l2 {
+            font-size: clamp(1.5rem, 2.2vw, 1.75rem);
+            line-height: 1.1;
+        }
+        .text-l3 {
+            font-size: clamp(1.125rem, 1.8vw, 1.25rem);
+            line-height: 1.2;
+        }
+
         .panel-reveal {
             animation: rise-in 0.6s ease both;
         }
@@ -144,13 +157,13 @@
                     <i data-lucide="wallet" class="w-16 h-16 text-cyan-400"></i>
                 </div>
                 <div class="text-gray-500 text-xs uppercase tracking-wider">Current Balance</div>
-                <div class="text-3xl md:text-4xl font-bold text-white mt-2 tracking-tight" id="disp-balance">
+                <div class="text-l1 font-bold text-white mt-2 tracking-tight" id="disp-balance">
                     $24,000.00
                 </div>
                 <div class="mt-4 flex justify-between items-end border-t border-gray-700 pt-4">
                     <div>
                         <div class="text-[11px] text-gray-500" id="disp-change-label">1D Change</div>
-                        <div class="text-lg font-bold text-green-400" id="disp-change">+$0.00</div>
+                        <div class="text-l3 font-bold text-green-400" id="disp-change">+$0.00</div>
                     </div>
                     <div class="text-[11px] bg-slate-800 px-2 py-1 rounded text-gray-400">
                         USD-M Futures
@@ -173,7 +186,7 @@
                 <div class="relative z-10 mb-6">
                     <div class="text-[11px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
                     <div class="flex items-baseline gap-2">
-                        <span class="text-4xl font-bold text-white tracking-tighter" id="disp-dd">0.00%</span>
+                        <span class="text-l1 font-bold text-white tracking-tighter" id="disp-dd">0.00%</span>
                         <span class="text-xs text-gray-500">/ 10% Limit</span>
                     </div>
                     <!-- Progress Bar -->
@@ -205,7 +218,7 @@
                                 stroke-dasharray="351" stroke-dashoffset="0" class="transition-all duration-1000"></circle>
                     </svg>
                     <div class="absolute inset-0 flex flex-col items-center justify-center">
-                        <span class="text-3xl font-bold text-white" id="disp-score">100</span>
+                        <span class="text-l2 font-bold text-white" id="disp-score">100</span>
                         <span class="text-[11px] text-gray-500 uppercase">Health Score</span>
                     </div>
                 </div>
@@ -243,7 +256,7 @@
                 <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
                     <div class="text-gray-500 text-[11px] uppercase">Sharpe Ratio <span class="text-gray-600">夏普比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
-                        <div class="text-2xl font-bold text-blue-400" id="disp-sharpe">0.00</div>
+                        <div class="text-l2 font-bold text-blue-400" id="disp-sharpe">0.00</div>
                     </div>
                     <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         风险调整收益 (>1.0)
@@ -253,7 +266,7 @@
                 <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
                     <div class="text-gray-500 text-[11px] uppercase">Calmar Ratio <span class="text-gray-600">卡玛比率</span></div>
                     <div class="flex items-end gap-2 mt-2">
-                        <div class="text-2xl font-bold text-orange-400" id="disp-calmar">0.00</div>
+                        <div class="text-l2 font-bold text-orange-400" id="disp-calmar">0.00</div>
                     </div>
                     <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         收益回撤比 (>2.0)
@@ -263,7 +276,7 @@
                 <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
                     <div class="text-gray-500 text-[11px] uppercase">Win Rate (Time) <span class="text-gray-600">时间胜率</span></div>
                     <div class="flex items-end gap-2 mt-2">
-                        <div class="text-2xl font-bold text-emerald-400" id="disp-winrate">0.00%</div>
+                        <div class="text-l2 font-bold text-emerald-400" id="disp-winrate">0.00%</div>
                     </div>
                     <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                         净值增长时间占比
@@ -277,7 +290,7 @@
             <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
                 <div class="text-gray-500 text-[11px] uppercase">Alpha Velocity (Est.) <span class="text-gray-600">收益速度</span></div>
                 <div class="flex items-end gap-2 mt-2">
-                    <div class="text-2xl font-bold text-yellow-400" id="disp-velocity">$0.00</div>
+                    <div class="text-l2 font-bold text-yellow-400" id="disp-velocity">$0.00</div>
                     <div class="text-xs text-gray-500 mb-1">/ Hour</div>
                 </div>
                 <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
@@ -288,7 +301,7 @@
             <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
                 <div class="text-gray-500 text-[11px] uppercase">Volatility (StdDev) <span class="text-gray-600">波动率</span></div>
                 <div class="flex items-end gap-2 mt-2">
-                    <div class="text-2xl font-bold text-purple-400" id="disp-vol">0.00%</div>
+                    <div class="text-l2 font-bold text-purple-400" id="disp-vol">0.00%</div>
                 </div>
                 <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
                     资金曲线平滑度 (越低越稳)
@@ -496,7 +509,7 @@
             const totalChange = balances.currentBalance - balances.initialBalance;
             const changeEl = document.getElementById('disp-change');
             changeEl.innerText = `${totalChange >= 0 ? '+' : ''}$${totalChange.toFixed(2)}`;
-            changeEl.className = `text-lg font-bold ${totalChange >= 0 ? 'text-green-400' : 'text-red-400'}`;
+            changeEl.className = `text-l3 font-bold ${totalChange >= 0 ? 'text-green-400' : 'text-red-400'}`;
             document.body.classList.toggle('mood-down', totalChange < 0);
 
             // Update change label based on current time range

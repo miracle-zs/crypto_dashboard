@@ -82,10 +82,23 @@
 
         .metric-label {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.72rem;
+            font-size: clamp(0.68rem, 0.8vw, 0.75rem);
             text-transform: uppercase;
             letter-spacing: 0.1em;
             color: #64748b;
+        }
+
+        .text-l1 {
+            font-size: clamp(2.75rem, 3vw, 3rem);
+            line-height: 1;
+        }
+        .text-l2 {
+            font-size: clamp(1.5rem, 2.2vw, 1.75rem);
+            line-height: 1.1;
+        }
+        .text-l3 {
+            font-size: clamp(1.125rem, 1.8vw, 1.25rem);
+            line-height: 1.2;
         }
 
         .section-label {
@@ -119,6 +132,21 @@
             min-height: 110px;
             cursor: pointer;
             transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .kpi-primary {
+            min-height: 140px;
+            box-shadow: 0 0 24px rgba(14, 165, 233, 0.35);
+            border: 1px solid rgba(14, 165, 233, 0.4);
+        }
+        .kpi-secondary {
+            min-height: 110px;
+            box-shadow: 0 0 12px rgba(14, 165, 233, 0.2);
+        }
+        .kpi-small {
+            min-height: 90px;
+        }
+        .chart-card {
+            min-height: 200px;
         }
         .kpi-card.kpi-muted {
             opacity: 0.35;
@@ -181,11 +209,11 @@
         
         <div class="lg:col-span-4 space-y-6">
             <div class="section-label">CORE METRICS</div>
-            <div class="cyber-panel rounded-xl p-6 panel-reveal kpi-card">
+            <div class="cyber-panel rounded-xl p-6 panel-reveal kpi-card kpi-primary">
                 <div class="flex justify-between items-start mb-4">
                     <div>
                         <div class="metric-label">Total Equity</div>
-                        <div class="text-5xl font-bold text-white mt-1 tracking-tight" id="disp-balance">$Loading</div>
+                        <div class="text-l1 font-bold text-white mt-1 tracking-tight" id="disp-balance">$Loading</div>
                     </div>
                     <i data-lucide="wallet" class="text-gray-600"></i>
                 </div>
@@ -193,11 +221,11 @@
                 <div class="flex gap-4">
                     <div>
                         <div class="metric-label">Net PnL</div>
-                        <div class="text-2xl font-bold pulse-text" id="disp-pnl">--</div>
+                        <div class="text-l2 font-bold pulse-text" id="disp-pnl">--</div>
                     </div>
                     <div>
                         <div class="metric-label">ROI</div>
-                        <div class="text-2xl font-bold" id="disp-roi">--%</div>
+                        <div class="text-l2 font-bold" id="disp-roi">--%</div>
                     </div>
                 </div>
                 
@@ -208,31 +236,31 @@
             </div>
 
             <div class="grid grid-cols-2 gap-4">
-                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card">
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card kpi-secondary">
                     <div class="metric-label text-purple-400">Kelly Criterion <span class="text-gray-600">凯利公式</span></div>
-                    <div class="text-2xl font-bold text-white mt-2" id="metric-kelly">--%</div>
+                    <div class="text-l2 font-bold text-white mt-2" id="metric-kelly">--%</div>
                     <div class="text-[11px] text-gray-500 mt-1">建议仓位比例</div>
                 </div>
-                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card">
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card kpi-secondary">
                     <div class="metric-label text-yellow-400">System Quality (SQN) <span class="text-gray-600">系统质量</span></div>
-                    <div class="text-2xl font-bold text-white mt-2" id="metric-sqn">--</div>
+                    <div class="text-l2 font-bold text-white mt-2" id="metric-sqn">--</div>
                     <div class="text-[11px] text-gray-500 mt-1">>2.0 = 优秀</div>
                 </div>
             </div>
             
-            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center panel-reveal kpi-card">
+            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center panel-reveal kpi-card kpi-secondary">
                 <div>
                     <div class="metric-label">Current Streak <span class="text-gray-600">连胜/连败</span></div>
-                    <div class="text-lg font-bold text-white mt-1" id="metric-streak">--</div>
+                    <div class="text-l3 font-bold text-white mt-1" id="metric-streak">--</div>
                 </div>
                 <div class="text-right">
                     <div class="metric-label">Expectancy (EV) <span class="text-gray-600">单笔期望</span></div>
-                    <div class="text-lg font-bold text-blue-400 mt-1" id="metric-ev">--</div>
+                    <div class="text-l3 font-bold text-blue-400 mt-1" id="metric-ev">--</div>
                 </div>
             </div>
 
             <!-- Daily Trade Stats Chart -->
-            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card">
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card chart-card">
                 <div class="flex justify-between items-center mb-2">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
                         <i data-lucide="bar-chart-3" class="mr-2 w-4 h-4 text-cyan-400"></i> DAILY TRADES
@@ -243,7 +271,7 @@
             </div>
 
             <!-- Monthly Target Progress -->
-            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card">
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card chart-card">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="text-sm font-bold text-gray-300 flex items-center">
                         <i data-lucide="target" class="mr-2 w-4 h-4 text-emerald-400"></i> MONTHLY TARGET
@@ -255,11 +283,11 @@
                 <div class="flex justify-between items-end mb-2">
                     <div>
                         <div class="text-[11px] text-gray-500">本月盈亏 (UTC+8)</div>
-                        <div class="text-2xl font-bold" id="monthly-current">$0</div>
+                        <div class="text-l2 font-bold" id="monthly-current">$0</div>
                     </div>
                     <div class="text-right">
                         <div class="text-[11px] text-gray-500">目标</div>
-                        <div class="text-lg font-bold text-gray-400" id="monthly-target">$30,000</div>
+                        <div class="text-l3 font-bold text-gray-400" id="monthly-target">$30,000</div>
                     </div>
                 </div>
                 <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
@@ -338,26 +366,26 @@
 
     <div class="section-label mb-4 relative z-10">STRATEGY METRICS</div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-10">
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500 panel-reveal kpi-card">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500 panel-reveal kpi-card kpi-small">
             <div class="metric-label">Win Rate <span class="text-gray-600">胜率</span></div>
-            <div class="text-3xl font-bold text-white mt-1" id="metric-winrate">--%</div>
+            <div class="text-l2 font-bold text-white mt-1" id="metric-winrate">--%</div>
             <div class="w-full bg-gray-800 h-1 mt-2 rounded overflow-hidden">
                 <div id="bar-winrate" class="bg-blue-500 h-full" style="width: 0%"></div>
             </div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500 panel-reveal kpi-card">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-yellow-500 panel-reveal kpi-card kpi-small">
             <div class="metric-label">R/R Ratio <span class="text-gray-600">盈亏比</span></div>
-            <div class="text-3xl font-bold text-white mt-1" id="metric-rr">--</div>
+            <div class="text-l2 font-bold text-white mt-1" id="metric-rr">--</div>
             <div class="text-[11px] text-gray-500 mt-1">Target: > 1.5</div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500 panel-reveal kpi-card">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-green-500 panel-reveal kpi-card kpi-small">
             <div class="metric-label">Profit Factor <span class="text-gray-600">盈利因子</span></div>
-            <div class="text-3xl font-bold text-white mt-1" id="metric-pf">--</div>
+            <div class="text-l2 font-bold text-white mt-1" id="metric-pf">--</div>
             <div class="text-[11px] text-gray-500 mt-1">Gross Win / Gross Loss</div>
         </div>
-        <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500 panel-reveal kpi-card">
+        <div class="cyber-panel rounded-lg p-4 border-t-2 border-red-500 panel-reveal kpi-card kpi-small">
             <div class="metric-label">Max Single Loss <span class="text-gray-600">单笔最大亏损</span></div>
-            <div class="text-3xl font-bold text-red-400 mt-1" id="metric-mdd">--</div>
+            <div class="text-l2 font-bold text-red-400 mt-1" id="metric-mdd">--</div>
             <div class="text-[11px] text-gray-500 mt-1">单笔最大亏损额</div>
         </div>
     </div>
@@ -435,13 +463,13 @@
 
             const pnlEl = document.getElementById('disp-pnl');
             pnlEl.innerText = `${stats.total_pnl > 0 ? '+' : ''}$${stats.total_pnl.toLocaleString()}`;
-            pnlEl.className = `text-2xl font-bold pulse-text ${stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-500'}`;
+            pnlEl.className = `text-l2 font-bold pulse-text ${stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
             // ROI Calculation - uses a fixed initial capital based on the UI text
             const initialCapital = 24000; 
             const roi = initialCapital > 0 ? (stats.total_pnl / initialCapital) * 100 : 0;
             document.getElementById('disp-roi').innerText = `${roi.toFixed(2)}%`;
-            document.getElementById('disp-roi').className = `text-2xl font-bold ${roi >= 0 ? 'text-green-400' : 'text-red-500'}`;
+            document.getElementById('disp-roi').className = `text-l2 font-bold ${roi >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
             document.getElementById('disp-fees').innerText = `$${stats.total_fees}`;
             document.getElementById('disp-wins').innerText = stats.win_count;
@@ -452,10 +480,10 @@
             document.getElementById('bar-winrate').style.width = stats.win_rate + '%';
 
             document.getElementById('metric-rr').innerText = stats.risk_reward_ratio.toFixed(2);
-            document.getElementById('metric-rr').className = `text-3xl font-bold mt-1 ${stats.risk_reward_ratio >= 1.5 ? 'text-yellow-400' : 'text-gray-500'}`;
+            document.getElementById('metric-rr').className = `text-l2 font-bold mt-1 ${stats.risk_reward_ratio >= 1.5 ? 'text-yellow-400' : 'text-gray-500'}`;
 
             document.getElementById('metric-pf').innerText = stats.profit_factor.toFixed(2);
-            document.getElementById('metric-pf').className = `text-3xl font-bold mt-1 ${stats.profit_factor >= 2 ? 'text-green-400' : 'text-gray-400'}`;
+            document.getElementById('metric-pf').className = `text-l2 font-bold mt-1 ${stats.profit_factor >= 2 ? 'text-green-400' : 'text-gray-400'}`;
 
             document.getElementById('metric-ev').innerText = `$${stats.expected_value.toFixed(0)}`;
 
@@ -463,7 +491,7 @@
             const kellyPct = (stats.kelly_criterion * 100).toFixed(1);
             const kellyEl = document.getElementById('metric-kelly');
             kellyEl.innerText = stats.kelly_criterion > 0 ? `${kellyPct}%` : '0%';
-            kellyEl.className = `text-2xl font-bold mt-2 ${stats.kelly_criterion > 0.2 ? 'text-purple-400' : 'text-gray-500'}`;
+            kellyEl.className = `text-l2 font-bold mt-2 ${stats.kelly_criterion > 0.2 ? 'text-purple-400' : 'text-gray-500'}`;
 
             // SQN
             const sqnEl = document.getElementById('metric-sqn');
@@ -472,12 +500,12 @@
             if (stats.sqn > 1.6) sqnColor = 'text-blue-400'; // Average
             if (stats.sqn > 2.0) sqnColor = 'text-green-400'; // Good
             if (stats.sqn > 3.0) sqnColor = 'text-purple-400'; // Holy Grail
-            sqnEl.className = `text-2xl font-bold mt-2 ${sqnColor}`;
+            sqnEl.className = `text-l2 font-bold mt-2 ${sqnColor}`;
 
             // Streak & Drawdown
             const streakEl = document.getElementById('metric-streak');
             streakEl.innerText = stats.current_streak > 0 ? `+${stats.current_streak} W` : `${stats.current_streak} L`;
-            streakEl.className = `text-lg font-bold mt-1 ${stats.current_streak > 0 ? 'text-green-400' : 'text-red-500'}`;
+            streakEl.className = `text-l3 font-bold mt-1 ${stats.current_streak > 0 ? 'text-green-400' : 'text-red-500'}`;
 
             document.getElementById('metric-mdd').innerText = `-$${stats.max_drawdown}`;
 
@@ -528,7 +556,7 @@
                 },
                 series: [{ name: 'Equity', data: dataPoints }],
                 theme: { mode: 'dark' },
-                stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
+                stroke: { curve: 'smooth', width: 2.5, colors: ['#0ea5e9'] },
                 fill: {
                     type: 'gradient',
                     gradient: {
@@ -955,7 +983,7 @@
 
             // 更新显示
             currentEl.innerText = `$${current.toLocaleString()}`;
-            currentEl.className = `text-2xl font-bold ${current >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+            currentEl.className = `text-l2 font-bold ${current >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
 
             targetEl.innerText = `$${target.toLocaleString()}`;
             progressBar.style.width = `${progress}%`;
