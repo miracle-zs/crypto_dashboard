@@ -597,13 +597,14 @@ class Database:
         conn.close()
 
     def get_monthly_pnl(self) -> float:
-        """获取本月盈亏"""
+        """获取本月盈亏 (北京时间)"""
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # 获取本月第一天的日期格式 YYYYMM01
-        from datetime import datetime
-        now = datetime.now()
+        # 获取本月第一天的日期格式 YYYYMM01 (UTC+8)
+        from datetime import datetime, timezone, timedelta
+        utc8 = timezone(timedelta(hours=8))
+        now = datetime.now(utc8)
         month_start = now.strftime('%Y%m01')
 
         cursor.execute("""

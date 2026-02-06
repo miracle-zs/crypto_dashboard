@@ -18,6 +18,9 @@ from app.logger import logger
 
 load_dotenv()
 
+# 定义UTC+8时区
+UTC8 = timezone(timedelta(hours=8))
+
 
 class TradeDataScheduler:
     """交易数据定时更新调度器"""
@@ -63,29 +66,29 @@ class TradeDataScheduler:
             if self.start_date:
                 # 使用自定义起始日期
                 try:
-                    start_dt = datetime.strptime(self.start_date, '%Y-%m-%d')
+                    start_dt = datetime.strptime(self.start_date, '%Y-%m-%d').replace(tzinfo=UTC8)
                     start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
                     since = int(start_dt.timestamp() * 1000)
                     logger.info(f"全量更新模式 - 从自定义日期 {self.start_date} 开始")
                 except ValueError as e:
                     logger.error(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
-                    since = int((datetime.now() - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+                    since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
             else:
                 # 使用DAYS_TO_FETCH
                 logger.info(f"全量更新模式 - 获取最近 {self.days_to_fetch} 天数据")
-                since = int((datetime.now() - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+                since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
 
             # 计算结束时间
             if self.end_date:
                 try:
-                    end_dt = datetime.strptime(self.end_date, '%Y-%m-%d')
+                    end_dt = datetime.strptime(self.end_date, '%Y-%m-%d').replace(tzinfo=UTC8)
                     end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
                     until = int(end_dt.timestamp() * 1000)
                     logger.info(f"使用自定义结束日期: {self.end_date}")
                 except ValueError:
-                    until = int(datetime.now().timestamp() * 1000)
+                    until = int(datetime.now(UTC8).timestamp() * 1000)
             else:
-                until = int(datetime.now().timestamp() * 1000)
+                until = int(datetime.now(UTC8).timestamp() * 1000)
 
             # 从Binance获取数据
             logger.info("从Binance API抓取数据...")
@@ -134,7 +137,7 @@ class TradeDataScheduler:
             return  # 如果没有配置API密钥，则不执行
 
         try:
-            logger.debug("尝试同步账户余额...")
+            logger.info("开始同步账户余额...")
             # balance_info returns {'margin_balance': float, 'wallet_balance': float}
             balance_info = self.analyzer.get_account_balance()
 
@@ -144,6 +147,7 @@ class TradeDataScheduler:
 
                 # --- 自动检测出入金逻辑 ---
                 try:
+                    logger.info("开始检测出入金...")
                     # 获取最近一条记录进行对比
                     history = self.db.get_balance_history(limit=1)
                     if history:
@@ -183,13 +187,15 @@ class TradeDataScheduler:
                             if abs(transfer_est) > 1000:
                                 logger.warning(f"监测到资金异动: 钱包变动 {wallet_diff:.2f}, 交易流 {trading_flow:.2f}, 差额 {transfer_est:.2f}")
                                 self.db.save_transfer(amount=transfer_est, type='auto', description="Auto-detected > 1000U")
+                            else:
+                                logger.info(f"未发现明显出入金: 差额 {transfer_est:.2f}")
 
                 except Exception as e:
                     logger.warning(f"出入金检测出错: {e}")
 
                 # 保存当前状态
                 self.db.save_balance_history(current_margin, current_wallet)
-                logger.debug(f"余额已更新: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
+                logger.info(f"余额已更新: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
             else:
                 logger.warning("获取余额失败，balance为 None")
         except Exception as e:
