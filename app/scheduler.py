@@ -37,7 +37,7 @@ class TradeDataScheduler:
             self.analyzer = BinanceOrderAnalyzer(api_key, api_secret)
 
         self.days_to_fetch = int(os.getenv('DAYS_TO_FETCH', 30))
-        self.update_interval_minutes = int(os.getenv('UPDATE_INTERVAL_MINUTES', 10))
+        self.update_interval_minutes = int(os.getenv('UPDATE_INTERVAL_MINUTES', 15))
         self.start_date = os.getenv('START_DATE')  # 自定义起始日期
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
 

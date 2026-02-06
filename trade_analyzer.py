@@ -47,24 +47,42 @@ class BinanceOrderAnalyzer:
         if params is None:
             params = {}
 
-        params['timestamp'] = int(time.time() * 1000)
-        params['signature'] = self._generate_signature(params)
-
         url = f"{self.base_url}{endpoint}"
 
-        try:
-            if method == 'GET':
-                response = requests.get(url, headers=self.headers, params=params, timeout=30)
-            else:
-                response = requests.post(url, headers=self.headers, params=params, timeout=30)
+        max_retries = 4
+        backoff_seconds = 1
 
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response: {e.response.text}")
-            return None
+        for attempt in range(1, max_retries + 1):
+            params['timestamp'] = int(time.time() * 1000)
+            params['signature'] = self._generate_signature(params)
+
+            try:
+                if method == 'GET':
+                    response = requests.get(url, headers=self.headers, params=params, timeout=30)
+                else:
+                    response = requests.post(url, headers=self.headers, params=params, timeout=30)
+
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if e.response is not None else None
+                if status_code == 429 and attempt < max_retries:
+                    logger.warning(
+                        f"Rate limited (429) on {endpoint}. Backing off {backoff_seconds}s (attempt {attempt}/{max_retries})"
+                    )
+                    time.sleep(backoff_seconds)
+                    backoff_seconds *= 2
+                    continue
+
+                logger.error(f"API request failed: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    logger.error(f"Response: {e.response.text}")
+                return None
+            except requests.exceptions.RequestException as e:
+                logger.error(f"API request failed: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    logger.error(f"Response: {e.response.text}")
+                return None
 
     def get_recent_financial_flow(self, start_time: int) -> float:
         """
