@@ -78,7 +78,18 @@ BINANCE_API_SECRET=YOUR_API_SECRET
 # 如果不设置，默认为最近30天
 # START_DATE=2023-01-01
 # END_DATE=2023-12-31
+
+# (可选) 同步配置
+# 交易同步间隔(分钟)，默认15
+# UPDATE_INTERVAL_MINUTES=15
+# 同步天数，默认30
+# DAYS_TO_FETCH=30
+
+# (可选) Binance 全局请求限速(秒)，默认0.3
+# BINANCE_MIN_REQUEST_INTERVAL=0.3
 ```
+
+> 时间说明：交易同步时间窗口与月度统计按北京时间(UTC+8)计算。
 
 ### 5. (可选) 网络代理配置
 
