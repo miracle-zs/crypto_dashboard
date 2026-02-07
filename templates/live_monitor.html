@@ -353,10 +353,10 @@
         }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8 relative theme-brutal">
+<body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
-    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8 relative z-10">
-        <div class="flex flex-col gap-3">
+    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-10">
+        <div class="flex flex-col gap-3 text-center lg:text-left">
             <div class="status-pill">
                 <span class="status-dot"></span>
                 SYSTEM ONLINE
@@ -366,13 +366,13 @@
                 <div class="brand-sub">CRYPTO SHORTING COCKPIT · MONITOR</div>
             </div>
         </div>
-        <nav class="flex items-center flex-wrap gap-3 text-sm">
+        <nav class="flex items-center flex-wrap gap-3 text-sm justify-center lg:justify-start w-full lg:w-auto">
             <a href="/" class="nav-link">TRADES</a>
             <a href="/live-monitor" class="nav-link active">MONITOR</a>
             <a href="/metrics" class="nav-link">METRICS</a>
             <a href="/logs" class="nav-link">LOGS</a>
         </nav>
-        <div class="text-right space-y-2">
+        <div class="text-center lg:text-right space-y-2">
             <div class="panel-meta">Trading Philosophy</div>
             <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
@@ -415,7 +415,7 @@
                 </div>
 
                 <div class="relative z-10">
-                    <div class="flex items-end justify-between gap-4">
+                    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 sm:gap-4">
                         <div>
                             <div class="text-[11px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
                             <div class="text-l1 font-bold text-white tracking-tighter" id="disp-dd">0.00%</div>
@@ -440,11 +440,11 @@
                     </div>
                 </div>
 
-                <div class="mt-5 text-[11px] text-gray-500 flex items-center justify-between gap-4 relative z-10">
+                <div class="mt-5 text-[11px] text-gray-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-4 relative z-10">
                     <div>DD Amount <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-amount">-$0.00</span></div>
                     <div>DD Duration <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-duration">0m</span></div>
                 </div>
-                <div class="mt-2 text-[11px] text-gray-500 flex items-center justify-between gap-4 relative z-10">
+                <div class="mt-2 text-[11px] text-gray-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-4 relative z-10">
                     <div>Max DD <span class="text-orange-600 font-mono text-[12px] ml-1" id="disp-max-dd">0.00%</span></div>
                     <div>Last Recovery <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-recovery">--</span></div>
                 </div>
@@ -481,7 +481,7 @@
                             <button id="btn-view-balance" class="px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
                         </div>
 
-                        <div class="flex justify-center gap-1 text-[11px] w-full md:w-auto">
+                        <div class="flex flex-wrap justify-center gap-1 text-[11px] w-full md:w-auto">
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1w">1W</button>
@@ -490,7 +490,7 @@
                         </div>
                     </div>
                 </div>
-                <div id="chart-container" class="flex-1 w-full min-h-[300px]"></div>
+                <div id="chart-container" class="flex-1 w-full min-h-[240px] sm:min-h-[280px] md:min-h-[300px]"></div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -333,10 +333,10 @@
 
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8 relative theme-brutal">
+<body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
-    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8 relative z-10">
-        <div class="flex flex-col gap-3">
+    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-10">
+        <div class="flex flex-col gap-3 text-center lg:text-left">
             <div class="status-pill">
                 <span class="status-dot"></span>
                 SYSTEM ONLINE
@@ -346,13 +346,13 @@
                 <div class="brand-sub">CRYPTO SHORTING COCKPIT · METRICS</div>
             </div>
         </div>
-        <nav class="flex items-center flex-wrap gap-3 text-sm">
+        <nav class="flex items-center flex-wrap gap-3 text-sm justify-center lg:justify-start w-full lg:w-auto">
             <a href="/" class="nav-link">TRADES</a>
             <a href="/live-monitor" class="nav-link">MONITOR</a>
             <a href="/metrics" class="nav-link active">METRICS</a>
             <a href="/logs" class="nav-link">LOGS</a>
         </nav>
-        <div class="text-right space-y-2">
+        <div class="text-center lg:text-right space-y-2">
             <div class="panel-meta">Trading Philosophy</div>
             <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
         </div>
@@ -371,7 +371,7 @@
 
         <!-- Row 1: Kelly Criterion + Current Streak (两个高卡片) -->
         <!-- Kelly Criterion -->
-        <div class="doc-card panel-reveal rounded-xl p-6 relative overflow-hidden group" style="border-left-color: #a855f7;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6 relative overflow-hidden group" style="border-left-color: #a855f7;">
             <div class="absolute top-0 right-0 p-4 opacity-10">
                 <i data-lucide="calculator" class="w-24 h-24 text-purple-400"></i>
             </div>
@@ -399,7 +399,7 @@
         </div>
 
         <!-- Current Streak -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #f97316;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f97316;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="zap"></i></div>
                 <h2 class="text-l2 font-bold">Current Streak <span class="text-gray-500 text-sm">连胜/连败</span></h2>
@@ -423,7 +423,7 @@
 
         <!-- Row 2: Profit Factor + Max Single Loss (两个中等卡片，都有列表) -->
         <!-- Profit Factor -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #10b981;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #10b981;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-green-500/10 rounded text-green-400"><i data-lucide="trending-up"></i></div>
                 <h2 class="text-l2 font-bold">Profit Factor <span class="text-gray-500 text-sm">盈利因子</span></h2>
@@ -445,7 +445,7 @@
         </div>
 
         <!-- Max Single Loss -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #ef4444;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #ef4444;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="alert-triangle"></i></div>
                 <h2 class="text-l2 font-bold">Max Single Loss <span class="text-gray-500 text-sm">单笔最大亏损</span></h2>
@@ -467,7 +467,7 @@
 
         <!-- Row 3: SQN + Win Rate & R/R (两个有评级格子的中等卡片) -->
         <!-- SQN -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #facc15;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #facc15;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-yellow-500/10 rounded text-yellow-400"><i data-lucide="award"></i></div>
                 <h2 class="text-l2 font-bold">System Quality (SQN) <span class="text-gray-500 text-sm">系统质量</span></h2>
@@ -498,7 +498,7 @@
         </div>
 
         <!-- Win Rate & R/R Ratio -->
-        <div class="doc-card panel-reveal rounded-xl p-6">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-blue-500/10 rounded text-blue-400"><i data-lucide="scale"></i></div>
                 <h2 class="text-l2 font-bold">Win Rate & R/R Ratio <span class="text-gray-500 text-sm">胜率与盈亏比</span></h2>
@@ -524,7 +524,7 @@
 
         <!-- Row 4: Expectancy + ROI (两个简短卡片) -->
         <!-- Expectancy -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #ec4899;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #ec4899;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-pink-500/10 rounded text-pink-400"><i data-lucide="crosshair"></i></div>
                 <h2 class="text-l2 font-bold">Expectancy (EV) <span class="text-gray-500 text-sm">单笔期望</span></h2>
@@ -544,7 +544,7 @@
         </div>
 
         <!-- ROI -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #06b6d4;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #06b6d4;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-cyan-500/10 rounded text-cyan-400"><i data-lucide="percent"></i></div>
                 <h2 class="text-l2 font-bold">ROI <span class="text-gray-500 text-sm">投资回报率</span></h2>
@@ -578,7 +578,7 @@
 
         <!-- Row 1: Drawdown + Health Score (两个高卡片，都有详细说明列表) -->
         <!-- Drawdown -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #ef4444;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #ef4444;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="trending-down"></i></div>
                 <h2 class="text-l2 font-bold">Drawdown <span class="text-gray-500 text-sm">回撤</span></h2>
@@ -604,7 +604,7 @@
         </div>
 
         <!-- Health Score -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #10b981;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #10b981;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-emerald-500/10 rounded text-emerald-400"><i data-lucide="heart-pulse"></i></div>
                 <h2 class="text-l2 font-bold">Health Score <span class="text-gray-500 text-sm">账户健康度</span></h2>
@@ -630,7 +630,7 @@
 
         <!-- Row 2: Sharpe + Calmar (两个有评级格子的中等卡片) -->
         <!-- Sharpe Ratio -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #3b82f6;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #3b82f6;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-blue-500/10 rounded text-blue-400"><i data-lucide="line-chart"></i></div>
                 <h2 class="text-l2 font-bold">Sharpe Ratio <span class="text-gray-500 text-sm">夏普比率</span></h2>
@@ -661,7 +661,7 @@
         </div>
 
         <!-- Calmar Ratio -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #f97316;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f97316;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="flame"></i></div>
                 <h2 class="text-l2 font-bold">Calmar Ratio <span class="text-gray-500 text-sm">卡玛比率</span></h2>
@@ -693,7 +693,7 @@
 
         <!-- Row 3: Volatility + Alpha Velocity (两个中等卡片) -->
         <!-- Volatility -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #a855f7;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #a855f7;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-purple-500/10 rounded text-purple-400"><i data-lucide="waves"></i></div>
                 <h2 class="text-l2 font-bold">Volatility <span class="text-gray-500 text-sm">波动率</span></h2>
@@ -714,7 +714,7 @@
         </div>
 
         <!-- Alpha Velocity -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #eab308;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #eab308;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-yellow-500/10 rounded text-yellow-400"><i data-lucide="rocket"></i></div>
                 <h2 class="text-l2 font-bold">Alpha Velocity <span class="text-gray-500 text-sm">收益速度</span></h2>
@@ -736,7 +736,7 @@
 
         <!-- Row 4: Win Rate (Time) + Peak Equity (两个简短卡片) -->
         <!-- Win Rate (Time) -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #10b981;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #10b981;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-emerald-500/10 rounded text-emerald-400"><i data-lucide="clock"></i></div>
                 <h2 class="text-l2 font-bold">Win Rate (Time) <span class="text-gray-500 text-sm">时间胜率</span></h2>
@@ -756,7 +756,7 @@
         </div>
 
         <!-- Peak Equity -->
-        <div class="doc-card panel-reveal rounded-xl p-6" style="border-left-color: #06b6d4;">
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #06b6d4;">
             <div class="flex items-center gap-3 mb-4">
                 <div class="p-2 bg-cyan-500/10 rounded text-cyan-400"><i data-lucide="mountain"></i></div>
                 <h2 class="text-l2 font-bold">Peak Equity <span class="text-gray-500 text-sm">峰值净值</span></h2>
@@ -786,7 +786,7 @@
         </h2>
     </div>
 
-    <div class="doc-card panel-reveal rounded-xl p-6 mb-12" style="border-left-color: #ef4444;">
+    <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6 mb-12" style="border-left-color: #ef4444;">
         <div class="flex items-center gap-3 mb-4">
             <div class="p-2 bg-red-500/10 rounded text-red-400"><i data-lucide="calculator"></i></div>
             <h2 class="text-l2 font-bold">加仓推演表 <span class="text-gray-500 text-sm">Averaging Down Strategy</span></h2>
