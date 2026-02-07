@@ -10,7 +10,6 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 
     <style>
-
         :root {
             --bg: #f7f3ea;
             --panel: #fffdf8;
@@ -319,7 +318,40 @@
             border-color: rgba(17, 24, 39, 0.8);
         }
 
-</style>
+        .metric-card {
+            min-height: 110px;
+        }
+
+        #chart-container {
+            transition: opacity 150ms ease;
+        }
+        #chart-container.fade-swap {
+            opacity: 0.4;
+        }
+
+        .risk-pill {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 9999px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+        .risk-safe {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+        .risk-caution {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+        .risk-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+    </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 relative theme-brutal">
 
@@ -373,37 +405,48 @@
                 <!-- Decorative Background -->
                 <div class="absolute -right-6 -top-6 w-24 h-24 bg-red-500/10 rounded-full blur-xl pointer-events-none"></div>
 
-                <div class="text-gray-500 text-xs uppercase tracking-wider flex justify-between items-center mb-4 relative z-10">
-                    <span class="flex items-center gap-2">
+                <div class="flex items-center justify-between mb-5 relative z-10">
+                    <div class="text-gray-500 text-xs uppercase tracking-wider flex items-center gap-2">
                         <div class="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
-                        Risk Monitor
-                    </span>
-                    <i data-lucide="shield-alert" class="w-4 h-4 text-red-500"></i>
+                        <span>Risk Monitor</span>
+                        <span class="text-[10px] text-gray-400">live</span>
+                    </div>
+                    <span id="disp-dd-status" class="risk-pill risk-safe">SAFE</span>
                 </div>
 
-                <div class="relative z-10 mb-6">
-                    <div class="text-[11px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
-                    <div class="flex items-baseline gap-2">
-                        <span class="text-l1 font-bold text-white tracking-tighter" id="disp-dd">0.00%</span>
-                        <span class="text-xs text-gray-500">/ 10% Limit</span>
+                <div class="relative z-10">
+                    <div class="flex items-end justify-between gap-4">
+                        <div>
+                            <div class="text-[11px] text-red-400 mb-1">CURRENT DRAWDOWN</div>
+                            <div class="text-l1 font-bold text-white tracking-tighter" id="disp-dd">0.00%</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-[11px] text-gray-500 mb-1">LIMIT</div>
+                            <div class="text-l3 font-bold text-gray-300"><span id="disp-dd-limit">10.0%</span></div>
+                        </div>
                     </div>
-                    <!-- Progress Bar -->
-                    <div class="w-full bg-slate-800/50 h-2 rounded-full mt-2 overflow-hidden border border-slate-700/50 relative">
-                        <!-- Warning Zone Pattern -->
-                        <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(45deg, #000 25%, transparent 25%, transparent 50%, #000 50%, #000 75%, transparent 75%, transparent); background-size: 4px 4px;"></div>
-                        <div id="bar-dd" class="bg-gradient-to-r from-orange-500 to-red-600 h-full w-0 transition-all duration-500 shadow-[0_0_10px_rgba(220,38,38,0.5)]"></div>
+                    <div class="mt-3">
+                        <div class="w-full bg-slate-800/50 h-2 rounded-full overflow-hidden border border-slate-700/50 relative">
+                            <!-- Warning Zone Pattern -->
+                            <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(45deg, #000 25%, transparent 25%, transparent 50%, #000 50%, #000 75%, transparent 75%, transparent); background-size: 4px 4px;"></div>
+                            <div id="bar-dd" class="h-full w-0 transition-all duration-500"></div>
+                        </div>
+                        <div class="mt-2 flex justify-between text-[10px] text-gray-500">
+                            <span>0</span>
+                            <span>50</span>
+                            <span>80</span>
+                            <span>100</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 border-t border-gray-800 pt-4 relative z-10">
-                    <div>
-                        <div class="text-[11px] text-gray-500 mb-1">PEAK EQUITY</div>
-                        <div class="text-sm font-bold text-gray-300 font-mono" id="disp-peak">$24,000</div>
-                    </div>
-                    <div class="text-right">
-                         <div class="text-[11px] text-gray-500 mb-1">MAX DD (PERIOD)</div>
-                         <div class="text-sm font-bold text-orange-400 font-mono" id="disp-max-dd">0.00%</div>
-                    </div>
+                <div class="mt-5 text-[11px] text-gray-500 flex items-center justify-between gap-4 relative z-10">
+                    <div>DD Amount <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-amount">-$0.00</span></div>
+                    <div>DD Duration <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-duration">0m</span></div>
+                </div>
+                <div class="mt-2 text-[11px] text-gray-500 flex items-center justify-between gap-4 relative z-10">
+                    <div>Max DD <span class="text-orange-600 font-mono text-[12px] ml-1" id="disp-max-dd">0.00%</span></div>
+                    <div>Last Recovery <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-recovery">--</span></div>
                 </div>
             </div>
 
@@ -521,12 +564,14 @@
         // 1. Configuration & State
         // -------------------------------------
         const UPDATE_INTERVAL = 60000; // 60 seconds
+        const DD_LIMIT_PCT = 10;
         let balanceData = []; // Array of {time, value, cumulative_equity}
         let chart;
         let lastFetchTime = 0;
         let currentTimeRange = '1d'; // Default time range
         let currentView = 'equity'; // Default view: 'equity' (cumulative) or 'balance' (actual)
         let lastRequestedTimeRange = '';
+        let maxDDWindow = null;
 
         const timeRangeButtons = document.querySelectorAll('.time-range-btn');
         const btnViewEquity = document.getElementById('btn-view-equity');
@@ -619,10 +664,51 @@
 
             const initialEquity = metricData[0].val;
             const currentEquity = metricData[metricData.length - 1].val;
-            const peakEquity = Math.max(...metricData.map(d => d.val));
+
+            let peakEquity = metricData[0].val;
+            let peakTime = metricData[0].time;
+            let currentDDStart = null;
+
+            let maxDDRatio = 0;
+            let maxDDPeakTime = null;
+            let maxDDPeakVal = null;
+            let maxDDTroughTime = null;
+
+            for (const d of metricData) {
+                if (d.val > peakEquity) {
+                    peakEquity = d.val;
+                    peakTime = d.time;
+                    currentDDStart = null;
+                } else if (d.val < peakEquity) {
+                    if (currentDDStart === null) currentDDStart = peakTime;
+                } else {
+                    currentDDStart = null;
+                }
+
+                const ddRatio = peakEquity > 0 ? (peakEquity - d.val) / peakEquity : 0;
+                if (ddRatio > maxDDRatio) {
+                    maxDDRatio = ddRatio;
+                    maxDDPeakTime = peakTime;
+                    maxDDPeakVal = peakEquity;
+                    maxDDTroughTime = d.time;
+                }
+            }
 
             // 1. Drawdown (Current) - Based on Equity
-            const drawdown = ((peakEquity - currentEquity) / peakEquity) * 100;
+            const drawdown = peakEquity > 0 ? ((peakEquity - currentEquity) / peakEquity) * 100 : 0;
+            const maxDD = maxDDRatio * 100;
+            const lastTime = metricData[metricData.length - 1].time;
+            const ddMinutes = currentDDStart ? Math.max(0, Math.round((lastTime - currentDDStart) / 60000)) : 0;
+
+            let recoveryMinutes = null;
+            if (maxDDPeakTime !== null && maxDDPeakVal !== null) {
+                for (const d of metricData) {
+                    if (d.time > maxDDPeakTime && d.val > maxDDPeakVal) {
+                        recoveryMinutes = Math.max(0, Math.round((d.time - maxDDPeakTime) / 60000));
+                        break;
+                    }
+                }
+            }
 
             // 2. Velocity - Based on Equity
             let velocity = 0;
@@ -638,16 +724,11 @@
             // 3. Volatility & Performance Metrics - Based on Equity
             let volatility = 0;
             let sharpe = 0, calmar = 0, winRate = 0;
-            let maxDD = 0; // Period Max DD
-
-            // Calculate Period Max DD on Equity
-            let tempPeak = -Infinity;
-            for (let d of metricData) {
-                if (d.val > tempPeak) tempPeak = d.val;
-                let cdd = (tempPeak - d.val) / tempPeak;
-                if (cdd > maxDD) maxDD = cdd;
+            if (maxDDRatio > 0 && maxDDPeakTime !== null && maxDDTroughTime !== null) {
+                maxDDWindow = { start: maxDDPeakTime, end: maxDDTroughTime };
+            } else {
+                maxDDWindow = null;
             }
-            maxDD = maxDD * 100;
 
             if (metricData.length > 1) {
                 const returns = [];
@@ -694,14 +775,26 @@
             let score = 100 - (drawdown * 5) - (volatility * 2);
             score = Math.max(0, Math.min(100, score));
 
-            updateUI({ initialBalance, currentBalance, peakBalance: peakEquity }, drawdown, maxDD, velocity, volatility, score, sharpe, calmar, winRate);
+            updateUI(
+                { initialBalance, currentBalance, peakBalance: peakEquity },
+                drawdown,
+                maxDD,
+                ddMinutes,
+                recoveryMinutes,
+                velocity,
+                volatility,
+                score,
+                sharpe,
+                calmar,
+                winRate
+            );
             updateChart();
         }
 
         // -------------------------------------
         // 4. UI Update
         // -------------------------------------
-        function updateUI(balances, dd, maxDD, vel, vol, score, sharpe, calmar, winRate) {
+        function updateUI(balances, dd, maxDD, ddMinutes, recoveryMinutes, vel, vol, score, sharpe, calmar, winRate) {
             // Main balance and change
             document.getElementById('disp-balance').innerText = `$${balances.currentBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
             const totalChange = balances.currentBalance - balances.initialBalance;
@@ -715,10 +808,67 @@
             document.getElementById('disp-change-label').innerText = `${rangeLabelMap[currentTimeRange] || '1D'} Change`;
 
             // Risk monitor
-            document.getElementById('disp-peak').innerText = `$${balances.peakBalance.toFixed(2)}`;
-            document.getElementById('disp-dd').innerText = `${dd.toFixed(2)}%`;
+            const ddLimitEl = document.getElementById('disp-dd-limit');
+            if (ddLimitEl) ddLimitEl.innerText = `${DD_LIMIT_PCT.toFixed(1)}%`;
+
+            const ddRatio = DD_LIMIT_PCT > 0 ? dd / DD_LIMIT_PCT : 0;
+            const ddEl = document.getElementById('disp-dd');
+            if (ddEl) ddEl.innerText = `${dd.toFixed(2)}%`;
+
+            const statusEl = document.getElementById('disp-dd-status');
+            let statusText = 'SAFE';
+            let statusClass = 'risk-safe';
+            let ddColor = 'text-emerald-400';
+            if (ddRatio >= 1) {
+                statusText = 'STOP';
+                statusClass = 'risk-danger';
+                ddColor = 'text-red-400';
+            } else if (ddRatio >= 0.8) {
+                statusText = 'DANGER';
+                statusClass = 'risk-danger';
+                ddColor = 'text-red-400';
+            } else if (ddRatio >= 0.5) {
+                statusText = 'CAUTION';
+                statusClass = 'risk-caution';
+                ddColor = 'text-amber-400';
+            }
+
+            if (ddEl) ddEl.className = `text-l1 font-bold tracking-tighter ${ddColor}`;
+            if (statusEl) {
+                statusEl.innerText = statusText;
+                statusEl.className = `risk-pill ${statusClass} self-center`;
+            }
+
+            const bar = document.getElementById('bar-dd');
+            if (bar) {
+                const barPct = Math.min(Math.max(ddRatio * 100, 0), 100);
+                bar.style.width = `${barPct}%`;
+                let barGradient = 'linear-gradient(90deg, #10b981, #059669)';
+                let barGlow = '0 0 8px rgba(16, 185, 129, 0.4)';
+                if (ddRatio >= 1) {
+                    barGradient = 'linear-gradient(90deg, #dc2626, #b91c1c)';
+                    barGlow = '0 0 10px rgba(220, 38, 38, 0.6)';
+                } else if (ddRatio >= 0.8) {
+                    barGradient = 'linear-gradient(90deg, #f97316, #dc2626)';
+                    barGlow = '0 0 10px rgba(220, 38, 38, 0.45)';
+                } else if (ddRatio >= 0.5) {
+                    barGradient = 'linear-gradient(90deg, #f59e0b, #f97316)';
+                    barGlow = '0 0 8px rgba(245, 158, 11, 0.4)';
+                }
+                bar.style.background = barGradient;
+                bar.style.boxShadow = barGlow;
+            }
+
+            const ddAmountEl = document.getElementById('disp-dd-amount');
+            if (ddAmountEl) {
+                const ddAmount = Math.max(0, balances.peakBalance * (dd / 100));
+                ddAmountEl.innerText = `-$${ddAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+            const ddDurationEl = document.getElementById('disp-dd-duration');
+            if (ddDurationEl) ddDurationEl.innerText = formatMinutes(ddMinutes);
+            const ddRecoveryEl = document.getElementById('disp-dd-recovery');
+            if (ddRecoveryEl) ddRecoveryEl.innerText = formatMinutes(recoveryMinutes);
             if(document.getElementById('disp-max-dd')) document.getElementById('disp-max-dd').innerText = `${maxDD.toFixed(2)}%`;
-            document.getElementById('bar-dd').style.width = `${Math.min(dd, 100)}%`;
 
             // Metrics
             document.getElementById('disp-velocity').innerText = `$${vel.toFixed(2)}`;
@@ -765,6 +915,30 @@
                 }
                 return { x: d.time, y: currentView === 'percent' ? val.toFixed(4) : val.toFixed(2) };
             });
+
+            const ddAnnotation = maxDDWindow ? {
+                xaxis: [
+                    {
+                        x: maxDDWindow.start,
+                        x2: maxDDWindow.end,
+                        borderColor: '#dc2626',
+                        fillColor: 'rgba(220, 38, 38, 0.12)',
+                        opacity: 0.25,
+                        label: {
+                            text: 'MAX_DD',
+                            position: 'top',
+                            orientation: 'horizontal',
+                            offsetY: 2,
+                            style: {
+                                color: '#111827',
+                                background: '#fecaca',
+                                fontSize: '10px',
+                                fontWeight: 700
+                            }
+                        }
+                    }
+                ]
+            } : { xaxis: [] };
 
             // Determine y-axis formatter based on view
             const yAxisFormatter = currentView === 'percent'
@@ -814,6 +988,7 @@
                     },
                     dataLabels: { enabled: false },
                     grid: { borderColor: '#1e293b', strokeDashArray: 2 },
+                    annotations: ddAnnotation,
                     tooltip: {
                         x: {
                             formatter: function(value) {
@@ -834,7 +1009,8 @@
                 chart.render();
             } else {
                 chart.updateOptions({
-                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } }
+                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } },
+                    annotations: ddAnnotation
                 });
                 chart.updateSeries([{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }]);
             }
@@ -859,6 +1035,16 @@
 
             logEl.innerHTML += `<div class="terminal-text ${color}">${time} - ${message}</div>`;
             logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function formatMinutes(minutes) {
+            if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return '--';
+            if (minutes <= 0) return '0m';
+            const total = Math.round(minutes);
+            const h = Math.floor(total / 60);
+            const m = total % 60;
+            if (h <= 0) return `${m}m`;
+            return `${h}h ${m}m`;
         }
 
         function startUpdateCycle() {

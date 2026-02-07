@@ -10,7 +10,6 @@
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 
     <style>
-
         :root {
             --bg: #f7f3ea;
             --panel: #fffdf8;
@@ -309,9 +308,11 @@
             border-radius: 14px;
         }
 
-</style>
+    </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 relative theme-brutal">
+
+    <div class="scan-line"></div>
 
     <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8 relative z-10">
         <div class="flex flex-col gap-3">
@@ -337,124 +338,141 @@
         </div>
     </header>
 
-    <main class="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-8 relative z-10">
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal kpi-card kpi-primary xl:col-span-4">
-            <div class="panel-title mb-4">
-                <strong>Account Snapshot</strong>
-                <span class="panel-meta">USD-M Futures</span>
-            </div>
-            <div class="metric-label">Total Equity</div>
-            <div class="text-l1 font-semibold tracking-tight" id="disp-balance">$Loading</div>
-
-            <div class="mt-5 grid grid-cols-2 gap-4">
-                <div>
-                    <div class="metric-label">Net PnL</div>
-                    <div class="text-l2 font-semibold pulse-text" id="disp-pnl">--</div>
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-10">
+        
+        <div class="lg:col-span-4 space-y-6">
+            <div class="section-label">CORE METRICS</div>
+            <div class="cyber-panel rounded-xl p-6 panel-reveal kpi-card kpi-primary">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <div class="metric-label">Total Equity</div>
+                        <div class="text-l1 font-bold text-white mt-1 tracking-tight" id="disp-balance">$Loading</div>
+                    </div>
+                    <i data-lucide="wallet" class="text-gray-600"></i>
                 </div>
-                <div>
-                    <div class="metric-label">ROI</div>
-                    <div class="text-l2 font-semibold" id="disp-roi">--%</div>
+                
+                <div class="flex gap-4">
+                    <div>
+                        <div class="metric-label">Net PnL</div>
+                        <div class="text-l2 font-bold pulse-text" id="disp-pnl">--</div>
+                    </div>
+                    <div>
+                        <div class="metric-label">ROI</div>
+                        <div class="text-l2 font-bold" id="disp-roi">--%</div>
+                    </div>
+                </div>
+                
+                <div class="mt-4 pt-4 border-t border-gray-800 text-[11px] flex justify-between text-gray-400">
+                    <span>Initial: $24,000</span>
+                    <span>Fees Paid: <span class="text-red-400" id="disp-fees">--</span></span>
                 </div>
             </div>
 
-            <div class="mt-6 pt-4 border-t border-slate-800/60 text-[11px] flex justify-between text-slate-400">
-                <span>Initial: $24,000</span>
-                <span>Fees Paid: <span class="text-rose-400" id="disp-fees">--</span></span>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card kpi-secondary">
+                    <div class="metric-label text-purple-400">Kelly Criterion <span class="text-gray-600">凯利公式</span></div>
+                    <div class="text-l2 font-bold text-white mt-2" id="metric-kelly">--%</div>
+                    <div class="text-[11px] text-gray-500 mt-1">建议仓位比例</div>
+                </div>
+                <div class="cyber-panel rounded-xl p-4 text-center panel-reveal kpi-card kpi-secondary">
+                    <div class="metric-label text-yellow-400">System Quality (SQN) <span class="text-gray-600">系统质量</span></div>
+                    <div class="text-l2 font-bold text-white mt-2" id="metric-sqn">--</div>
+                    <div class="text-[11px] text-gray-500 mt-1">>2.0 = 优秀</div>
+                </div>
             </div>
-        </section>
+            
+            <div class="cyber-panel rounded-xl p-4 flex justify-between items-center panel-reveal kpi-card kpi-secondary">
+                <div>
+                    <div class="metric-label">Current Streak <span class="text-gray-600">连胜/连败</span></div>
+                    <div class="text-l3 font-bold text-white mt-1" id="metric-streak">--</div>
+                </div>
+                <div class="text-right">
+                    <div class="metric-label">Expectancy (EV) <span class="text-gray-600">单笔期望</span></div>
+                    <div class="text-l3 font-bold text-blue-400 mt-1" id="metric-ev">--</div>
+                </div>
+            </div>
 
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-8">
-            <div class="panel-title mb-4">
-                <strong>Equity Curve</strong>
+            <!-- Daily Trade Stats Chart -->
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card chart-card">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="bar-chart-3" class="mr-2 w-4 h-4 text-cyan-400"></i> DAILY TRADES
+                    </h3>
+                    <span class="text-[11px] text-gray-500">开单数量 & 金额 · 最近14天 · UTC+8</span>
+                </div>
+                <div id="dailyTradesChart" class="w-full min-h-[180px]"></div>
+            </div>
+
+            <!-- Monthly Target Progress -->
+            <div class="cyber-panel rounded-xl p-4 mt-6 panel-reveal kpi-card chart-card">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="target" class="mr-2 w-4 h-4 text-emerald-400"></i> MONTHLY TARGET
+                    </h3>
+                    <button onclick="openTargetModal()" class="text-[11px] text-gray-500 hover:text-cyan-400 transition-colors">
+                        <i data-lucide="settings" class="w-3 h-3 inline"></i> 设置
+                    </button>
+                </div>
+                <div class="flex justify-between items-end mb-2">
+                    <div>
+                        <div class="text-[11px] text-gray-500">本月盈亏 (UTC+8)</div>
+                        <div class="text-l2 font-bold" id="monthly-current">$0</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-[11px] text-gray-500">目标</div>
+                        <div class="text-l3 font-bold text-gray-400" id="monthly-target">$30,000</div>
+                    </div>
+                </div>
+                <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                    <div id="monthly-progress-bar" class="h-full rounded-full transition-all duration-500" style="width: 0%; background: linear-gradient(90deg, #10b981, #34d399);"></div>
+                </div>
+                <div class="flex justify-between mt-2 text-[11px]">
+                    <span class="text-gray-500">进度: <span id="monthly-progress-pct" class="text-emerald-400">0%</span></span>
+                    <span class="text-gray-500">剩余: <span id="monthly-remaining" class="text-yellow-400">$30,000</span></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-8">
+            <div class="section-label mb-4">ANALYSIS</div>
+            <div class="cyber-panel rounded-xl p-6 flex flex-col panel-reveal">
+            <div class="flex justify-between mb-4">
+                <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                    <i data-lucide="activity" class="mr-2 w-4 h-4 text-cyan-400"></i> EQUITY CURVE
+                </h3>
                 <div class="flex gap-2 text-[11px]">
-                    <span class="px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">WIN: <span id="disp-wins">0</span></span>
-                    <span class="px-2 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">LOSS: <span id="disp-losses">0</span></span>
+                    <span class="px-2 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded">WIN: <span id="disp-wins">0</span></span>
+                    <span class="px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded">LOSS: <span id="disp-losses">0</span></span>
                 </div>
             </div>
-            <div id="equityChart" class="w-full min-h-[260px]"></div>
-        </section>
+            <div id="equityChart" class="w-full min-h-[200px]"></div>
 
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-4">
-            <div class="panel-title mb-4">
-                <strong>Edge Metrics</strong>
-                <span class="panel-meta">System Quality</span>
+            <!-- Hourly Analysis Chart -->
+            <div class="mt-6 pt-6 border-t border-gray-800">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="clock" class="mr-2 w-4 h-4 text-pink-400"></i> HOURLY PERFORMANCE
+                    </h3>
+                </div>
+                <div id="hourlyChart" class="w-full min-h-[160px]"></div>
             </div>
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <div class="metric-slab p-4 kpi-card kpi-secondary text-center">
-                    <div class="metric-label text-teal-300">Kelly Criterion</div>
-                    <div class="text-l2 font-semibold mt-2" id="metric-kelly">--%</div>
-                    <div class="text-[11px] text-slate-400 mt-1">建议仓位比例</div>
-                </div>
-                <div class="metric-slab p-4 kpi-card kpi-secondary text-center">
-                    <div class="metric-label text-amber-300">System Quality (SQN)</div>
-                    <div class="text-l2 font-semibold mt-2" id="metric-sqn">--</div>
-                    <div class="text-[11px] text-slate-400 mt-1">>2.0 = 优秀</div>
-                </div>
-            </div>
-            <div class="metric-slab p-4 flex justify-between items-center kpi-card kpi-secondary">
-                <div>
-                    <div class="metric-label">Current Streak</div>
-                    <div class="text-l3 font-semibold mt-1" id="metric-streak">--</div>
-                </div>
-                <div class="text-right">
-                    <div class="metric-label">Expectancy (EV)</div>
-                    <div class="text-l3 font-semibold text-teal-300 mt-1" id="metric-ev">--</div>
-                </div>
-            </div>
-        </section>
 
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-4 chart-card">
-            <div class="panel-title mb-2">
-                <strong>Daily Trades</strong>
-                <span class="panel-meta">最近14天 · UTC+8</span>
-            </div>
-            <div id="dailyTradesChart" class="w-full min-h-[200px]"></div>
-        </section>
-
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-4 chart-card">
-            <div class="panel-title mb-3">
-                <strong>Monthly Target</strong>
-                <button onclick="openTargetModal()" class="text-[11px] text-slate-400 hover:text-teal-300 transition-colors">
-                    <i data-lucide="settings" class="w-3 h-3 inline"></i> 设置
-                </button>
-            </div>
-            <div class="flex justify-between items-end mb-2">
-                <div>
-                    <div class="text-[11px] text-slate-400">本月盈亏 (UTC+8)</div>
-                    <div class="text-l2 font-semibold" id="monthly-current">$0</div>
+            <!-- Duration Scatter Plot -->
+            <div class="mt-6 pt-6 border-t border-gray-800">
+                <div class="flex justify-between mb-2">
+                    <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                        <i data-lucide="scatter-chart" class="mr-2 w-4 h-4 text-purple-400"></i> DURATION ANALYSIS
+                    </h3>
+                    <span class="text-[11px] text-gray-500">Cut Losses Short, Let Profits Run</span>
                 </div>
-                <div class="text-right">
-                    <div class="text-[11px] text-slate-400">目标</div>
-                    <div class="text-l3 font-semibold text-slate-300" id="monthly-target">$30,000</div>
-                </div>
+                <div id="durationChart" class="w-full min-h-[160px]"></div>
             </div>
-            <div class="w-full bg-slate-800/70 h-3 rounded-full overflow-hidden">
-                <div id="monthly-progress-bar" class="h-full rounded-full transition-all duration-500" style="width: 0%; background: linear-gradient(90deg, #14b8a6, #5eead4);"></div>
             </div>
-            <div class="flex justify-between mt-2 text-[11px]">
-                <span class="text-slate-400">进度: <span id="monthly-progress-pct" class="text-teal-300">0%</span></span>
-                <span class="text-slate-400">剩余: <span id="monthly-remaining" class="text-amber-300">$30,000</span></span>
-            </div>
-        </section>
 
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-6 chart-card">
-            <div class="panel-title mb-2">
-                <strong>Hourly Performance</strong>
-                <span class="panel-meta">交易时段分布</span>
-            </div>
-            <div id="hourlyChart" class="w-full min-h-[200px]"></div>
-        </section>
+        </div>
+    </div>
 
-        <section class="cyber-panel rounded-2xl p-6 panel-reveal xl:col-span-6 chart-card">
-            <div class="panel-title mb-2">
-                <strong>Duration Analysis</strong>
-                <span class="panel-meta">Cut Losses Short, Let Profits Run</span>
-            </div>
-            <div id="durationChart" class="w-full min-h-[200px]"></div>
-        </section>
-    </main>
-
-<!-- Target Setting Modal -->
+    <!-- Target Setting Modal -->
     <div id="targetModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
         <div class="cyber-panel rounded-xl p-6 w-80">
             <h3 class="text-lg font-bold text-white mb-4 flex items-center">
@@ -509,7 +527,7 @@
     <div class="cyber-panel rounded-xl overflow-hidden relative z-10 panel-reveal">
         <div class="overflow-x-auto">
             <table class="w-full text-left text-sm text-gray-400 min-w-[600px] md:min-w-full">
-                <thead class="table-head sticky top-0 z-10 backdrop-blur font-bold">
+                <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold sticky top-0 z-10 backdrop-blur">
                     <tr>
                         <th class="px-6 py-4">Time</th>
                         <th class="px-6 py-4">Symbol</th>
