@@ -528,6 +528,44 @@
         </div>
     </div>
 
+    <div class="cyber-panel rounded-xl p-4 mb-6 relative z-10 panel-reveal">
+        <div class="flex justify-between items-center mb-3">
+            <div class="metric-label">Red & Black List <span class="text-gray-600">红黑榜</span></div>
+            <div class="text-[11px] text-gray-500">Top 5</div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+                <div class="text-[11px] text-green-400 mb-2">盈利榜</div>
+                <div class="grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] uppercase text-gray-500 mb-2">
+                    <span>Symbol</span>
+                    <span class="grid grid-cols-[7ch_6ch_6ch_6ch] gap-2 text-right font-mono tabular-nums">
+                        <span class="text-right">PnL</span>
+                        <span>Trades</span>
+                        <span>Win%</span>
+                        <span>Share</span>
+                    </span>
+                </div>
+                <div id="redlist" class="space-y-3 text-xs"></div>
+            </div>
+            <div>
+                <div class="text-[11px] text-red-400 mb-2">亏损榜</div>
+                <div class="grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] uppercase text-gray-500 mb-2">
+                    <span>Symbol</span>
+                    <span class="grid grid-cols-[7ch_6ch_6ch_6ch] gap-2 text-right font-mono tabular-nums">
+                        <span class="text-right">PnL</span>
+                        <span>Trades</span>
+                        <span>Win%</span>
+                        <span>Share</span>
+                    </span>
+                </div>
+                <div id="blacklist" class="space-y-3 text-xs"></div>
+            </div>
+        </div>
+        <div class="text-[11px] text-gray-500 mt-3 border-t border-gray-800 pt-2">
+            按净盈亏 (USDT) 统计
+        </div>
+    </div>
+
     <div class="section-label mb-4 relative z-10">TRADE LOG</div>
     <div class="cyber-panel rounded-xl overflow-hidden relative z-10 panel-reveal">
         <div class="overflow-x-auto">
@@ -664,6 +702,7 @@
             renderHourlyChart(trades);
             renderDailyTradesChart(dailyStats);
             renderTable(trades);
+            renderSymbolLeaderboard(trades);
             initKpiFocus();
         }
 
@@ -1082,6 +1121,73 @@
                 tbody.innerHTML += row;
             });
 
+        }
+
+        function renderSymbolLeaderboard(tradeData) {
+            const redEl = document.getElementById('redlist');
+            const blackEl = document.getElementById('blacklist');
+            if (!redEl || !blackEl) return;
+
+            const stats = {};
+            tradeData.forEach(t => {
+                const symbol = t.symbol || '--';
+                const pnl = Number(t.pnl_net) || 0;
+                if (!stats[symbol]) stats[symbol] = { pnl: 0, count: 0, win: 0, loss: 0 };
+                stats[symbol].pnl += pnl;
+                stats[symbol].count += 1;
+                if (pnl > 0) stats[symbol].win += 1;
+                if (pnl < 0) stats[symbol].loss += 1;
+            });
+
+            const totalAbsPnl = Object.values(stats).reduce((sum, s) => sum + Math.abs(s.pnl), 0) || 1;
+            const rows = Object.entries(stats).map(([symbol, s]) => ({
+                symbol,
+                pnl: s.pnl,
+                count: s.count,
+                win: s.win,
+                loss: s.loss
+            }));
+
+            const winners = rows.filter(r => r.pnl > 0).sort((a, b) => b.pnl - a.pnl).slice(0, 5);
+            const losers = rows.filter(r => r.pnl < 0).sort((a, b) => a.pnl - b.pnl).slice(0, 5);
+
+            const maxWinPnl = winners.length ? Math.max(...winners.map(r => r.pnl)) : 1;
+            const maxLossPnl = losers.length ? Math.min(...losers.map(r => r.pnl)) : -1;
+
+            const renderList = (list, el, positive) => {
+                if (!list.length) {
+                    el.innerHTML = `<div class="text-[11px] text-gray-500">暂无数据</div>`;
+                    return;
+                }
+                el.innerHTML = list.map(item => {
+                    const winRate = item.count > 0 ? Math.round((item.win / item.count) * 100) : 0;
+                    const contribution = Math.round((Math.abs(item.pnl) / totalAbsPnl) * 100);
+                    const denom = positive ? maxWinPnl : Math.abs(maxLossPnl);
+                    const barPct = denom > 0 ? Math.min((Math.abs(item.pnl) / denom) * 100, 100) : 0;
+                    return `
+                        <div class="space-y-1">
+                            <div class="grid grid-cols-[1fr_auto] items-center gap-2">
+                                <div class="text-white font-mono truncate">${item.symbol}</div>
+                                <div class="grid grid-cols-[7ch_6ch_6ch_6ch] gap-2 text-right font-mono tabular-nums">
+                                    <span class="${positive ? 'text-emerald-400' : 'text-red-400'} font-mono">${positive ? '+' : ''}${item.pnl.toFixed(0)}</span>
+                                    <span class="text-gray-500 font-mono">${item.count}</span>
+                                    <span class="text-gray-500 font-mono">${winRate}%</span>
+                                    <span class="text-gray-500 font-mono">${contribution}%</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-[1fr_auto] items-center gap-2">
+                                <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full ${positive ? 'bg-emerald-400' : 'bg-red-400'}" style="width: ${barPct}%"></div>
+                                </div>
+                                <div></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            };
+
+            renderList(winners, redEl, true);
+            renderList(losers, blackEl, false);
         }
 
         let kpiBound = false;
