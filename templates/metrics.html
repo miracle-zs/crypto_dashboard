@@ -340,6 +340,47 @@
             font-family: 'Space Mono', monospace;
             color: var(--text);
         }
+        .pattern-mini {
+            background: #fff7e6;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 6px 8px;
+        }
+        .pattern-svg {
+            width: 100%;
+            height: 64px;
+            display: block;
+        }
+        .pattern-line {
+            stroke: var(--text);
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .pattern-axis {
+            stroke: rgba(17, 24, 39, 0.55);
+            stroke-width: 1.4;
+            fill: none;
+        }
+        .pattern-grid {
+            stroke: rgba(17, 24, 39, 0.18);
+            stroke-width: 1;
+            fill: none;
+        }
+        .pattern-dash {
+            stroke: rgba(17, 24, 39, 0.55);
+            stroke-width: 1.6;
+            fill: none;
+            stroke-dasharray: 4 4;
+        }
+        .pattern-trigger {
+            fill: #f97316;
+            stroke: var(--border);
+            stroke-width: 1;
+        }
+            fill: rgba(17, 24, 39, 0.25);
+        }
         .highlight { color: var(--success); font-weight: 700; }
         .warn { color: var(--danger); font-weight: 700; }
         .caution { color: var(--warn); font-weight: 700; }
@@ -584,6 +625,261 @@
             </p>
         </div>
 
+    </div>
+
+    <!-- ==================== TECHNICAL SHORT PATTERNS ==================== -->
+    <div class="section-title px-4 py-3 mb-6 rounded-r-lg relative z-10" style="background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), transparent); border-left-color: #f59e0b;">
+        <h2 class="text-lg font-bold flex items-center gap-2">
+            <i data-lucide="trending-down" class="w-5 h-5 text-orange-400"></i>
+            SHORT SETUPS 技术面做空经典图形
+            <span class="text-xs text-gray-500 font-normal ml-2">形态识别 · 触发 · 失效</span>
+        </h2>
+    </div>
+
+    <div class="cyber-panel rounded-xl p-4 mb-6 relative z-10 panel-reveal">
+        <div class="flex items-center justify-between mb-3">
+            <div class="metric-label">Setup Cheat Sheet <span class="text-gray-600">做空速查表</span></div>
+            <div class="text-[11px] text-gray-500">短线规则</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+                <div class="font-bold text-orange-400 uppercase mb-1">触发</div>
+                <p>• 破位后<strong>确认</strong>（收盘/放量/反抽失败）。</p>
+                <p>• 优先“第二次机会”而非第一次冲动。</p>
+            </div>
+            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+                <div class="font-bold text-orange-400 uppercase mb-1">止损</div>
+                <p>• 放在<strong>形态失效点</strong>（高点/上沿）。</p>
+                <p>• 止损必须小于结构性目标空间。</p>
+            </div>
+            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+                <div class="font-bold text-orange-400 uppercase mb-1">失效</div>
+                <p>• 价格重新站回关键结构并走高。</p>
+                <p>• 结构被“吞没”或量能反向扩张。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12 relative z-10">
+
+        <!-- Double Top -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="layers"></i></div>
+                <h2 class="text-l2 font-bold">Double Top <span class="text-gray-500 text-sm">双顶</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-red-500/30 text-red-400 bg-red-500/10">反转</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">高位形态</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">高位反转信号。</span>价格两次冲高失败，形成明显颈线支撑。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <polyline class="pattern-line" points="6,46 24,18 42,46 60,18 78,46 110,34" />
+                    <line class="pattern-dash" x1="6" y1="46" x2="114" y2="46" />
+                    <circle class="pattern-trigger" cx="92" cy="50" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：颈线下破收盘。</p>
+                <p>• 失效：收回颈线上方。</p>
+                <p>• 止损：右顶高点上方。</p>
+                <p>• 适用：高位或涨势末端更可靠。</p>
+            </div>
+        </div>
+
+        <!-- Head & Shoulders -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="triangle"></i></div>
+                <h2 class="text-l2 font-bold">Head & Shoulders <span class="text-gray-500 text-sm">头肩顶</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-red-500/30 text-red-400 bg-red-500/10">反转</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">高位形态</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">趋势反转经典形态。</span>右肩弱于头部，颈线承压。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <polyline class="pattern-line" points="6,44 24,26 42,44 60,14 78,44 96,26 114,44" />
+                    <line class="pattern-dash" x1="6" y1="44" x2="114" y2="44" />
+                    <circle class="pattern-trigger" cx="98" cy="48" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：颈线下破反抽失败。</p>
+                <p>• 失效：站回颈线并走高。</p>
+                <p>• 止损：右肩高点上方。</p>
+                <p>• 适用：右肩显著缩量更稳。</p>
+            </div>
+        </div>
+
+        <!-- Rising Wedge -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="slash"></i></div>
+                <h2 class="text-l2 font-bold">Rising Wedge <span class="text-gray-500 text-sm">上升楔形</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-red-500/30 text-red-400 bg-red-500/10">反转</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">趋势末端</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">涨不动的上涨。</span>价格抬高但斜率减弱，成交量常缩减。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <line class="pattern-dash" x1="10" y1="50" x2="110" y2="30" />
+                    <line class="pattern-dash" x1="10" y1="20" x2="110" y2="8" />
+                    <polyline class="pattern-line" points="16,44 34,36 52,32 70,26 88,22 106,18" />
+                    <circle class="pattern-trigger" cx="102" cy="36" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：跌破下沿趋势线。</p>
+                <p>• 失效：突破上沿并站稳。</p>
+                <p>• 止损：楔形上沿或近高。</p>
+                <p>• 适用：上升斜率明显放缓。</p>
+            </div>
+        </div>
+
+        <!-- Bear Flag -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="flag"></i></div>
+                <h2 class="text-l2 font-bold">Bear Flag <span class="text-gray-500 text-sm">熊旗</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-orange-500/30 text-orange-400 bg-orange-500/10">中继</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">趋势中</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">下跌中继。</span>先急跌形成旗杆，随后窄幅反弹或横盘。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <polyline class="pattern-line" points="10,10 10,52 46,36 82,42 110,38" />
+                    <line class="pattern-dash" x1="40" y1="30" x2="112" y2="38" />
+                    <line class="pattern-dash" x1="40" y1="44" x2="112" y2="50" />
+                    <circle class="pattern-trigger" cx="108" cy="52" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：跌破旗形下沿。</p>
+                <p>• 失效：突破旗形上沿。</p>
+                <p>• 止损：旗形上沿上方。</p>
+                <p>• 适用：旗形回撤不过深。</p>
+            </div>
+        </div>
+
+        <!-- Bull Trap -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="alert-circle"></i></div>
+                <h2 class="text-l2 font-bold">Bull Trap <span class="text-gray-500 text-sm">多头陷阱</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-red-500/30 text-red-400 bg-red-500/10">反转</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">诱多</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">假突破诱多。</span>冲破阻力后快速跌回，形成反向信号。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <line class="pattern-dash" x1="8" y1="38" x2="112" y2="38" />
+                    <polyline class="pattern-line" points="10,44 42,38 62,22 82,40 110,46" />
+                    <circle class="pattern-trigger" cx="92" cy="42" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：跌回突破位下方。</p>
+                <p>• 失效：重新站上突破位。</p>
+                <p>• 止损：假突破高点上方。</p>
+                <p>• 适用：假突破快速回撤。</p>
+            </div>
+        </div>
+
+        <!-- Range Breakdown -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-orange-500/10 rounded text-orange-400"><i data-lucide="minus"></i></div>
+                <h2 class="text-l2 font-bold">Range Breakdown <span class="text-gray-500 text-sm">区间下破</span></h2>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 text-[10px] uppercase mb-3">
+                <span class="px-2 py-1 rounded-full border border-amber-500/30 text-amber-400 bg-amber-500/10">延续</span>
+                <span class="px-2 py-1 rounded-full border border-gray-300/40 text-gray-500 bg-white/60">区间破位</span>
+            </div>
+            <p class="text-sm mb-4">
+                <span class="caution">支撑失效。</span>长时间横盘后向下破位，趋势开始加速。
+            </p>
+
+            <div class="pattern-mini mb-4">
+                <svg class="pattern-svg" viewBox="0 0 120 60" aria-hidden="true">
+                    <line class="pattern-axis" x1="6" y1="6" x2="6" y2="54" />
+                    <line class="pattern-axis" x1="6" y1="54" x2="114" y2="54" />
+                    <line class="pattern-grid" x1="6" y1="18" x2="114" y2="18" />
+                    <line class="pattern-grid" x1="6" y1="34" x2="114" y2="34" />
+                    <line class="pattern-dash" x1="8" y1="22" x2="112" y2="22" />
+                    <line class="pattern-dash" x1="8" y1="42" x2="112" y2="42" />
+                    <polyline class="pattern-line" points="10,32 28,26 46,36 64,28 82,38 100,50 112,54" />
+                    <circle class="pattern-trigger" cx="98" cy="46" r="3.2" />
+                </svg>
+            </div>
+
+            <div class="text-xs space-y-2 bg-orange-900/10 p-4 rounded border border-orange-500/20">
+                <div class="font-bold text-orange-400 uppercase mb-1">交易要点</div>
+                <p>• 触发：支撑下破收盘。</p>
+                <p>• 失效：收回区间并站稳。</p>
+                <p>• 止损：原支撑或中轴上方。</p>
+                <p>• 适用：横盘时间越长越强。</p>
+            </div>
+        </div>
     </div>
 
     <!-- ==================== MONITOR 指标组 ==================== -->
