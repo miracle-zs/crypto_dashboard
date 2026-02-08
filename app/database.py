@@ -8,6 +8,8 @@ from typing import Optional, List, Dict
 import os
 from pathlib import Path
 from app.logger import logger
+import json
+import numpy as np
 
 
 class Database:
@@ -172,6 +174,34 @@ class Database:
         cursor.execute("""
             INSERT OR IGNORE INTO user_settings (id, monthly_target)
             VALUES (1, 30000)
+        """)
+
+        # 交易统计快照表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trade_summary (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                total_pnl REAL,
+                total_fees REAL,
+                win_rate REAL,
+                win_count INTEGER,
+                loss_count INTEGER,
+                total_trades INTEGER,
+                equity_curve TEXT,
+                current_streak INTEGER,
+                best_win_streak INTEGER,
+                worst_loss_streak INTEGER,
+                max_drawdown REAL,
+                profit_factor REAL,
+                kelly_criterion REAL,
+                sqn REAL,
+                expected_value REAL,
+                risk_reward_ratio REAL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT OR IGNORE INTO trade_summary (id)
+            VALUES (1)
         """)
 
         conn.commit()
@@ -425,6 +455,188 @@ class Database:
             'latest_trade': date_range[1],
             'unique_symbols': unique_symbols
         }
+
+    def get_trade_summary(self) -> Optional[Dict]:
+        """读取交易统计快照"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trade_summary WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+        data = dict(row)
+        data.pop('id', None)
+        data.pop('updated_at', None)
+        if data.get('equity_curve'):
+            try:
+                data['equity_curve'] = json.loads(data['equity_curve'])
+            except Exception:
+                data['equity_curve'] = []
+        else:
+            data['equity_curve'] = []
+        return data
+
+    def save_trade_summary(self, summary: Dict):
+        """保存交易统计快照"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        equity_curve = summary.get('equity_curve', [])
+        equity_curve_json = json.dumps(equity_curve, ensure_ascii=False)
+
+        cursor.execute("""
+            INSERT INTO trade_summary (
+                id, total_pnl, total_fees, win_rate, win_count, loss_count,
+                total_trades, equity_curve, current_streak, best_win_streak,
+                worst_loss_streak, max_drawdown, profit_factor, kelly_criterion,
+                sqn, expected_value, risk_reward_ratio, updated_at
+            ) VALUES (
+                1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT(id) DO UPDATE SET
+                total_pnl = excluded.total_pnl,
+                total_fees = excluded.total_fees,
+                win_rate = excluded.win_rate,
+                win_count = excluded.win_count,
+                loss_count = excluded.loss_count,
+                total_trades = excluded.total_trades,
+                equity_curve = excluded.equity_curve,
+                current_streak = excluded.current_streak,
+                best_win_streak = excluded.best_win_streak,
+                worst_loss_streak = excluded.worst_loss_streak,
+                max_drawdown = excluded.max_drawdown,
+                profit_factor = excluded.profit_factor,
+                kelly_criterion = excluded.kelly_criterion,
+                sqn = excluded.sqn,
+                expected_value = excluded.expected_value,
+                risk_reward_ratio = excluded.risk_reward_ratio,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            float(summary.get('total_pnl', 0.0)),
+            float(summary.get('total_fees', 0.0)),
+            float(summary.get('win_rate', 0.0)),
+            int(summary.get('win_count', 0)),
+            int(summary.get('loss_count', 0)),
+            int(summary.get('total_trades', 0)),
+            equity_curve_json,
+            int(summary.get('current_streak', 0)),
+            int(summary.get('best_win_streak', 0)),
+            int(summary.get('worst_loss_streak', 0)),
+            float(summary.get('max_drawdown', 0.0)),
+            float(summary.get('profit_factor', 0.0)),
+            float(summary.get('kelly_criterion', 0.0)),
+            float(summary.get('sqn', 0.0)),
+            float(summary.get('expected_value', 0.0)),
+            float(summary.get('risk_reward_ratio', 0.0)),
+        ))
+
+        conn.commit()
+        conn.close()
+
+    def recompute_trade_summary(self) -> Dict:
+        """全量重算交易统计并保存"""
+        df = self.get_all_trades()
+
+        if df.empty:
+            summary = {
+                'total_pnl': 0.0,
+                'total_fees': 0.0,
+                'win_rate': 0.0,
+                'win_count': 0,
+                'loss_count': 0,
+                'total_trades': 0,
+                'equity_curve': [],
+                'current_streak': 0,
+                'best_win_streak': 0,
+                'worst_loss_streak': 0,
+                'max_drawdown': 0.0,
+                'profit_factor': 0.0,
+                'kelly_criterion': 0.0,
+                'sqn': 0.0,
+                'expected_value': 0.0,
+                'risk_reward_ratio': 0.0
+            }
+            self.save_trade_summary(summary)
+            return summary
+
+        total_pnl = float(df['PNL_Net'].sum())
+        total_fees = float(df['Fees'].sum())
+        win_count = len(df[df['PNL_Net'] > 0])
+        loss_count = len(df[df['PNL_Net'] < 0])
+        total_trades = len(df)
+        win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0.0
+        equity_curve = df['PNL_Net'].cumsum().tolist()
+
+        current_streak = 0
+        for pnl in reversed(df['PNL_Net'].values):
+            if (current_streak >= 0 and pnl > 0) or (current_streak < 0 and pnl < 0):
+                current_streak += 1 if pnl > 0 else -1
+            else:
+                break
+
+        best_win_streak = 0
+        worst_loss_streak = 0
+        streak = 0
+        for pnl in df['PNL_Net'].values:
+            if pnl > 0:
+                streak = streak + 1 if streak >= 0 else 1
+            elif pnl < 0:
+                streak = streak - 1 if streak <= 0 else -1
+            else:
+                streak = 0
+            if streak > best_win_streak:
+                best_win_streak = streak
+            if streak < worst_loss_streak:
+                worst_loss_streak = streak
+
+        max_drawdown = float(df['PNL_Net'].min()) if not df.empty else 0.0
+        total_wins = float(df[df['PNL_Net'] > 0]['PNL_Net'].sum())
+        total_losses = abs(float(df[df['PNL_Net'] < 0]['PNL_Net'].sum()))
+        profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
+
+        avg_win = total_wins / win_count if win_count > 0 else 0
+        avg_loss = total_losses / loss_count if loss_count > 0 else 0
+        win_prob = win_count / total_trades if total_trades > 0 else 0
+        loss_prob = loss_count / total_trades if total_trades > 0 else 0
+
+        if avg_loss > 0 and avg_win > 0:
+            kelly_criterion = (win_prob * avg_win - loss_prob * avg_loss) / avg_win
+        else:
+            kelly_criterion = 0.0
+
+        if total_trades > 0:
+            pnl_mean = df['PNL_Net'].mean()
+            pnl_std = df['PNL_Net'].std()
+            sqn = (pnl_mean / pnl_std) * np.sqrt(total_trades) if pnl_std > 0 else 0.0
+        else:
+            sqn = 0.0
+
+        expected_value = (win_prob * avg_win) - (loss_prob * avg_loss)
+        risk_reward_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
+
+        summary = {
+            'total_pnl': total_pnl,
+            'total_fees': total_fees,
+            'win_rate': win_rate,
+            'win_count': win_count,
+            'loss_count': loss_count,
+            'total_trades': total_trades,
+            'equity_curve': equity_curve,
+            'current_streak': current_streak,
+            'best_win_streak': best_win_streak,
+            'worst_loss_streak': worst_loss_streak,
+            'max_drawdown': max_drawdown,
+            'profit_factor': profit_factor,
+            'kelly_criterion': kelly_criterion,
+            'sqn': float(sqn),
+            'expected_value': expected_value,
+            'risk_reward_ratio': risk_reward_ratio
+        }
+
+        self.save_trade_summary(summary)
+        return summary
 
     def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
         """保存新的余额记录"""

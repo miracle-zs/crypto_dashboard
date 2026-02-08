@@ -103,6 +103,9 @@ class TradeDataScheduler:
             # 保存到数据库
             logger.info(f"保存 {len(df)} 条记录到数据库...")
             saved_count = self.db.save_trades(df)
+            if saved_count > 0:
+                logger.info("检测到新平仓单，重算统计快照...")
+                self.db.recompute_trade_summary()
 
             # 同步未平仓订单
             logger.info("同步未平仓订单...")

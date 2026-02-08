@@ -385,6 +385,11 @@
                 <div>
                     <div class="metric-label">Current Streak <span class="text-gray-600">连胜/连败</span></div>
                     <div class="text-l3 font-bold text-white mt-1" id="metric-streak">--</div>
+                    <div class="text-[11px] text-gray-500 mt-1">
+                        Best <span class="text-green-400 font-mono ml-1" id="metric-streak-best">--</span>
+                        <span class="mx-2 text-gray-400">/</span>
+                        Worst <span class="text-red-400 font-mono ml-1" id="metric-streak-worst">--</span>
+                    </div>
                 </div>
                 <div class="text-right">
                     <div class="metric-label">Expectancy (EV) <span class="text-gray-600">单笔期望</span></div>
@@ -639,6 +644,18 @@
             const streakEl = document.getElementById('metric-streak');
             streakEl.innerText = stats.current_streak > 0 ? `+${stats.current_streak} W` : `${stats.current_streak} L`;
             streakEl.className = `text-l3 font-bold mt-1 ${stats.current_streak > 0 ? 'text-green-400' : 'text-red-500'}`;
+
+            const bestEl = document.getElementById('metric-streak-best');
+            const worstEl = document.getElementById('metric-streak-worst');
+            if (bestEl && worstEl) {
+                if (stats.total_trades > 0) {
+                    bestEl.innerText = `+${stats.best_win_streak} W`;
+                    worstEl.innerText = `-${Math.abs(stats.worst_loss_streak)} L`;
+                } else {
+                    bestEl.innerText = '--';
+                    worstEl.innerText = '--';
+                }
+            }
 
             document.getElementById('metric-mdd').innerText = `-$${stats.max_drawdown}`;
 

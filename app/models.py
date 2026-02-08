@@ -33,6 +33,8 @@ class TradeSummary(BaseModel):
     total_trades: int
     equity_curve: List[float]
     current_streak: int
+    best_win_streak: int
+    worst_loss_streak: int
     max_drawdown: float
     profit_factor: float
     kelly_criterion: float
