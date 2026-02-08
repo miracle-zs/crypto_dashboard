@@ -502,6 +502,8 @@
                             <button id="btn-view-balance" class="px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
                         </div>
 
+                        <button id="btn-toggle-markers" class="px-2 py-1 text-[11px] rounded bg-cyan-600 text-white font-bold transition-all">标记:开</button>
+
                         <div class="flex flex-wrap justify-center gap-1 text-[11px] w-full md:w-auto">
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1h">1H</button>
                             <button class="time-range-btn px-2 py-1 rounded-md" data-range="1d">1D</button>
@@ -599,11 +601,13 @@
         let currentView = 'equity'; // Default view: 'equity' (cumulative) or 'balance' (actual)
         let lastRequestedTimeRange = '';
         let maxDDWindow = null;
+        let showMarkers = true;
 
         const timeRangeButtons = document.querySelectorAll('.time-range-btn');
         const btnViewEquity = document.getElementById('btn-view-equity');
         const btnViewPercent = document.getElementById('btn-view-percent');
         const btnViewBalance = document.getElementById('btn-view-balance');
+        const btnToggleMarkers = document.getElementById('btn-toggle-markers');
 
         // Time Range Click Handlers
         timeRangeButtons.forEach(button => {
@@ -619,6 +623,24 @@
         btnViewEquity.addEventListener('click', () => { switchView('equity'); });
         btnViewPercent.addEventListener('click', () => { switchView('percent'); });
         btnViewBalance.addEventListener('click', () => { switchView('balance'); });
+
+        function updateMarkerToggle() {
+            if (!btnToggleMarkers) return;
+            const activeClass = 'px-2 py-1 text-[11px] rounded bg-cyan-600 text-white font-bold transition-all';
+            const inactiveClass = 'px-2 py-1 text-[11px] rounded bg-slate-800 text-gray-400 hover:text-white transition-all';
+            btnToggleMarkers.className = showMarkers ? activeClass : inactiveClass;
+            btnToggleMarkers.textContent = showMarkers ? '标记:开' : '标记:关';
+        }
+
+        if (btnToggleMarkers) {
+            btnToggleMarkers.addEventListener('click', () => {
+                showMarkers = !showMarkers;
+                updateMarkerToggle();
+                fadeChart();
+                setTimeout(updateChart, 150);
+            });
+            updateMarkerToggle();
+        }
 
         function switchView(view) {
             currentView = view;
@@ -1069,6 +1091,8 @@
                 return { x: d.time, y: currentView === 'percent' ? val.toFixed(4) : val.toFixed(2) };
             });
 
+            const numericSeries = seriesData.map(p => ({ x: p.x, y: Number(p.y) })).filter(p => Number.isFinite(p.y));
+
             const ddAnnotation = maxDDWindow ? {
                 xaxis: [
                     {
@@ -1076,22 +1100,158 @@
                         x2: maxDDWindow.end,
                         borderColor: '#dc2626',
                         fillColor: 'rgba(220, 38, 38, 0.12)',
-                        opacity: 0.25,
-                        label: {
-                            text: 'MAX_DD',
-                            position: 'top',
-                            orientation: 'horizontal',
-                            offsetY: 2,
-                            style: {
-                                color: '#111827',
-                                background: '#fecaca',
-                                fontSize: '10px',
-                                fontWeight: 700
-                            }
-                        }
+                        opacity: 0.25
                     }
                 ]
             } : { xaxis: [] };
+
+            const formatValue = (val) => {
+                if (currentView === 'percent') {
+                    if (val > 0) return `+${val.toFixed(2)}%`;
+                    if (val < 0) return `${val.toFixed(2)}%`;
+                    return `0.00%`;
+                }
+                return `$${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+            };
+
+            const lastPoint = numericSeries.length ? numericSeries[numericSeries.length - 1] : null;
+            const peakPoint = numericSeries.reduce((max, p) => (max === null || p.y > max.y ? p : max), null);
+            const baselineValue = currentView === 'percent'
+                ? 0
+                : (initialEquity !== null ? initialEquity : (numericSeries[0] ? numericSeries[0].y : null));
+
+            let yMin = null;
+            let yMax = null;
+            const indexByX = new Map();
+            numericSeries.forEach((p, idx) => {
+                if (yMin === null || p.y < yMin) yMin = p.y;
+                if (yMax === null || p.y > yMax) yMax = p.y;
+                if (!indexByX.has(p.x)) indexByX.set(p.x, idx);
+            });
+            const totalPoints = numericSeries.length;
+            const lastIndex = lastPoint ? indexByX.get(lastPoint.x) : null;
+            const peakIndex = peakPoint ? indexByX.get(peakPoint.x) : null;
+            const isNearRight = (idx) => idx !== null && idx >= Math.max(0, totalPoints - 3);
+            const isNearLeft = (idx) => idx !== null && idx <= 1;
+            const closeInX = lastIndex !== null && peakIndex !== null
+                ? Math.abs(lastIndex - peakIndex) <= Math.max(2, Math.floor(totalPoints * 0.03))
+                : false;
+            const yRange = (yMin !== null && yMax !== null) ? (yMax - yMin) : 0;
+            const closeInY = lastPoint && peakPoint && yRange > 0
+                ? Math.abs(lastPoint.y - peakPoint.y) <= yRange * 0.08
+                : false;
+
+            let nowOffsetX = isNearRight(lastIndex) ? -72 : -44;
+            if (isNearLeft(lastIndex)) nowOffsetX = -8;
+            let peakOffsetX = isNearRight(peakIndex) ? -120 : -60;
+            if (isNearLeft(peakIndex)) peakOffsetX = -8;
+            let nowOffsetY = 12;
+            let peakOffsetY = -14;
+            if (closeInX || closeInY) {
+                nowOffsetY = 22;
+                peakOffsetY = -28;
+                if (!isNearLeft(peakIndex) && !isNearRight(peakIndex)) {
+                    peakOffsetX = -30;
+                }
+                if (!isNearLeft(lastIndex) && !isNearRight(lastIndex)) {
+                    nowOffsetX = -54;
+                }
+                if (!isNearLeft(peakIndex) && !isNearLeft(lastIndex)) {
+                    if (Math.abs(nowOffsetX - peakOffsetX) < 16) {
+                        peakOffsetX = nowOffsetX - 20;
+                    }
+                }
+            }
+
+            const ddMidX = maxDDWindow ? (maxDDWindow.start + (maxDDWindow.end - maxDDWindow.start) / 2) : null;
+
+            const annotations = {
+                xaxis: ddAnnotation.xaxis || [],
+                yaxis: [],
+                points: []
+            };
+
+            if (baselineValue !== null && Number.isFinite(baselineValue)) {
+                const baseLabel = currentView === 'percent'
+                    ? 'BASE 0.00%'
+                    : `BASE ${formatValue(baselineValue)}`;
+                annotations.yaxis.push({
+                    y: baselineValue,
+                    borderColor: '#94a3b8',
+                    strokeDashArray: 4,
+                    label: {
+                        text: baseLabel,
+                        style: {
+                            color: '#0f172a',
+                            background: '#e2e8f0',
+                            fontSize: '10px',
+                            fontWeight: 700
+                        },
+                        offsetX: -12
+                    }
+                });
+            }
+
+            if (lastPoint) {
+                annotations.points.push({
+                    x: lastPoint.x,
+                    y: lastPoint.y,
+                    marker: { size: 4, fillColor: '#0ea5e9', strokeColor: '#0ea5e9' },
+                    label: {
+                        text: `NOW ${formatValue(lastPoint.y)}`,
+                        borderColor: '#0ea5e9',
+                        style: {
+                            color: '#0f172a',
+                            background: '#bae6fd',
+                            fontSize: '10px',
+                            fontWeight: 700
+                        },
+                        offsetY: nowOffsetY,
+                        offsetX: nowOffsetX
+                    }
+                });
+            }
+
+            if (peakPoint && (!lastPoint || peakPoint.x !== lastPoint.x)) {
+                annotations.points.push({
+                    x: peakPoint.x,
+                    y: peakPoint.y,
+                    marker: { size: 4, fillColor: '#f59e0b', strokeColor: '#f59e0b' },
+                    label: {
+                        text: `PEAK ${formatValue(peakPoint.y)}`,
+                        borderColor: '#f59e0b',
+                        style: {
+                            color: '#0f172a',
+                            background: '#fde68a',
+                            fontSize: '10px',
+                            fontWeight: 700
+                        },
+                        offsetY: peakOffsetY,
+                        offsetX: peakOffsetX
+                    }
+                });
+            }
+
+            if (ddMidX !== null && yMax !== null) {
+                annotations.points.push({
+                    x: ddMidX,
+                    y: yMax,
+                    marker: { size: 0, strokeWidth: 0, fillColor: 'transparent' },
+                    label: {
+                        text: 'MAX_DD',
+                        borderColor: '#dc2626',
+                        style: {
+                            color: '#111827',
+                            background: '#fecaca',
+                            fontSize: '10px',
+                            fontWeight: 700
+                        },
+                        offsetY: 8
+                    }
+                });
+            }
+
+            const finalAnnotations = showMarkers ? annotations : { xaxis: [], yaxis: [], points: [] };
 
             // Determine y-axis formatter based on view
             const yAxisFormatter = currentView === 'percent'
@@ -1106,7 +1266,7 @@
                     xaxis: {
                         type: 'datetime',
                         labels: {
-                            style: { colors: '#64748b' },
+                            style: { colors: '#64748b', fontSize: '10px' },
                             formatter: function(value, timestamp) {
                                 const d = new Date(timestamp);
                                 // For longer time ranges, show date + time
@@ -1133,7 +1293,7 @@
                             }
                         }
                     },
-                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } },
+                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b', fontSize: '10px' } } },
                     stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
                     fill: {
                         type: 'gradient',
@@ -1141,7 +1301,7 @@
                     },
                     dataLabels: { enabled: false },
                     grid: { borderColor: '#1e293b', strokeDashArray: 2 },
-                    annotations: ddAnnotation,
+                    annotations: finalAnnotations,
                     tooltip: {
                         x: {
                             formatter: function(value) {
@@ -1162,8 +1322,8 @@
                 chart.render();
             } else {
                 chart.updateOptions({
-                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b' } } },
-                    annotations: ddAnnotation
+                    yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b', fontSize: '10px' } } },
+                    annotations: finalAnnotations
                 });
                 chart.updateSeries([{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }]);
             }
