@@ -446,7 +446,7 @@
                 </div>
                 <div class="mt-2 text-[11px] text-gray-500 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-4 relative z-10">
                     <div>Max DD <span class="text-orange-600 font-mono text-[12px] ml-1" id="disp-max-dd">0.00%</span></div>
-                    <div>Last Recovery <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-recovery">--</span></div>
+                    <div>Max DD Recovery <span class="text-gray-300 font-mono text-[12px] ml-1" id="disp-dd-recovery">--</span></div>
                 </div>
             </div>
 
@@ -540,12 +540,17 @@
             </div>
 
             <div class="glass-panel p-4 rounded-xl panel-reveal metric-card">
-                <div class="text-gray-500 text-[11px] uppercase">Volatility (StdDev) <span class="text-gray-600">波动率</span></div>
+                <div class="text-gray-500 text-[11px] uppercase">Volatility (Hourly StdDev) <span class="text-gray-600">时波动率</span></div>
                 <div class="flex items-end gap-2 mt-2">
                     <div class="text-l2 font-bold text-purple-400" id="disp-vol">0.00%</div>
                 </div>
+                <div id="volatility-spark" class="mt-2 h-12"></div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-gray-500">
+                    <div>Avg <span class="font-mono text-gray-300 ml-1" id="disp-vol-avg">--%</span></div>
+                    <div>Δ <span class="font-mono ml-1" id="disp-vol-delta">--</span></div>
+                </div>
                 <div class="text-[11px] text-gray-600 mt-2 border-t border-gray-800 pt-2">
-                    资金曲线平滑度 (越低越稳)
+                    基于小时收益率标准差 (越低越稳)
                 </div>
             </div>
 
@@ -567,6 +572,7 @@
         const DD_LIMIT_PCT = 10;
         let balanceData = []; // Array of {time, value, cumulative_equity}
         let chart;
+        let volSparkChart;
         let lastFetchTime = 0;
         let currentTimeRange = '1d'; // Default time range
         let currentView = 'equity'; // Default view: 'equity' (cumulative) or 'balance' (actual)
@@ -722,7 +728,6 @@
             }
 
             // 3. Volatility & Performance Metrics - Based on Equity
-            let volatility = 0;
             let sharpe = 0, calmar = 0, winRate = 0;
             if (maxDDRatio > 0 && maxDDPeakTime !== null && maxDDTroughTime !== null) {
                 maxDDWindow = { start: maxDDPeakTime, end: maxDDTroughTime };
@@ -744,8 +749,6 @@
                 if (returns.length > 0) {
                     const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
                     const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
-                    volatility = Math.sqrt(variance) * 100;
-
                     // --- New Metrics ---
 
                     // Win Rate
@@ -771,8 +774,12 @@
                 }
             }
 
+            const hourlySeries = buildHourlyEquitySeries(metricData);
+            const volSeries = buildVolatilitySeries(hourlySeries, 24);
+            const hourlyVol = computeSeriesVolatility(hourlySeries);
+
             // 4. Health Score
-            let score = 100 - (drawdown * 5) - (volatility * 2);
+            let score = 100 - (drawdown * 5) - (hourlyVol * 2);
             score = Math.max(0, Math.min(100, score));
 
             updateUI(
@@ -782,12 +789,14 @@
                 ddMinutes,
                 recoveryMinutes,
                 velocity,
-                volatility,
+                hourlyVol,
                 score,
                 sharpe,
                 calmar,
                 winRate
             );
+            updateVolatilityMeta(volSeries);
+            updateVolatilityChart(volSeries);
             updateChart();
         }
 
@@ -895,6 +904,129 @@
         // -------------------------------------
         // 5. Chart Rendering
         // -------------------------------------
+        function buildHourlyEquitySeries(metricData) {
+            if (!metricData || metricData.length === 0) return [];
+            const formatter = new Intl.DateTimeFormat('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Shanghai'
+            });
+            const hourly = [];
+            let lastKey = null;
+            for (const point of metricData) {
+                const key = formatter.format(point.time);
+                if (key !== lastKey) {
+                    hourly.push({ time: point.time, val: point.val });
+                    lastKey = key;
+                } else {
+                    hourly[hourly.length - 1] = { time: point.time, val: point.val };
+                }
+            }
+            return hourly;
+        }
+
+        function computeSeriesVolatility(metricData) {
+            if (!metricData || metricData.length < 2) return 0;
+            const returns = [];
+            for (let i = 1; i < metricData.length; i++) {
+                const prev = metricData[i - 1].val;
+                const ret = prev !== 0 ? (metricData[i].val - prev) / prev : 0;
+                returns.push(ret);
+            }
+            if (returns.length === 0) return 0;
+            const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+            const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
+            return Math.sqrt(variance) * 100;
+        }
+
+        function buildVolatilitySeries(metricData, windowSize = 20) {
+            if (!metricData || metricData.length < 2) return [];
+            const returns = [];
+            for (let i = 1; i < metricData.length; i++) {
+                const prev = metricData[i - 1].val;
+                const ret = prev !== 0 ? (metricData[i].val - prev) / prev : 0;
+                returns.push(ret);
+            }
+
+            const series = [];
+            for (let i = 0; i < returns.length; i++) {
+                const start = Math.max(0, i - windowSize + 1);
+                const slice = returns.slice(start, i + 1);
+                const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+                const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / slice.length;
+                const vol = Math.sqrt(variance) * 100;
+                series.push({ x: metricData[i + 1].time, y: parseFloat(vol.toFixed(4)) });
+            }
+            return series;
+        }
+
+        function updateVolatilityChart(seriesData) {
+            const container = document.querySelector("#volatility-spark");
+            if (!container) return;
+
+            if (!volSparkChart) {
+                const options = {
+                    chart: {
+                        type: 'line',
+                        height: 60,
+                        sparkline: { enabled: true },
+                        background: 'transparent'
+                    },
+                    theme: { mode: 'dark' },
+                    series: [{ name: 'Volatility', data: seriesData || [] }],
+                    stroke: { width: 2, curve: 'smooth', colors: ['#a855f7'] },
+                    fill: { opacity: 0.25 },
+                    tooltip: {
+                        enabled: true,
+                        x: {
+                            formatter: function(value) {
+                                return new Intl.DateTimeFormat('zh-CN', {
+                                    month: 'numeric',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false,
+                                    timeZone: 'Asia/Shanghai'
+                                }).format(value);
+                            }
+                        },
+                        y: { formatter: val => `${parseFloat(val).toFixed(2)}%` }
+                    }
+                };
+                volSparkChart = new ApexCharts(container, options);
+                volSparkChart.render();
+            } else {
+                volSparkChart.updateSeries([{ name: 'Volatility', data: seriesData || [] }]);
+            }
+        }
+
+        function updateVolatilityMeta(seriesData) {
+            const avgEl = document.getElementById('disp-vol-avg');
+            const deltaEl = document.getElementById('disp-vol-delta');
+            if (!avgEl || !deltaEl) return;
+
+            if (!seriesData || seriesData.length === 0) {
+                avgEl.innerText = '--%';
+                deltaEl.innerText = '--';
+                deltaEl.className = 'font-mono ml-1 text-gray-400';
+                return;
+            }
+
+            const values = seriesData.map(p => p.y);
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const latest = values[values.length - 1];
+            const prev = values.length > 1 ? values[values.length - 2] : latest;
+            const delta = latest - prev;
+
+            avgEl.innerText = `${avg.toFixed(2)}%`;
+            const sign = delta >= 0 ? '+' : '';
+            deltaEl.innerText = `${sign}${delta.toFixed(2)}%`;
+            deltaEl.className = `font-mono ml-1 ${delta >= 0 ? 'text-red-400' : 'text-emerald-400'}`;
+        }
+
         function updateChart() {
             // Get initial equity for percent calculation
             let initialEquity = null;
