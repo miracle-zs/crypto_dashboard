@@ -157,6 +157,27 @@
             color: var(--muted);
         }
 
+        /* KPI density normalization */
+        .kpi-card .metric-label {
+            font-size: 0.64rem;
+            line-height: 1.2;
+        }
+        .kpi-card .text-l1,
+        .kpi-card .text-l2,
+        .kpi-card .text-l3 {
+            line-height: 1.05;
+        }
+        .kpi-card .metric-label + .text-l1,
+        .kpi-card .metric-label + .text-l2,
+        .kpi-card .metric-label + .text-l3 {
+            margin-top: 0.35rem !important;
+        }
+        .kpi-card .text-l1 + .text-[11px],
+        .kpi-card .text-l2 + .text-[11px],
+        .kpi-card .text-l3 + .text-[11px] {
+            margin-top: 0.35rem !important;
+        }
+
         .text-l1 {
             font-size: clamp(2.5rem, 3vw, 3.2rem);
             line-height: 1;

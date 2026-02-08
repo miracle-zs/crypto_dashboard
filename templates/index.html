@@ -158,6 +158,27 @@
             color: var(--muted);
         }
 
+        /* KPI density normalization */
+        .kpi-card .metric-label {
+            font-size: 0.64rem;
+            line-height: 1.2;
+        }
+        .kpi-card .text-l1,
+        .kpi-card .text-l2,
+        .kpi-card .text-l3 {
+            line-height: 1.05;
+        }
+        .kpi-card .metric-label + .text-l1,
+        .kpi-card .metric-label + .text-l2,
+        .kpi-card .metric-label + .text-l3 {
+            margin-top: 0.35rem !important;
+        }
+        .kpi-card .text-l1 + .text-[11px],
+        .kpi-card .text-l2 + .text-[11px],
+        .kpi-card .text-l3 + .text-[11px] {
+            margin-top: 0.35rem !important;
+        }
+
         .text-l1 {
             font-size: clamp(2.5rem, 3vw, 3.2rem);
             line-height: 1;
@@ -393,7 +414,7 @@
                 </div>
                 <div class="text-right">
                     <div class="metric-label">Expectancy (EV) <span class="text-gray-600">单笔期望</span></div>
-                    <div class="text-l3 font-bold text-blue-400 mt-1" id="metric-ev">--</div>
+                    <div class="text-l3 font-bold text-emerald-400 mt-1" id="metric-ev">--</div>
                 </div>
             </div>
 
@@ -662,12 +683,14 @@
             document.getElementById('bar-winrate').style.width = stats.win_rate + '%';
 
             document.getElementById('metric-rr').innerText = stats.risk_reward_ratio.toFixed(2);
-            document.getElementById('metric-rr').className = `text-l2 font-bold mt-1 ${stats.risk_reward_ratio >= 1.5 ? 'text-yellow-400' : 'text-gray-500'}`;
+            document.getElementById('metric-rr').className = `text-l2 font-bold mt-1 ${stats.risk_reward_ratio >= 1.5 ? 'text-amber-400' : 'text-gray-500'}`;
 
             document.getElementById('metric-pf').innerText = stats.profit_factor.toFixed(2);
             document.getElementById('metric-pf').className = `text-l2 font-bold mt-1 ${stats.profit_factor >= 2 ? 'text-green-400' : 'text-gray-400'}`;
 
-            document.getElementById('metric-ev').innerText = `$${stats.expected_value.toFixed(0)}`;
+            const evEl = document.getElementById('metric-ev');
+            evEl.innerText = `$${stats.expected_value.toFixed(0)}`;
+            evEl.className = `text-l3 font-bold mt-1 ${stats.expected_value >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
 
             // Kelly
             const kellyPct = (stats.kelly_criterion * 100).toFixed(1);
