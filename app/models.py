@@ -56,3 +56,41 @@ class DailyStats(BaseModel):
     win_count: int
     loss_count: int
     win_rate: float
+
+
+class OpenPositionItem(BaseModel):
+    symbol: str
+    side: str
+    qty: float
+    entry_price: float
+    mark_price: Optional[float] = None
+    entry_time: str
+    holding_minutes: int
+    holding_time: str
+    entry_amount: float
+    notional: float
+    unrealized_pnl: Optional[float] = None
+    unrealized_pnl_pct: Optional[float] = None
+    weight: float
+
+
+class OpenPositionsSummary(BaseModel):
+    total_positions: int
+    long_count: int
+    short_count: int
+    total_notional: float
+    long_notional: float
+    short_notional: float
+    net_exposure: float
+    total_unrealized_pnl: float
+    avg_holding_minutes: float
+    avg_holding_time: str
+    concentration_top1: float
+    concentration_top3: float
+    concentration_hhi: float
+
+
+class OpenPositionsResponse(BaseModel):
+    as_of: str
+    positions: List[OpenPositionItem]
+    summary: OpenPositionsSummary

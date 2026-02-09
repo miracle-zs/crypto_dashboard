@@ -342,6 +342,11 @@
         .metric-card {
             min-height: 110px;
         }
+        .metric-slab {
+            background: #fff7e6;
+            border: 2px solid var(--border);
+            border-radius: 14px;
+        }
 
         #chart-container {
             transition: opacity 150ms ease;
@@ -583,6 +588,81 @@
                     </div>
             </div>
         </div>
+
+        <div class="lg:col-span-12">
+            <div class="section-label mt-2">OPEN POSITIONS</div>
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
+                <div class="lg:col-span-8">
+                    <div class="glass-panel rounded-xl overflow-hidden panel-reveal">
+                        <div class="flex justify-between items-center px-6 py-4 border-b border-gray-800">
+                            <h3 class="text-sm font-bold text-gray-300 flex items-center">
+                                <i data-lucide="layers" class="mr-2 w-4 h-4 text-amber-400"></i> OPEN POSITIONS
+                            </h3>
+                            <span class="text-[11px] text-gray-500">Floating PnL · Mark Price</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm text-gray-400 min-w-[760px] md:min-w-full">
+                                <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold sticky top-0 z-10 backdrop-blur">
+                                    <tr>
+                                        <th class="px-6 py-4">Symbol</th>
+                                        <th class="px-6 py-4">Side</th>
+                                        <th class="px-6 py-4">Entry Time</th>
+                                        <th class="px-6 py-4">Holding</th>
+                                        <th class="px-6 py-4 text-right">Entry</th>
+                                        <th class="px-6 py-4 text-right">Mark</th>
+                                        <th class="px-6 py-4 text-right">Notional</th>
+                                        <th class="px-6 py-4 text-right">uPnL</th>
+                                        <th class="px-6 py-4 text-right">uPnL %</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="open-positions-body" class="divide-y divide-gray-800"></tbody>
+                            </table>
+                        </div>
+                        <div id="open-positions-empty" class="px-6 py-6 text-sm text-gray-500 hidden">
+                            当前无未平仓订单
+                        </div>
+                    </div>
+                </div>
+                <div class="lg:col-span-4">
+                    <div class="glass-panel rounded-xl p-4 panel-reveal">
+                        <div class="metric-label">Exposure</div>
+                        <div class="grid grid-cols-2 gap-3 mt-3">
+                            <div class="metric-slab p-3">
+                                <div class="text-[11px] text-gray-500">Total Notional</div>
+                                <div class="text-l3 font-bold" id="open-total-notional">--</div>
+                                <div class="text-[11px] text-gray-500 mt-1">
+                                    Long <span class="font-mono" id="open-long-notional">--</span> /
+                                    Short <span class="font-mono" id="open-short-notional">--</span>
+                                </div>
+                            </div>
+                            <div class="metric-slab p-3">
+                                <div class="text-[11px] text-gray-500">Unrealized PnL</div>
+                                <div class="text-l3 font-bold" id="open-total-upnl">--</div>
+                                <div class="text-[11px] text-gray-500 mt-1">
+                                    Net <span class="font-mono" id="open-net-exposure">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap justify-between text-[11px] text-gray-500 mt-3">
+                            <span>Positions: <span id="open-total-count" class="text-gray-300">0</span></span>
+                            <span>Long: <span id="open-long-count" class="text-emerald-400">0</span></span>
+                            <span>Short: <span id="open-short-count" class="text-rose-400">0</span></span>
+                            <span>Avg Hold: <span id="open-avg-hold" class="text-gray-300">--</span></span>
+                        </div>
+
+                        <div class="mt-4">
+                            <div class="metric-label">Concentration</div>
+                            <div class="mt-2 text-[11px] text-gray-500 flex justify-between">
+                                <span>Top1 <span id="open-conc-top1" class="text-amber-400">--%</span></span>
+                                <span>Top3 <span id="open-conc-top3" class="text-amber-400">--%</span></span>
+                                <span>HHI <span id="open-conc-hhi" class="text-gray-400">--</span></span>
+                            </div>
+                            <div class="mt-3 space-y-3" id="open-concentration-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -691,6 +771,8 @@
                 console.error("Fetch error:", error);
                 logToTerminal(`数据获取失败: ${error.message}`, "error");
             }
+
+            await fetchOpenPositions();
         }
 
         // -------------------------------------
@@ -1358,6 +1440,154 @@
             const m = total % 60;
             if (h <= 0) return `${m}m`;
             return `${h}h ${m}m`;
+        }
+
+        function formatNumber(val, digits = 2) {
+            if (val === null || val === undefined || Number.isNaN(Number(val))) return '--';
+            return Number(val).toLocaleString(undefined, { maximumFractionDigits: digits });
+        }
+
+        function formatMoney(val, digits = 0) {
+            if (val === null || val === undefined || Number.isNaN(Number(val))) return '--';
+            return '$' + Number(val).toLocaleString(undefined, { maximumFractionDigits: digits });
+        }
+
+        function formatSignedMoney(val, digits = 0) {
+            if (val === null || val === undefined || Number.isNaN(Number(val))) return '--';
+            const num = Number(val);
+            const abs = Math.abs(num).toLocaleString(undefined, { maximumFractionDigits: digits });
+            return `${num >= 0 ? '+' : '-'}$${abs}`;
+        }
+
+        function formatPct(val, digits = 2) {
+            if (val === null || val === undefined || Number.isNaN(Number(val))) return '--';
+            return `${Number(val).toFixed(digits)}%`;
+        }
+
+        async function fetchOpenPositions() {
+            try {
+                const response = await fetch('/api/open-positions');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                renderOpenPositions(data);
+            } catch (error) {
+                console.error("Open positions fetch error:", error);
+                logToTerminal(`持仓获取失败: ${error.message}`, "warn");
+            }
+        }
+
+        function renderOpenPositions(openData) {
+            const tbody = document.getElementById('open-positions-body');
+            const emptyEl = document.getElementById('open-positions-empty');
+            const summary = openData && openData.summary ? openData.summary : {};
+            const positions = openData && openData.positions ? openData.positions : [];
+
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (!positions.length) {
+                if (emptyEl) emptyEl.classList.remove('hidden');
+            } else {
+                if (emptyEl) emptyEl.classList.add('hidden');
+            }
+
+            const sortedPositions = [...positions].sort((a, b) => {
+                const aTime = Date.parse(String(a.entry_time || '').replace(' ', 'T')) || 0;
+                const bTime = Date.parse(String(b.entry_time || '').replace(' ', 'T')) || 0;
+                return bTime - aTime;
+            });
+
+            sortedPositions.forEach(pos => {
+                const sideClass = pos.side === 'LONG'
+                    ? 'text-emerald-400 border-emerald-500/30'
+                    : 'text-rose-400 border-rose-500/30';
+                const pnlVal = Number(pos.unrealized_pnl);
+                const pnlClass = pnlVal >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
+                const row = `
+                    <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800">
+                        <td class="px-6 py-4 font-bold text-cyan-400">${pos.symbol}</td>
+                        <td class="px-6 py-4">
+                            <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
+                        </td>
+                        <td class="px-6 py-4 text-xs font-mono">${pos.entry_time}</td>
+                        <td class="px-6 py-4 text-xs font-mono">${pos.holding_time}</td>
+                        <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.entry_price, 3)}</td>
+                        <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.mark_price, 3)}</td>
+                        <td class="px-6 py-4 text-right font-mono">${formatMoney(pos.notional, 0)}</td>
+                        <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatSignedMoney(pos.unrealized_pnl, 0)}</td>
+                        <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatPct(pos.unrealized_pnl_pct, 2)}</td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+
+            const totalNotional = Number(summary.total_notional || 0);
+            const totalUpnl = Number(summary.total_unrealized_pnl || 0);
+            const netExposure = Number(summary.net_exposure || 0);
+
+            const totalNotionalEl = document.getElementById('open-total-notional');
+            const longNotionalEl = document.getElementById('open-long-notional');
+            const shortNotionalEl = document.getElementById('open-short-notional');
+            const totalUpnlEl = document.getElementById('open-total-upnl');
+            const netExposureEl = document.getElementById('open-net-exposure');
+            const totalCountEl = document.getElementById('open-total-count');
+            const longCountEl = document.getElementById('open-long-count');
+            const shortCountEl = document.getElementById('open-short-count');
+            const avgHoldEl = document.getElementById('open-avg-hold');
+            const top1El = document.getElementById('open-conc-top1');
+            const top3El = document.getElementById('open-conc-top3');
+            const hhiEl = document.getElementById('open-conc-hhi');
+            const listEl = document.getElementById('open-concentration-list');
+
+            if (totalNotionalEl) totalNotionalEl.innerText = formatMoney(totalNotional, 0);
+            if (longNotionalEl) longNotionalEl.innerText = formatMoney(summary.long_notional || 0, 0);
+            if (shortNotionalEl) shortNotionalEl.innerText = formatMoney(summary.short_notional || 0, 0);
+            if (totalUpnlEl) {
+                totalUpnlEl.innerText = formatSignedMoney(totalUpnl, 0);
+                totalUpnlEl.className = `text-l3 font-bold ${totalUpnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+            }
+            if (netExposureEl) netExposureEl.innerText = formatSignedMoney(netExposure, 0);
+            if (totalCountEl) totalCountEl.innerText = summary.total_positions || 0;
+            if (longCountEl) longCountEl.innerText = summary.long_count || 0;
+            if (shortCountEl) shortCountEl.innerText = summary.short_count || 0;
+            if (avgHoldEl) avgHoldEl.innerText = summary.avg_holding_time || '--';
+            if (top1El) top1El.innerText = formatPct((summary.concentration_top1 || 0) * 100, 1);
+            if (top3El) top3El.innerText = formatPct((summary.concentration_top3 || 0) * 100, 1);
+            if (hhiEl) hhiEl.innerText = formatNumber(summary.concentration_hhi || 0, 3);
+
+            if (listEl) {
+                if (!positions.length) {
+                    listEl.innerHTML = `<div class=\"text-[11px] text-gray-500\">暂无仓位</div>`;
+                } else {
+                    const symbolTotals = {};
+                    positions.forEach(pos => {
+                        const symbol = pos.symbol || '--';
+                        symbolTotals[symbol] = (symbolTotals[symbol] || 0) + (pos.notional || 0);
+                    });
+                    const topSymbols = Object.entries(symbolTotals)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5);
+
+                    listEl.innerHTML = topSymbols.map(([symbol, value]) => {
+                        const share = totalNotional > 0 ? (value / totalNotional) : 0;
+                        const pct = (share * 100).toFixed(1);
+                        return `
+                            <div class="space-y-1">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="text-white font-mono">${symbol}</span>
+                                    <span class="text-gray-400 font-mono">${pct}%</span>
+                                </div>
+                                <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-amber-400" style="width: ${pct}%"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
         }
 
         function startUpdateCycle() {

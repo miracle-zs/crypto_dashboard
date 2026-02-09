@@ -3,20 +3,23 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.services import BinanceOrderAnalyzer
-from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats
+from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats, OpenPositionsResponse
 from app.scheduler import get_scheduler
 from app.database import Database
 import os
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timedelta, timezone
 from app.logger import logger, read_logs
+import requests
+from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
 
 # 定义UTC+8时区
 UTC8 = timezone(timedelta(hours=8))
+BINANCE_FAPI_BASE = "https://fapi.binance.com"
 
 app = FastAPI(title="Zero Gravity Dashboard")
 
@@ -31,6 +34,63 @@ db = Database()
 
 # Scheduler instance
 scheduler = None
+
+
+def _format_holding_time(total_minutes: int) -> str:
+    if total_minutes <= 0:
+        return "0m"
+    if total_minutes < 60:
+        return f"{total_minutes}m"
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    if hours < 24:
+        return f"{hours}h {minutes}m"
+    days = hours // 24
+    hours = hours % 24
+    return f"{days}d {hours}h"
+
+
+def _normalize_symbol(symbol: str) -> str:
+    return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
+
+
+def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
+    if not symbols:
+        return {}
+
+    unique_symbols = sorted(set(symbols))
+
+    try:
+        response = requests.get(f"{BINANCE_FAPI_BASE}/fapi/v1/premiumIndex", timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict):
+            data = [data]
+        price_map = {
+            item["symbol"]: float(item["markPrice"])
+            for item in data
+            if isinstance(item, dict) and "symbol" in item and "markPrice" in item
+        }
+        return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
+    except Exception as exc:
+        logger.warning(f"Failed to fetch mark prices via premiumIndex: {exc}")
+
+    try:
+        response = requests.get(f"{BINANCE_FAPI_BASE}/fapi/v1/ticker/price", timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict):
+            data = [data]
+        price_map = {
+            item["symbol"]: float(item["price"])
+            for item in data
+            if isinstance(item, dict) and "symbol" in item and "price" in item
+        }
+        return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
+    except Exception as exc:
+        logger.warning(f"Failed to fetch mark prices via ticker/price: {exc}")
+
+    return {}
 
 
 @app.on_event("startup")
@@ -167,6 +227,146 @@ async def get_trades():
     """Get list of individual trades"""
     trades = analyzer.get_trades_list()
     return trades
+
+
+@app.get("/api/open-positions", response_model=OpenPositionsResponse)
+async def get_open_positions():
+    """Get open positions with unrealized PnL and concentration metrics"""
+    raw_positions = db.get_open_positions()
+    now = datetime.now(UTC8)
+
+    if not raw_positions:
+        return {
+            "as_of": now.isoformat(),
+            "positions": [],
+            "summary": {
+                "total_positions": 0,
+                "long_count": 0,
+                "short_count": 0,
+                "total_notional": 0.0,
+                "long_notional": 0.0,
+                "short_notional": 0.0,
+                "net_exposure": 0.0,
+                "total_unrealized_pnl": 0.0,
+                "avg_holding_minutes": 0.0,
+                "avg_holding_time": "0m",
+                "concentration_top1": 0.0,
+                "concentration_top3": 0.0,
+                "concentration_hhi": 0.0
+            }
+        }
+
+    symbols_full = [_normalize_symbol(pos["symbol"]) for pos in raw_positions]
+    mark_prices = _fetch_mark_price_map(symbols_full)
+
+    positions = []
+    per_symbol_notional = defaultdict(float)
+    total_notional = 0.0
+    long_notional = 0.0
+    short_notional = 0.0
+    total_unrealized_pnl = 0.0
+    total_holding_minutes = 0
+
+    for pos in raw_positions:
+        symbol = str(pos.get("symbol", "")).upper()
+        side = str(pos.get("side", "")).upper()
+        qty = float(pos.get("qty", 0.0))
+        entry_price = float(pos.get("entry_price", 0.0))
+        entry_amount = float(pos.get("entry_amount") or (entry_price * qty))
+        entry_time_str = str(pos.get("entry_time"))
+
+        symbol_full = _normalize_symbol(symbol)
+        mark_price = mark_prices.get(symbol_full)
+        price_for_notional = mark_price if mark_price is not None else entry_price
+        notional = float(price_for_notional * qty)
+
+        unrealized_pnl = None
+        unrealized_pnl_pct = None
+        if mark_price is not None and qty > 0:
+            if side == "SHORT":
+                unrealized_pnl = (entry_price - mark_price) * qty
+            else:
+                unrealized_pnl = (mark_price - entry_price) * qty
+            if entry_amount > 0:
+                unrealized_pnl_pct = (unrealized_pnl / entry_amount) * 100
+
+        try:
+            entry_dt = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
+        except ValueError:
+            entry_dt = now
+
+        holding_minutes = max(0, int((now - entry_dt).total_seconds() // 60))
+        holding_time = _format_holding_time(holding_minutes)
+
+        total_notional += notional
+        total_holding_minutes += holding_minutes
+        if side == "SHORT":
+            short_notional += notional
+        else:
+            long_notional += notional
+
+        if unrealized_pnl is not None:
+            total_unrealized_pnl += unrealized_pnl
+
+        per_symbol_notional[symbol] += notional
+
+        positions.append({
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "entry_price": entry_price,
+            "mark_price": mark_price,
+            "entry_time": entry_time_str,
+            "holding_minutes": holding_minutes,
+            "holding_time": holding_time,
+            "entry_amount": entry_amount,
+            "notional": notional,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "weight": 0.0
+        })
+
+    if total_notional > 0:
+        for pos in positions:
+            pos["weight"] = pos["notional"] / total_notional
+
+    positions.sort(key=lambda item: item["notional"], reverse=True)
+
+    shares = []
+    if total_notional > 0:
+        shares = sorted(
+            (value / total_notional for value in per_symbol_notional.values()),
+            reverse=True
+        )
+
+    concentration_top1 = shares[0] if shares else 0.0
+    concentration_top3 = sum(shares[:3]) if shares else 0.0
+    concentration_hhi = sum(share ** 2 for share in shares) if shares else 0.0
+
+    avg_holding_minutes = (total_holding_minutes / len(positions)) if positions else 0.0
+    avg_holding_time = _format_holding_time(int(avg_holding_minutes))
+
+    summary = {
+        "total_positions": len(positions),
+        "long_count": sum(1 for p in positions if p["side"] == "LONG"),
+        "short_count": sum(1 for p in positions if p["side"] == "SHORT"),
+        "total_notional": total_notional,
+        "long_notional": long_notional,
+        "short_notional": short_notional,
+        "net_exposure": long_notional - short_notional,
+        "total_unrealized_pnl": total_unrealized_pnl,
+        "avg_holding_minutes": avg_holding_minutes,
+        "avg_holding_time": avg_holding_time,
+        "concentration_top1": concentration_top1,
+        "concentration_top3": concentration_top3,
+        "concentration_hhi": concentration_hhi
+    }
+
+    return {
+        "as_of": now.isoformat(),
+        "positions": positions,
+        "summary": summary
+    }
 
 
 @app.get("/api/status")
