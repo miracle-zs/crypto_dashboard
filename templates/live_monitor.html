@@ -1843,7 +1843,7 @@
             const capEl = document.getElementById('proto-cap');
 
             // Check Stale (> 48h = 2880 mins)
-            let hasStale = positions.some(p => (p.holding_minutes || 0) > 2880);
+            let hasStale = positions.some(p => !p.is_long_term && (p.holding_minutes || 0) > 2880);
             if (staleEl) {
                 if (hasStale) {
                      staleEl.innerText = "WARNING";
