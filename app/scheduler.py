@@ -316,6 +316,76 @@ class TradeDataScheduler:
         except Exception as e:
             logger.error(f"睡前风控检查失败: {e}")
 
+    def check_recent_losses_at_noon(self):
+        """每天中午11:50检查24小时内开仓且当前浮亏的订单"""
+        try:
+            positions = self.db.get_open_positions()
+            now = datetime.now(UTC8)
+            loss_positions = []
+
+            for pos in positions:
+                # 跳过长期持仓
+                if pos.get('is_long_term'):
+                    continue
+
+                entry_time_str = pos['entry_time']
+                try:
+                    entry_dt = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
+                except ValueError:
+                    continue
+
+                # 检查是否在24小时内开仓
+                if (now - entry_dt).total_seconds() <= 24 * 3600:
+                    # 获取实时价格计算浮盈
+                    try:
+                        # 临时获取当前价格
+                        ticker = self.analyzer.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
+                        if ticker:
+                            current_price = float(ticker['price'])
+                            entry_price = float(pos['entry_price'])
+                            qty = float(pos['qty'])
+                            side = pos['side']
+
+                            if side == 'LONG':
+                                pnl = (current_price - entry_price) * qty
+                            else:
+                                pnl = (entry_price - current_price) * qty
+
+                            pos['current_pnl'] = pnl
+                            pos['current_price'] = current_price
+
+                            # 如果浮亏
+                            if pnl < 0:
+                                loss_positions.append(pos)
+                    except Exception as e:
+                        logger.warning(f"获取实时价格失败: {e}")
+
+            if loss_positions:
+                count = len(loss_positions)
+                title = f"⚠️ 午间浮亏警报: {count}个新订单"
+                content = f"北京时间 11:50 监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
+                content += "--- \n"
+
+                # 按亏损金额排序 (从小到大，即亏损最多的在前)
+                loss_positions.sort(key=lambda x: x['current_pnl'])
+
+                for pos in loss_positions:
+                    pnl_val = pos['current_pnl']
+                    content += (
+                        f"**{pos['symbol']}** ({pos['side']})\n"
+                        f"- 浮亏: 🔴 {pnl_val:.2f} U\n"
+                        f"- 开仓: {pos['entry_price']}\n"
+                        f"- 现价: {pos.get('current_price', '--')}\n"
+                        f"- 时间: {pos['entry_time']}\n\n"
+                    )
+
+                content += "请及时关注风险。"
+                send_server_chan_notification(title, content)
+                logger.info(f"已发送午间浮亏提醒: {count} 个订单")
+
+        except Exception as e:
+            logger.error(f"午间风控检查失败: {e}")
+
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""
         if not self.analyzer:
@@ -424,6 +494,15 @@ class TradeDataScheduler:
             trigger=CronTrigger(hour=23, minute=0, timezone=UTC8),
             id='risk_check_sleep',
             name='睡前风控检查',
+            replace_existing=True
+        )
+
+        # 添加午间浮亏检查任务 - 每天 11:50 (UTC+8) 执行
+        self.scheduler.add_job(
+            func=self.check_recent_losses_at_noon,
+            trigger=CronTrigger(hour=11, minute=50, timezone=UTC8),
+            id='check_losses_noon',
+            name='午间浮亏检查',
             replace_existing=True
         )
 

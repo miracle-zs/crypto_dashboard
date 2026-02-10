@@ -273,6 +273,7 @@ async def get_open_positions():
     short_notional = 0.0
     total_unrealized_pnl = 0.0
     total_holding_minutes = 0
+    recent_loss_count = 0
 
     for pos in raw_positions:
         symbol = str(pos.get("symbol", "")).upper()
@@ -281,6 +282,7 @@ async def get_open_positions():
         entry_price = float(pos.get("entry_price", 0.0))
         entry_amount = float(pos.get("entry_amount") or (entry_price * qty))
         entry_time_str = str(pos.get("entry_time"))
+        is_long_term = pos.get("is_long_term", 0) == 1
 
         symbol_full = _normalize_symbol(symbol)
         mark_price = mark_prices.get(symbol_full)
@@ -304,6 +306,11 @@ async def get_open_positions():
 
         holding_minutes = max(0, int((now - entry_dt).total_seconds() // 60))
         holding_time = _format_holding_time(holding_minutes)
+
+        # 检查是否为24h内浮亏
+        if not is_long_term and holding_minutes <= 24 * 60:
+            if unrealized_pnl is not None and unrealized_pnl < 0:
+                recent_loss_count += 1
 
         total_notional += notional
         total_holding_minutes += holding_minutes
@@ -368,7 +375,8 @@ async def get_open_positions():
         "avg_holding_time": avg_holding_time,
         "concentration_top1": concentration_top1,
         "concentration_top3": concentration_top3,
-        "concentration_hhi": concentration_hhi
+        "concentration_hhi": concentration_hhi,
+        "recent_loss_count": recent_loss_count
     }
 
     return {

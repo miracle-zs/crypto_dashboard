@@ -753,6 +753,15 @@
                                 </div>
                                 <div class="flex items-center justify-between bg-black/20 p-2 rounded border border-gray-800/50">
                                     <div class="flex flex-col">
+                                        <span class="text-[11px] text-gray-400 font-bold">RECENT LOSS</span>
+                                        <span class="text-[9px] text-gray-600">Rule: 24h Loss > 0 @ Noon</span>
+                                    </div>
+                                    <div id="proto-loss" class="px-2 py-1 rounded text-[10px] font-bold bg-gray-800 text-gray-500 border border-gray-700">
+                                        CHECKING
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between bg-black/20 p-2 rounded border border-gray-800/50">
+                                    <div class="flex flex-col">
                                         <span class="text-[11px] text-gray-400 font-bold">OVERNIGHT CAP</span>
                                         <span class="text-[9px] text-gray-600">Rule: Max 5 Symbols @ 23:00</span>
                                     </div>
@@ -1840,6 +1849,7 @@
 
             // Risk Protocol Updates
             const staleEl = document.getElementById('proto-stale');
+            const lossEl = document.getElementById('proto-loss');
             const capEl = document.getElementById('proto-cap');
 
             // Check Stale (> 48h = 2880 mins)
@@ -1851,6 +1861,18 @@
                 } else {
                      staleEl.innerText = "PASS";
                      staleEl.className = "px-2 py-1 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                }
+            }
+
+            // Check Recent Loss (24h)
+            if (lossEl) {
+                const recentLossCount = summary.recent_loss_count || 0;
+                if (recentLossCount > 0) {
+                     lossEl.innerText = recentLossCount + " FAILED";
+                     lossEl.className = "px-2 py-1 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse";
+                } else {
+                     lossEl.innerText = "PASS";
+                     lossEl.className = "px-2 py-1 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
                 }
             }
 

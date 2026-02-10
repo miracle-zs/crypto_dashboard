@@ -90,6 +90,7 @@ class OpenPositionsSummary(BaseModel):
     concentration_top1: float
     concentration_top3: float
     concentration_hhi: float
+    recent_loss_count: int = 0  # New field for risk protocol
 
 
 class OpenPositionsResponse(BaseModel):
