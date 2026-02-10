@@ -200,6 +200,16 @@ class Database:
             except Exception as e:
                 logger.warning(f"列添加失败(可能已存在): {e}")
 
+        # 检查是否需要迁移 is_long_term 列
+        try:
+            cursor.execute("SELECT is_long_term FROM open_positions LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 is_long_term 列...")
+            try:
+                cursor.execute("ALTER TABLE open_positions ADD COLUMN is_long_term INTEGER DEFAULT 0")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
         # 创建用户设置表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
@@ -823,7 +833,7 @@ class Database:
 
     def save_open_positions(self, positions: List[Dict]) -> int:
         """
-        保存未平仓订单（全量替换，但保留 alerted 状态）
+        保存未平仓订单（全量替换，但保留 alerted 和 is_long_term 状态）
 
         Args:
             positions: 未平仓订单列表
@@ -834,17 +844,20 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # 1. 获取现有记录的 alerted 状态和 last_alert_time
+        # 1. 获取现有记录的 alerted 状态、last_alert_time 和 is_long_term
         state_map = {}
         try:
-            # 检查列是否存在（为了兼容旧库，虽然上面init做了迁移，但为了保险）
+            # 检查列是否存在
             cursor.execute("PRAGMA table_info(open_positions)")
             columns = [info[1] for info in cursor.fetchall()]
 
-            query = "SELECT symbol, order_id, alerted"
+            query_cols = ["symbol", "order_id", "alerted"]
             if 'last_alert_time' in columns:
-                query += ", last_alert_time"
-            query += " FROM open_positions"
+                query_cols.append("last_alert_time")
+            if 'is_long_term' in columns:
+                query_cols.append("is_long_term")
+
+            query = f"SELECT {', '.join(query_cols)} FROM open_positions"
 
             cursor.execute(query)
             for row in cursor.fetchall():
@@ -852,6 +865,8 @@ class Database:
                 state_data = {'alerted': row['alerted']}
                 if 'last_alert_time' in columns:
                     state_data['last_alert_time'] = row['last_alert_time']
+                if 'is_long_term' in columns:
+                    state_data['is_long_term'] = row['is_long_term']
                 state_map[key] = state_data
         except Exception as e:
             logger.warning(f"读取状态失败: {e}")
@@ -865,11 +880,12 @@ class Database:
             saved_state = state_map.get(key, {})
             is_alerted = saved_state.get('alerted', 0)
             last_alert_time = saved_state.get('last_alert_time', None)
+            is_long_term = saved_state.get('is_long_term', 0)
 
             cursor.execute("""
                 INSERT INTO open_positions (
-                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id, alerted, last_alert_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id, alerted, last_alert_time, is_long_term
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 pos['date'],
                 pos['symbol'],
@@ -880,7 +896,8 @@ class Database:
                 pos['entry_amount'],
                 pos['order_id'],
                 is_alerted,
-                last_alert_time
+                last_alert_time,
+                is_long_term
             ))
 
         conn.commit()
@@ -897,6 +914,18 @@ class Database:
             SET alerted = 1, last_alert_time = CURRENT_TIMESTAMP
             WHERE symbol = ? AND order_id = ?
         """, (symbol, order_id))
+        conn.commit()
+        conn.close()
+
+    def set_position_long_term(self, symbol: str, order_id: int, is_long_term: bool):
+        """设置持仓是否为长期持仓"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE open_positions
+            SET is_long_term = ?
+            WHERE symbol = ? AND order_id = ?
+        """, (1 if is_long_term else 0, symbol, order_id))
         conn.commit()
         conn.close()
 

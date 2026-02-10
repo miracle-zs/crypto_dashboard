@@ -60,6 +60,7 @@ class DailyStats(BaseModel):
 
 class OpenPositionItem(BaseModel):
     symbol: str
+    order_id: int
     side: str
     qty: float
     entry_price: float
@@ -72,6 +73,7 @@ class OpenPositionItem(BaseModel):
     unrealized_pnl: Optional[float] = None
     unrealized_pnl_pct: Optional[float] = None
     weight: float
+    is_long_term: bool = False
 
 
 class OpenPositionsSummary(BaseModel):

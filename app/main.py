@@ -319,6 +319,7 @@ async def get_open_positions():
 
         positions.append({
             "symbol": symbol,
+            "order_id": pos.get("order_id"),
             "side": side,
             "qty": qty,
             "entry_price": entry_price,
@@ -330,6 +331,7 @@ async def get_open_positions():
             "notional": notional,
             "unrealized_pnl": unrealized_pnl,
             "unrealized_pnl_pct": unrealized_pnl_pct,
+            "is_long_term": pos.get("is_long_term", 0) == 1,
             "weight": 0.0
         })
 
@@ -473,3 +475,10 @@ async def set_monthly_target(target: float = Query(..., description="Monthly tar
 
     db.set_monthly_target(target)
     return {"message": "目标已更新", "target": target}
+
+
+@app.post("/api/positions/set-long-term")
+async def set_long_term(symbol: str, order_id: int, is_long_term: bool):
+    """设置持仓是否为长期持仓"""
+    db.set_position_long_term(symbol, order_id, is_long_term)
+    return {"message": "状态已更新", "symbol": symbol, "is_long_term": is_long_term}

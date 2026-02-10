@@ -24,6 +24,19 @@
             --warn: #f97316;
             --shadow: 6px 6px 0 rgba(17, 24, 39, 0.9);
         }
+
+        /* Dark Mode Variables */
+        body.dark-mode {
+            --bg: #0f172a;
+            --panel: rgba(30, 41, 59, 0.65);
+            --panel-strong: #1e293b;
+            --border: #334155;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --primary: #f8fafc;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+
         * { box-sizing: border-box; }
         body {
             font-family: 'Barlow', system-ui, sans-serif;
@@ -31,10 +44,16 @@
             background-color: var(--bg);
             color: var(--text);
             background-image: linear-gradient(180deg, #f7f3ea 0%, #f1f5f9 55%, #f7f3ea 100%);
+            transition: background-color 0.5s ease, color 0.5s ease;
         }
+        body.dark-mode {
+            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+        }
+
         .font-mono {
             font-family: 'Space Mono', monospace;
         }
+
         body::before {
             content: '';
             position: fixed;
@@ -71,6 +90,26 @@
             letter-spacing: 0.18em;
             text-transform: uppercase;
             font-size: 0.68rem;
+        }
+
+        /* Theme Toggle Button */
+        .theme-toggle {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            color: var(--muted);
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .theme-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+            transform: rotate(15deg);
         }
 
         .status-pill {
@@ -328,15 +367,39 @@
             border: 2px solid var(--border);
             border-radius: 14px;
         }
+        body.dark-mode .metric-slab {
+            background: rgba(15, 23, 42, 0.6);
+            border-color: #334155;
+        }
+        body.dark-mode .metric-slab .text-gray-500 {
+            color: #94a3b8 !important;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            background: #fff3db;
+            color: #111827;
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+        body.dark-mode .status-pill {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
 
     </style>
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
-    <div class="scan-line"></div>
-
-    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-10">
-        <div class="flex flex-col gap-3 text-center lg:text-left">
+    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-50">
+        <div class="flex flex-col gap-3 text-center lg:text-left items-center lg:items-start">
             <div class="status-pill">
                 <span class="status-dot"></span>
                 SYSTEM ONLINE
@@ -352,14 +415,17 @@
             <a href="/metrics" class="nav-link">METRICS</a>
             <a href="/logs" class="nav-link">LOGS</a>
         </nav>
-        <div class="text-center lg:text-right space-y-2">
+        <div class="text-center lg:text-right space-y-2 flex flex-col items-end">
+            <button id="btn-theme-toggle" class="theme-toggle mb-2" title="Toggle Dark Mode">
+                <i data-lucide="moon" class="w-4 h-4"></i>
+            </button>
             <div class="panel-meta">Trading Philosophy</div>
             <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
             <div class="panel-meta">Last Update (UTC+8): <span id="last-updated" class="text-teal-200">--</span></div>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-10">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-20">
         
         <div class="lg:col-span-4 space-y-6">
             <div class="section-label">CORE METRICS</div>
@@ -523,8 +589,8 @@
         </div>
     </div>
 
-    <div class="section-label mb-4 relative z-10">STRATEGY METRICS</div>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-10">
+    <div class="section-label mb-4 relative z-20">STRATEGY METRICS</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-20">
         <div class="cyber-panel rounded-lg p-4 border-t-2 border-blue-500 panel-reveal kpi-card kpi-small">
             <div class="metric-label">Win Rate <span class="text-gray-600">胜率</span></div>
             <div class="text-l2 font-bold text-white mt-1" id="metric-winrate">--%</div>
@@ -549,7 +615,7 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-10">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-20">
         <div class="lg:col-span-8">
             <div class="section-label mb-4">TRADE LOG</div>
             <div class="cyber-panel rounded-xl overflow-hidden panel-reveal">
@@ -779,7 +845,7 @@
                     fontFamily: 'Share Tech Mono'
                 },
                 series: [{ name: 'Equity', data: dataPoints }],
-                theme: { mode: 'dark' },
+                theme: { mode: document.body.classList.contains('dark-mode') ? 'dark' : 'light' },
                 stroke: { curve: 'smooth', width: 2.5, colors: ['#0ea5e9'] },
                 fill: {
                     type: 'gradient',
@@ -792,7 +858,7 @@
                     }
                 },
                 dataLabels: { enabled: false },
-                grid: { borderColor: '#1e293b', strokeDashArray: 4 },
+                grid: { borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0', strokeDashArray: 4 },
                 xaxis: {
                     categories: categories,
                     labels: { style: { colors: '#64748b' }, show: false }, // Hide labels if too many
@@ -805,7 +871,7 @@
                         formatter: (value) => { return "$" + (value / 1000).toFixed(1) + "k" }
                     }
                 },
-                tooltip: { theme: 'dark' }
+                tooltip: { theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light' }
             };
 
             if (equityChartInstance) {
@@ -848,7 +914,7 @@
                 ],
                 colors: ['#10b981', '#ef4444'], // Green, Red
                 grid: {
-                    borderColor: '#1e293b',
+                    borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0',
                     strokeDashArray: 4,
                     xaxis: { lines: { show: true } },
                     yaxis: { lines: { show: true } },
@@ -867,7 +933,7 @@
                 },
                 markers: { size: 4, strokeWidth: 0, hover: { size: 6 } },
                 tooltip: {
-                    theme: 'dark',
+                    theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
                     custom: function({series, seriesIndex, dataPointIndex, w}) {
                         const data = w.config.series[seriesIndex].data[dataPointIndex];
                         return `
@@ -937,7 +1003,7 @@
                 },
                 dataLabels: { enabled: false },
                 grid: {
-                    borderColor: '#1e293b',
+                    borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0',
                     strokeDashArray: 4,
                     yaxis: { lines: { show: true } },
                     xaxis: { lines: { show: false } }
@@ -965,7 +1031,7 @@
                     }
                 },
                 tooltip: {
-                    theme: 'dark',
+                    theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
                     y: {
                         formatter: function (val) {
                             return "$" + val.toLocaleString();
@@ -1035,7 +1101,7 @@
                 },
                 dataLabels: { enabled: false },
                 tooltip: {
-                    theme: 'dark',
+                    theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
                     shared: true,
                     intersect: false,
                     y: [
@@ -1044,7 +1110,7 @@
                     ]
                 },
                 grid: {
-                    borderColor: '#1e293b',
+                    borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0',
                     strokeDashArray: 4
                 },
                 xaxis: {
@@ -1091,7 +1157,7 @@
                     markers: { width: 8, height: 8 }
                 },
                 tooltip: {
-                    theme: 'dark',
+                    theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
                     shared: true,
                     y: {
                         formatter: function (val, { seriesIndex }) {
@@ -1338,6 +1404,34 @@
                 alert('保存失败');
             }
         }
+
+        // Theme Handling
+        const btnThemeToggle = document.getElementById('btn-theme-toggle');
+        let isDarkMode = localStorage.getItem('theme') === 'dark';
+
+        function applyTheme(dark) {
+            if (dark) {
+                document.body.classList.add('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="sun" class="w-4 h-4"></i>';
+            } else {
+                document.body.classList.remove('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="moon" class="w-4 h-4"></i>';
+            }
+            lucide.createIcons();
+            // Refresh data to update charts theme
+            fetchDashboardData();
+        }
+
+        if (btnThemeToggle) {
+            btnThemeToggle.addEventListener('click', () => {
+                isDarkMode = !isDarkMode;
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+                applyTheme(isDarkMode);
+            });
+        }
+
+        // Initialize Theme
+        applyTheme(isDarkMode);
 
     </script>
 </body>

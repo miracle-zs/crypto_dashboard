@@ -23,6 +23,19 @@
             --warn: #f97316;
             --shadow: 6px 6px 0 rgba(17, 24, 39, 0.9);
         }
+
+        /* Dark Mode Variables */
+        body.dark-mode {
+            --bg: #0f172a;
+            --panel: rgba(30, 41, 59, 0.65);
+            --panel-strong: #1e293b;
+            --border: #334155;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --primary: #f8fafc;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+
         * { box-sizing: border-box; }
         body {
             font-family: 'Barlow', system-ui, sans-serif;
@@ -30,10 +43,16 @@
             background-color: var(--bg);
             color: var(--text);
             background-image: linear-gradient(180deg, #f7f3ea 0%, #f1f5f9 55%, #f7f3ea 100%);
+            transition: background-color 0.5s ease, color 0.5s ease;
         }
+        body.dark-mode {
+            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+        }
+
         .font-mono {
             font-family: 'Space Mono', monospace;
         }
+
         body::before {
             content: '';
             position: fixed;
@@ -72,6 +91,26 @@
             font-size: 0.68rem;
         }
 
+        /* Theme Toggle Button */
+        .theme-toggle {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            color: var(--muted);
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .theme-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+            transform: rotate(15deg);
+        }
+
         .status-pill {
             display: inline-flex;
             align-items: center;
@@ -85,6 +124,12 @@
             letter-spacing: 0.2em;
             text-transform: uppercase;
         }
+        body.dark-mode .status-pill {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+
         .status-dot {
             width: 6px;
             height: 6px;
@@ -392,13 +437,36 @@
             text-transform: uppercase;
             letter-spacing: 0.2em;
         }
+        body.dark-mode .section-title {
+            background: rgba(30, 41, 59, 0.8);
+        }
+        body.dark-mode .formula-box,
+        body.dark-mode .pattern-mini {
+            background: rgba(15, 23, 42, 0.6);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+        body.dark-mode .pattern-line { stroke: #e2e8f0; }
+        body.dark-mode .pattern-axis { stroke: #64748b; }
+        body.dark-mode .pattern-grid { stroke: #334155; }
+        body.dark-mode .pattern-dash { stroke: #94a3b8; }
+
+        /* Cheat Sheet Cards */
+        .cheat-card {
+            background: rgba(255, 255, 255, 0.6);
+            border: 1px solid #e5e7eb;
+        }
+        body.dark-mode .cheat-card {
+            background: rgba(30, 41, 59, 0.4);
+            border-color: #334155;
+        }
 
     </style>
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
-    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-10">
-        <div class="flex flex-col gap-3 text-center lg:text-left">
+    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-50">
+        <div class="flex flex-col gap-3 text-center lg:text-left items-center lg:items-start">
             <div class="status-pill">
                 <span class="status-dot"></span>
                 SYSTEM ONLINE
@@ -414,14 +482,18 @@
             <a href="/metrics" class="nav-link active">METRICS</a>
             <a href="/logs" class="nav-link">LOGS</a>
         </nav>
-        <div class="text-center lg:text-right space-y-2">
+        <div class="text-center lg:text-right space-y-2 flex flex-col items-end">
+            <button id="btn-theme-toggle" class="theme-toggle mb-2" title="Toggle Dark Mode">
+                <i data-lucide="moon" class="w-4 h-4"></i>
+            </button>
             <div class="panel-meta">Trading Philosophy</div>
             <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
+            <div class="panel-meta">Last Update (UTC+8): <span id="last-updated" class="text-teal-200">--</span></div>
         </div>
     </header>
 
     <!-- ==================== TRADES 指标组 ==================== -->
-    <div class="section-title px-4 py-3 mb-6 rounded-r-lg relative z-10">
+    <div class="section-title px-4 py-3 mb-6 rounded-r-lg relative z-20">
         <h2 class="text-lg font-bold flex items-center gap-2">
             <i data-lucide="bar-chart-2" class="w-5 h-5 text-cyan-400"></i>
             TRADES 交易指标
@@ -429,7 +501,7 @@
         </h2>
     </div>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12 relative z-10">
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12 relative z-20">
 
         <!-- Row 1: Kelly Criterion + Current Streak (两个高卡片) -->
         <!-- Kelly Criterion -->
@@ -628,7 +700,7 @@
     </div>
 
     <!-- ==================== TECHNICAL SHORT PATTERNS ==================== -->
-    <div class="section-title px-4 py-3 mb-6 rounded-r-lg relative z-10" style="background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), transparent); border-left-color: #f59e0b;">
+    <div class="section-title px-4 py-3 mb-6 rounded-r-lg relative z-20" style="background: linear-gradient(90deg, rgba(245, 158, 11, 0.18), transparent); border-left-color: #f59e0b;">
         <h2 class="text-lg font-bold flex items-center gap-2">
             <i data-lucide="trending-down" class="w-5 h-5 text-orange-400"></i>
             SHORT SETUPS 技术面做空经典图形
@@ -636,23 +708,23 @@
         </h2>
     </div>
 
-    <div class="cyber-panel rounded-xl p-4 mb-6 relative z-10 panel-reveal">
+    <div class="cyber-panel rounded-xl p-4 mb-6 relative z-20 panel-reveal">
         <div class="flex items-center justify-between mb-3">
             <div class="metric-label">Setup Cheat Sheet <span class="text-gray-600">做空速查表</span></div>
             <div class="text-[11px] text-gray-500">短线规则</div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+            <div class="cheat-card rounded-lg p-3">
                 <div class="font-bold text-orange-400 uppercase mb-1">触发</div>
                 <p>• 破位后<strong>确认</strong>（收盘/放量/反抽失败）。</p>
                 <p>• 优先“第二次机会”而非第一次冲动。</p>
             </div>
-            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+            <div class="cheat-card rounded-lg p-3">
                 <div class="font-bold text-orange-400 uppercase mb-1">止损</div>
                 <p>• 放在<strong>形态失效点</strong>（高点/上沿）。</p>
                 <p>• 止损必须小于结构性目标空间。</p>
             </div>
-            <div class="bg-white/60 border border-gray-200 rounded-lg p-3">
+            <div class="cheat-card rounded-lg p-3">
                 <div class="font-bold text-orange-400 uppercase mb-1">失效</div>
                 <p>• 价格重新站回关键结构并走高。</p>
                 <p>• 结构被“吞没”或量能反向扩张。</p>
@@ -660,7 +732,7 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12 relative z-10">
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:gap-8 mb-12 relative z-20">
 
         <!-- Double Top -->
         <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6" style="border-left-color: #f59e0b;">
@@ -1213,6 +1285,44 @@
 
     <script>
         lucide.createIcons({ attrs: { 'stroke-width': 1.6 } });
+
+        function updateLastUpdated() {
+            const el = document.getElementById('last-updated');
+            if (!el) return;
+            const ts = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
+            el.innerText = ts;
+            el.classList.remove('update-flash');
+            void el.offsetWidth;
+            el.classList.add('update-flash');
+        }
+
+        // Theme Handling
+        const btnThemeToggle = document.getElementById('btn-theme-toggle');
+        let isDarkMode = localStorage.getItem('theme') === 'dark';
+
+        function applyTheme(dark) {
+            if (dark) {
+                document.body.classList.add('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="sun" class="w-4 h-4"></i>';
+            } else {
+                document.body.classList.remove('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="moon" class="w-4 h-4"></i>';
+            }
+            lucide.createIcons();
+        }
+
+        if (btnThemeToggle) {
+            btnThemeToggle.addEventListener('click', () => {
+                isDarkMode = !isDarkMode;
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+                applyTheme(isDarkMode);
+            });
+        }
+
+        // Initialize Theme
+        applyTheme(isDarkMode);
+
+        updateLastUpdated();
     </script>
 
 </body>

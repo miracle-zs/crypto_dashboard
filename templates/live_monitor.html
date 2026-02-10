@@ -24,6 +24,19 @@
             --warn: #f97316;
             --shadow: 6px 6px 0 rgba(17, 24, 39, 0.9);
         }
+
+        /* Dark Mode Variables */
+        body.dark-mode {
+            --bg: #0f172a;
+            --panel: rgba(30, 41, 59, 0.65);
+            --panel-strong: #1e293b;
+            --border: #334155;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --primary: #f8fafc;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+
         * { box-sizing: border-box; }
         body {
             font-family: 'Barlow', system-ui, sans-serif;
@@ -31,10 +44,16 @@
             background-color: var(--bg);
             color: var(--text);
             background-image: linear-gradient(180deg, #f7f3ea 0%, #f1f5f9 55%, #f7f3ea 100%);
+            transition: background-color 0.5s ease, color 0.5s ease;
         }
+        body.dark-mode {
+            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+        }
+
         .font-mono {
             font-family: 'Space Mono', monospace;
         }
+
         body::before {
             content: '';
             position: fixed;
@@ -73,6 +92,26 @@
             font-size: 0.68rem;
         }
 
+        /* Theme Toggle Button */
+        .theme-toggle {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            color: var(--muted);
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .theme-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+            transform: rotate(15deg);
+        }
+
         .status-pill {
             display: inline-flex;
             align-items: center;
@@ -86,6 +125,12 @@
             letter-spacing: 0.2em;
             text-transform: uppercase;
         }
+        body.dark-mode .status-pill {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+
         .status-dot {
             width: 6px;
             height: 6px;
@@ -347,10 +392,33 @@
             border: 2px solid var(--border);
             border-radius: 14px;
         }
-
-        #chart-container {
-            transition: opacity 150ms ease;
+        body.dark-mode .metric-slab {
+            background: rgba(15, 23, 42, 0.6);
+            border-color: #334155;
         }
+        body.dark-mode .metric-slab .text-gray-500 {
+            color: #94a3b8 !important;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            background: #fff3db;
+            color: #111827;
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+        body.dark-mode .status-pill {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+
         #chart-container.fade-swap {
             opacity: 0.4;
         }
@@ -381,8 +449,8 @@
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
-    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-10">
-        <div class="flex flex-col gap-3 text-center lg:text-left">
+    <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-50">
+        <div class="flex flex-col gap-3 text-center lg:text-left items-center lg:items-start">
             <div class="status-pill">
                 <span class="status-dot"></span>
                 SYSTEM ONLINE
@@ -398,13 +466,17 @@
             <a href="/metrics" class="nav-link">METRICS</a>
             <a href="/logs" class="nav-link">LOGS</a>
         </nav>
-        <div class="text-center lg:text-right space-y-2">
+        <div class="text-center lg:text-right space-y-2 flex flex-col items-end">
+            <button id="btn-theme-toggle" class="theme-toggle mb-2" title="Toggle Dark Mode">
+                <i data-lucide="moon" class="w-4 h-4"></i>
+            </button>
             <div class="panel-meta">Trading Philosophy</div>
             <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
+            <div class="panel-meta">Last Update (UTC+8): <span id="last-updated" class="text-teal-200">--</span></div>
         </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 relative z-10">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 relative z-20">
         
         <div class="lg:col-span-3 flex flex-col gap-4">
             <div class="section-label">ACCOUNT STATUS</div>
@@ -614,6 +686,7 @@
                                         <th class="px-6 py-4 text-right">Notional</th>
                                         <th class="px-6 py-4 text-right">uPnL</th>
                                         <th class="px-6 py-4 text-right">uPnL %</th>
+                                        <th class="px-6 py-4 text-center">Long-term</th>
                                     </tr>
                                 </thead>
                                 <tbody id="open-positions-body" class="divide-y divide-gray-800"></tbody>
@@ -698,6 +771,16 @@
     <script>
         lucide.createIcons({ attrs: { 'stroke-width': 1.6 } });
 
+        function updateLastUpdated() {
+            const el = document.getElementById('last-updated');
+            if (!el) return;
+            const ts = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
+            el.innerText = ts;
+            el.classList.remove('update-flash');
+            void el.offsetWidth;
+            el.classList.add('update-flash');
+        }
+
         // -------------------------------------
         // 1. Configuration & State
         // -------------------------------------
@@ -718,6 +801,52 @@
         const btnViewPercent = document.getElementById('btn-view-percent');
         const btnViewBalance = document.getElementById('btn-view-balance');
         const btnToggleMarkers = document.getElementById('btn-toggle-markers');
+        const btnThemeToggle = document.getElementById('btn-theme-toggle');
+
+        // Theme Handling
+        let isDarkMode = localStorage.getItem('theme') === 'dark';
+
+        function applyTheme(dark) {
+            if (dark) {
+                document.body.classList.add('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="sun" class="w-4 h-4"></i>';
+            } else {
+                document.body.classList.remove('dark-mode');
+                if (btnThemeToggle) btnThemeToggle.innerHTML = '<i data-lucide="moon" class="w-4 h-4"></i>';
+            }
+            lucide.createIcons();
+
+            // Update chart themes if they exist
+            updateChartTheme(dark);
+        }
+
+        function updateChartTheme(dark) {
+            const themeMode = dark ? 'dark' : 'light';
+            const gridColor = dark ? '#334155' : '#e2e8f0'; // slate-700 vs slate-200
+
+            if (chart) {
+                chart.updateOptions({
+                    theme: { mode: themeMode },
+                    grid: { borderColor: gridColor }
+                });
+            }
+            if (volSparkChart) {
+                volSparkChart.updateOptions({
+                    theme: { mode: themeMode }
+                });
+            }
+        }
+
+        if (btnThemeToggle) {
+            btnThemeToggle.addEventListener('click', () => {
+                isDarkMode = !isDarkMode;
+                localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+                applyTheme(isDarkMode);
+            });
+        }
+
+        // Initialize Theme
+        applyTheme(isDarkMode);
 
         // Time Range Click Handlers
         timeRangeButtons.forEach(button => {
@@ -793,6 +922,7 @@
                         logToTerminal(`接收到 ${data.length} 条最新余额数据`);
                         analyzeAndDisplay();
                     }
+                    updateLastUpdated();
                 } else {
                     logToTerminal("未获取到余额数据", "warn");
                 }
@@ -1123,6 +1253,7 @@
             if (!container) return;
 
             if (!volSparkChart) {
+                const isDark = document.body.classList.contains('dark-mode');
                 const options = {
                     chart: {
                         type: 'line',
@@ -1130,7 +1261,7 @@
                         sparkline: { enabled: true },
                         background: 'transparent'
                     },
-                    theme: { mode: 'dark' },
+                    theme: { mode: isDark ? 'dark' : 'light' },
                     series: [{ name: 'Volatility', data: seriesData || [] }],
                     stroke: { width: 2, curve: 'smooth', colors: ['#a855f7'] },
                     fill: { opacity: 0.25 },
@@ -1371,9 +1502,13 @@
                 : (val => `$${parseFloat(val).toLocaleString()}`);
 
             if (!chart) {
+                const isDark = document.body.classList.contains('dark-mode');
+                const themeMode = isDark ? 'dark' : 'light';
+                const gridColor = isDark ? '#334155' : '#e2e8f0';
+
                 const options = {
                     chart: { type: 'area', height: '100%', background: 'transparent', toolbar: { show: false } },
-                    theme: { mode: 'dark' },
+                    theme: { mode: themeMode },
                     series: [{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }],
                     xaxis: {
                         type: 'datetime',
@@ -1412,7 +1547,7 @@
                         gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] }
                     },
                     dataLabels: { enabled: false },
-                    grid: { borderColor: '#1e293b', strokeDashArray: 2 },
+                    grid: { borderColor: gridColor, strokeDashArray: 2 },
                     annotations: finalAnnotations,
                     tooltip: {
                         x: {
@@ -1508,6 +1643,24 @@
             }
         }
 
+        async function toggleLongTerm(symbol, orderId, isLongTerm) {
+            try {
+                const response = await fetch(`/api/positions/set-long-term?symbol=${symbol}&order_id=${orderId}&is_long_term=${isLongTerm}`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    logToTerminal(`${symbol} 已标记为${isLongTerm ? '长期' : '普通'}持仓`);
+                    // 立即局部更新 UI 而不是全量刷新
+                    await fetchOpenPositions();
+                } else {
+                    throw new Error("更新失败");
+                }
+            } catch (error) {
+                logToTerminal(`设置失败: ${error.message}`, "error");
+                await fetchOpenPositions(); // 失败则恢复状态
+            }
+        }
+
         function renderOpenPositions(openData) {
             const tbody = document.getElementById('open-positions-body');
             const emptyEl = document.getElementById('open-positions-empty');
@@ -1538,12 +1691,19 @@
 
                 // 检查持仓是否超过48小时 (2880分钟)
                 const isStale = (pos.holding_minutes || 0) > 2880;
-                const holdingStyle = isStale ? 'text-orange-400 font-bold' : 'text-xs font-mono';
-                const holdingIcon = isStale ? '<i data-lucide="alert-triangle" class="w-3 h-3 inline mr-1 text-orange-400"></i>' : '';
+                const isLongTerm = pos.is_long_term === true;
+
+                // 长期持仓行样式淡化
+                const rowOpacity = isLongTerm ? 'opacity-60' : '';
+                const holdingStyle = isStale && !isLongTerm ? 'text-orange-400 font-bold' : 'text-xs font-mono';
+                const holdingIcon = isLongTerm ? '<i data-lucide="timer" class="w-3 h-3 inline mr-1 text-cyan-400"></i>' : (isStale ? '<i data-lucide="alert-triangle" class="w-3 h-3 inline mr-1 text-orange-400"></i>' : '');
 
                 const row = `
-                    <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800">
-                        <td class="px-6 py-4 font-bold text-cyan-400">${pos.symbol}</td>
+                    <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800 ${rowOpacity}">
+                        <td class="px-6 py-4 font-bold text-cyan-400">
+                            ${pos.symbol}
+                            ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded ml-1">LT</span>' : ''}
+                        </td>
                         <td class="px-6 py-4">
                             <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
                         </td>
@@ -1556,6 +1716,12 @@
                         <td class="px-6 py-4 text-right font-mono">${formatMoney(pos.notional, 0)}</td>
                         <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatSignedMoney(pos.unrealized_pnl, 0)}</td>
                         <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatPct(pos.unrealized_pnl_pct, 2)}</td>
+                        <td class="px-6 py-4 text-center">
+                            <input type="checkbox"
+                                   ${isLongTerm ? 'checked' : ''}
+                                   onchange="toggleLongTerm('${pos.symbol}', ${pos.order_id || 0}, this.checked)"
+                                   class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-cyan-600 focus:ring-cyan-500 cursor-pointer">
+                        </td>
                     </tr>
                 `;
                 tbody.innerHTML += row;

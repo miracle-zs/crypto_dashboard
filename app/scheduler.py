@@ -179,6 +179,10 @@ class TradeDataScheduler:
             stale_positions = []
 
             for pos in positions:
+                # 跳过用户标记为长期持仓的订单
+                if pos.get('is_long_term'):
+                    continue
+
                 entry_time_str = pos['entry_time']
                 try:
                     entry_dt = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
