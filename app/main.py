@@ -184,9 +184,36 @@ async def get_balance_history(
     # 获取出入金记录
     transfers = db.get_transfers()
 
+    # 预处理 transfers: 解析时间并排序
+    sorted_transfers = []
+    for t in transfers:
+        try:
+            t_dt = datetime.fromisoformat(t['timestamp']).replace(tzinfo=timezone.utc)
+            sorted_transfers.append((t_dt, t['amount']))
+        except ValueError:
+            continue
+    sorted_transfers.sort(key=lambda x: x[0])
+
     # 转换数据：从数据库的UTC时间转换为UTC+8时区，再生成时间戳
     transformed_data = []
-    for item in history_data:
+
+    # 双指针优化变量
+    transfer_idx = 0
+    current_net_deposits = 0.0
+    total_transfers = len(sorted_transfers)
+
+    # 降采样准备 (简单的间隔采样)
+    total_points = len(history_data)
+    target_points = 1000  # 限制最大返回点数，避免前端卡顿
+    step = 1
+    if total_points > target_points:
+        step = total_points // target_points
+
+    for i, item in enumerate(history_data):
+        # 降采样：跳过非关键点 (保留第一个和最后一个点)
+        if i % step != 0 and i != total_points - 1:
+            continue
+
         # 1. 解析来自数据库的ISO格式时间字符串（我们知道它是UTC）
         utc_dt_naive = datetime.fromisoformat(item['timestamp'])
 
@@ -197,20 +224,13 @@ async def get_balance_history(
         utc8_dt = utc_dt_aware.astimezone(UTC8)
         current_ts = int(utc8_dt.timestamp() * 1000)
 
-        # 4. 计算累计净值 (Cumulative Equity)
-        # 逻辑：Cumulative = Actual Balance - Net Deposits
-        # 比如：余额 14000，之前提了 10000 (Net Deposit = -10000)
-        # Cumulative = 14000 - (-10000) = 24000
+        # 4. 计算累计净值 (Cumulative Equity) - 优化后的O(N)算法
+        # 推进 transfer 指针，直到超过当前余额记录的时间
+        while transfer_idx < total_transfers and sorted_transfers[transfer_idx][0] <= utc_dt_aware:
+            current_net_deposits += sorted_transfers[transfer_idx][1]
+            transfer_idx += 1
 
-        net_deposits = 0.0
-        for t in transfers:
-            # 只统计在这个时间点之前的转账
-            # 解析transfer的时间
-            t_dt = datetime.fromisoformat(t['timestamp']).replace(tzinfo=timezone.utc)
-            if t_dt <= utc_dt_aware:
-                net_deposits += t['amount']
-
-        cumulative_val = item['balance'] - net_deposits
+        cumulative_val = item['balance'] - current_net_deposits
 
         # 5. 生成前端需要的时间戳（毫秒）
         transformed_data.append({
