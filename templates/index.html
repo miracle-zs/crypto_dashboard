@@ -9,6 +9,26 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 
+    <script>
+        // Critical: Apply theme before page render to prevent flash
+        (function() {
+            const isDark = localStorage.getItem('theme') === 'dark';
+            if (isDark) {
+                document.documentElement.classList.add('dark-mode');
+                // Also add to body if it exists (though usually it doesn't yet)
+                // We use a MutationObserver or just set a style tag
+                const style = document.createElement('style');
+                style.innerHTML = 'body { background-color: #0f172a !important; color: #f8fafc !important; }';
+                document.head.appendChild(style);
+
+                // Add class to body as soon as possible
+                document.addEventListener('DOMContentLoaded', () => {
+                    document.body.classList.add('dark-mode');
+                });
+            }
+        })();
+    </script>
+
     <style>
         :root {
             --bg: #f7f3ea;
