@@ -6,12 +6,13 @@ from app.services import BinanceOrderAnalyzer
 from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats, OpenPositionsResponse
 from app.scheduler import get_scheduler
 from app.database import Database
+from app.binance_client import BinanceFuturesRestClient
+from app.user_stream import BinanceUserDataStream
 import os
 from dotenv import load_dotenv
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta, timezone
 from app.logger import logger, read_logs
-import requests
 from collections import defaultdict
 
 # Load environment variables
@@ -19,7 +20,6 @@ load_dotenv()
 
 # 定义UTC+8时区
 UTC8 = timezone(timedelta(hours=8))
-BINANCE_FAPI_BASE = "https://fapi.binance.com"
 
 app = FastAPI(title="Zero Gravity Dashboard")
 
@@ -32,8 +32,12 @@ analyzer = BinanceOrderAnalyzer()
 # Initialize database
 db = Database()
 
+# Public REST client (market data)
+public_rest = BinanceFuturesRestClient()
+
 # Scheduler instance
 scheduler = None
+user_stream = None
 
 
 def _format_holding_time(total_minutes: int) -> str:
@@ -61,9 +65,7 @@ def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
     unique_symbols = sorted(set(symbols))
 
     try:
-        response = requests.get(f"{BINANCE_FAPI_BASE}/fapi/v1/premiumIndex", timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        data = public_rest.public_get("/fapi/v1/premiumIndex")
         if isinstance(data, dict):
             data = [data]
         price_map = {
@@ -76,9 +78,7 @@ def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
         logger.warning(f"Failed to fetch mark prices via premiumIndex: {exc}")
 
     try:
-        response = requests.get(f"{BINANCE_FAPI_BASE}/fapi/v1/ticker/price", timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        data = public_rest.public_get("/fapi/v1/ticker/price")
         if isinstance(data, dict):
             data = [data]
         price_map = {
@@ -96,7 +96,7 @@ def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
 @app.on_event("startup")
 async def startup_event():
     """应用启动时执行"""
-    global scheduler
+    global scheduler, user_stream
 
     # 启动定时任务调度器
     api_key = os.getenv('BINANCE_API_KEY')
@@ -106,6 +106,11 @@ async def startup_event():
         scheduler = get_scheduler()
         scheduler.start()
         logger.info("定时任务调度器已启动")
+
+        enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
+        if enable_user_stream:
+            user_stream = BinanceUserDataStream(api_key=api_key, db=db)
+            user_stream.start()
     else:
         logger.warning("未配置API密钥，定时任务未启动")
 
@@ -113,10 +118,12 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时执行"""
-    global scheduler
+    global scheduler, user_stream
     if scheduler:
         scheduler.stop()
         logger.info("定时任务调度器已停止")
+    if user_stream:
+        user_stream.stop()
 
 
 @app.get("/", response_class=HTMLResponse)

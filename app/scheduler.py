@@ -3,7 +3,9 @@
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import os
 from dotenv import load_dotenv
 import sys
@@ -15,18 +17,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from trade_analyzer import BinanceOrderAnalyzer
 from app.database import Database
 from app.logger import logger
+from app.notifier import send_server_chan_notification
 
 load_dotenv()
 
 # 定义UTC+8时区
-UTC8 = timezone(timedelta(hours=8))
+UTC8 = ZoneInfo("Asia/Shanghai")
 
 
 class TradeDataScheduler:
     """交易数据定时更新调度器"""
 
     def __init__(self):
-        self.scheduler = BackgroundScheduler()
+        scheduler_tz = os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')
+        try:
+            self.scheduler = BackgroundScheduler(timezone=ZoneInfo(scheduler_tz))
+        except Exception as exc:
+            logger.warning(f"无效的调度器时区 {scheduler_tz}: {exc}，使用默认时区")
+            self.scheduler = BackgroundScheduler()
         self.db = Database()
 
         # 从环境变量获取配置
@@ -43,6 +51,9 @@ class TradeDataScheduler:
         self.update_interval_minutes = int(os.getenv('UPDATE_INTERVAL_MINUTES', 10))
         self.start_date = os.getenv('START_DATE')  # 自定义起始日期
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
+        self.sync_lookback_minutes = int(os.getenv('SYNC_LOOKBACK_MINUTES', 1440))
+        self.use_time_filter = os.getenv('SYNC_USE_TIME_FILTER', '1').lower() in ('1', 'true', 'yes')
+        self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
 
     def sync_trades_data(self):
         """同步交易数据到数据库"""
@@ -60,9 +71,11 @@ class TradeDataScheduler:
             # 获取最后一条交易时间（仅作参考，不再用于增量更新）
             # last_entry_time = self.db.get_last_entry_time()
 
-            # 强制使用全量更新模式
-            # 如果配置了 START_DATE，则从 START_DATE 开始
-            # 否则从 DAYS_TO_FETCH 天前开始
+            # 同步模式：
+            # 1) 如果配置 START_DATE -> 全量
+            # 2) 否则如果数据库已有最后入场时间 -> 增量(带回溯窗口)
+            # 3) 否则 -> DAYS_TO_FETCH 天全量
+            last_entry_time = self.db.get_last_entry_time()
             if self.start_date:
                 # 使用自定义起始日期
                 try:
@@ -72,6 +85,16 @@ class TradeDataScheduler:
                     logger.info(f"全量更新模式 - 从自定义日期 {self.start_date} 开始")
                 except ValueError as e:
                     logger.error(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
+                    since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+            elif last_entry_time:
+                try:
+                    last_dt = datetime.strptime(last_entry_time, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
+                    since = int((last_dt - timedelta(minutes=self.sync_lookback_minutes)).timestamp() * 1000)
+                    logger.info(
+                        f"增量更新模式 - 从最近入场时间 {last_entry_time} 回溯 {self.sync_lookback_minutes} 分钟"
+                    )
+                except ValueError as e:
+                    logger.error(f"入场时间解析失败: {e}，使用默认DAYS_TO_FETCH")
                     since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
             else:
                 # 使用DAYS_TO_FETCH
@@ -93,14 +116,25 @@ class TradeDataScheduler:
             # 从Binance获取数据
             logger.info("从Binance API抓取数据...")
             traded_symbols = self.analyzer.get_traded_symbols(since, until)
-            df = self.analyzer.analyze_orders(since=since, until=until, traded_symbols=traded_symbols)
+            df = self.analyzer.analyze_orders(
+                since=since,
+                until=until,
+                traded_symbols=traded_symbols,
+                use_time_filter=self.use_time_filter
+            )
 
             if df.empty:
                 logger.info("没有新数据需要更新")
             else:
                 # 保存到数据库
-                logger.info(f"保存 {len(df)} 条记录到数据库...")
-                saved_count = self.db.save_trades(df)
+                # 如果是全量更新模式（start_date 或无 last_entry_time），建议使用覆盖模式防止重复
+                # 这里简单起见，只要有新数据计算出来，我们就认为这批数据是最新的真理
+                # 尤其是当重新计算了历史盈亏时，覆盖旧数据是必须的
+                is_full_sync = self.start_date is not None or self.db.get_last_entry_time() is None
+
+                logger.info(f"保存 {len(df)} 条记录到数据库 (覆盖模式={is_full_sync})...")
+                saved_count = self.db.save_trades(df, overwrite=is_full_sync)
+
                 if saved_count > 0:
                     logger.info("检测到新平仓单，重算统计快照...")
                     self.db.recompute_trade_summary()
@@ -115,6 +149,9 @@ class TradeDataScheduler:
                 # 清空未平仓记录（如果没有未平仓订单）
                 self.db.save_open_positions([])
                 logger.info("当前无未平仓订单")
+
+            # 检查持仓超时告警
+            self.check_long_held_positions()
 
             # 更新同步状态
             self.db.update_sync_status(status='idle')
@@ -132,6 +169,104 @@ class TradeDataScheduler:
             self.db.update_sync_status(status='error', error_message=error_msg)
             import traceback
             logger.error(traceback.format_exc())
+
+    def check_long_held_positions(self):
+        """检查持仓时间超过48小时的订单并发送合并通知 (每24小时复提)"""
+        try:
+            positions = self.db.get_open_positions()
+            now = datetime.now(UTC8)
+            now_utc = datetime.now(timezone.utc)
+            stale_positions = []
+
+            for pos in positions:
+                entry_time_str = pos['entry_time']
+                try:
+                    entry_dt = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
+                except ValueError:
+                    logger.warning(f"无法解析时间: {entry_time_str}")
+                    continue
+
+                duration = now - entry_dt
+
+                # 48小时 = 48 * 3600 秒
+                if duration.total_seconds() > 48 * 3600:
+                    should_alert = False
+
+                    # 检查是否需要报警
+                    if pos.get('alerted', 0) == 0:
+                        should_alert = True
+                    else:
+                        # 如果已报警，检查距离上次报警是否超过24小时
+                        last_alert_str = pos.get('last_alert_time')
+                        if last_alert_str:
+                            try:
+                                # SQLite CURRENT_TIMESTAMP 是 UTC 时间
+                                last_alert_dt = datetime.strptime(last_alert_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                                time_since_last = now_utc - last_alert_dt
+                                if time_since_last.total_seconds() > 24 * 3600:
+                                    should_alert = True
+                            except ValueError:
+                                # 解析失败，为安全起见再次报警
+                                should_alert = True
+                        else:
+                            # 有alerted标志但无时间，视为需要更新
+                            should_alert = True
+
+                    if should_alert:
+                        hours = int(duration.total_seconds() / 3600)
+                        pos['hours_held'] = hours
+                        stale_positions.append(pos)
+
+            if stale_positions:
+                count = len(stale_positions)
+                title = f"⚠️ 持仓超时告警: {count}个订单"
+
+                content = f"监测到 **{count}** 个订单持仓超过 48 小时 (复提周期: 24h)。\n\n"
+                content += "--- \n"
+
+                for pos in stale_positions:
+                    content += (
+                        f"**{pos['symbol']}** ({pos['side']})\n"
+                        f"- 时长: {pos['hours_held']} 小时\n"
+                        f"- 开仓: {pos['entry_time']}\n"
+                        f"- 价格: {pos['entry_price']}\n\n"
+                    )
+
+                content += "请及时处理。"
+
+                send_server_chan_notification(title, content)
+
+                # 批量标记为已通知
+                for pos in stale_positions:
+                    self.db.set_position_alerted(pos['symbol'], pos['order_id'])
+                    logger.info(f"已发送持仓超时告警: {pos['symbol']} ({pos['hours_held']}h)")
+
+        except Exception as e:
+            logger.error(f"检查持仓超时失败: {e}")
+
+    def check_risk_before_sleep(self):
+        """每晚11点检查持仓风险"""
+        try:
+            positions = self.db.get_open_positions()
+            # 统计持仓币种数量 (去重)
+            unique_symbols = set(p['symbol'] for p in positions)
+            count = len(unique_symbols)
+
+            if count > 5:
+                title = f"🌙 睡前风控提醒: 持仓过重 ({count}个)"
+                content = (
+                    f"当前持有 **{count}** 个币种，超过建议的 5 个。\n\n"
+                    f"**持仓列表**:\n"
+                    f"{', '.join(sorted(unique_symbols))}\n\n"
+                    f"建议睡前检查风险，考虑减仓或设置止损。"
+                )
+                send_server_chan_notification(title, content)
+                logger.info(f"已发送睡前风控提醒: 持仓 {count} 个币种")
+            else:
+                logger.info(f"睡前风控检查通过: 持仓 {count} 个币种")
+
+        except Exception as e:
+            logger.error(f"睡前风控检查失败: {e}")
 
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""
@@ -223,18 +358,31 @@ class TradeDataScheduler:
             replace_existing=True
         )
 
-        # 添加余额同步任务 - 每分钟执行一次
+        if not self.enable_user_stream:
+            # 添加余额同步任务 - 每分钟执行一次
+            self.scheduler.add_job(
+                func=self.sync_balance_data,
+                trigger=IntervalTrigger(minutes=1),
+                id='sync_balance',
+                name='同步账户余额',
+                replace_existing=True
+            )
+        else:
+            logger.info("已启用用户数据流，跳过轮询余额同步任务")
+
+        # 添加睡前风控检查任务 - 每天 23:00 (UTC+8) 执行
         self.scheduler.add_job(
-            func=self.sync_balance_data,
-            trigger=IntervalTrigger(minutes=1),
-            id='sync_balance',
-            name='同步账户余额',
+            func=self.check_risk_before_sleep,
+            trigger=CronTrigger(hour=23, minute=0, timezone=UTC8),
+            id='risk_check_sleep',
+            name='睡前风控检查',
             replace_existing=True
         )
 
         self.scheduler.start()
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
         logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
+        logger.info("睡前风控检查已启动: 每天 23:00 执行")
 
     def stop(self):
         """停止定时任务"""

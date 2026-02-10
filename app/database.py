@@ -141,6 +141,23 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_transfers_timestamp ON transfers(timestamp)
         """)
 
+        # Websocket 事件记录表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ws_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT,
+                event_time INTEGER,
+                payload TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ws_events_time ON ws_events(event_time)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ws_events_type ON ws_events(event_type)
+        """)
+
         # 创建未平仓订单表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS open_positions (
@@ -153,6 +170,8 @@ class Database:
                 qty REAL,
                 entry_amount REAL,
                 order_id INTEGER,
+                alerted INTEGER DEFAULT 0,
+                last_alert_time TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(symbol, order_id)
             )
@@ -160,6 +179,26 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_open_positions_date ON open_positions(date)
         """)
+
+        # 检查是否需要迁移 alerted 列
+        try:
+            cursor.execute("SELECT alerted FROM open_positions LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 alerted 列...")
+            try:
+                cursor.execute("ALTER TABLE open_positions ADD COLUMN alerted INTEGER DEFAULT 0")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
+        # 检查是否需要迁移 last_alert_time 列
+        try:
+            cursor.execute("SELECT last_alert_time FROM open_positions LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 last_alert_time 列...")
+            try:
+                cursor.execute("ALTER TABLE open_positions ADD COLUMN last_alert_time TIMESTAMP")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
 
         # 创建用户设置表
         cursor.execute("""
@@ -207,12 +246,13 @@ class Database:
         conn.commit()
         conn.close()
 
-    def save_trades(self, df: pd.DataFrame) -> int:
+    def save_trades(self, df: pd.DataFrame, overwrite: bool = False) -> int:
         """
-        保存交易数据到数据库（批量插入或更新）
+        保存交易数据到数据库
 
         Args:
             df: 交易数据DataFrame
+            overwrite: 是否覆盖模式（先删除该时间段内的所有记录，再插入）
 
         Returns:
             int: 新增或更新的记录数
@@ -222,6 +262,18 @@ class Database:
 
         conn = self._get_connection()
         cursor = conn.cursor()
+
+        if overwrite:
+            # 获取数据的时间范围，只删除该范围内的旧数据
+            if 'Entry_Time' in df.columns:
+                min_time = df['Entry_Time'].min()
+                max_time = df['Entry_Time'].max()
+                logger.info(f"覆盖模式: 删除 {min_time} 至 {max_time} 期间的旧记录...")
+                cursor.execute("DELETE FROM trades WHERE entry_time >= ? AND entry_time <= ?", (min_time, max_time))
+            else:
+                # 如果没有时间字段，甚至可以考虑清空全表（视需求而定，这里保守一点只清空相关的Symbol）
+                # 但既然是overwrite模式且通常用于全量同步，按时间删是最安全的
+                pass
 
         inserted_count = 0
         updated_count = 0
@@ -570,11 +622,28 @@ class Database:
         equity_curve = df['PNL_Net'].cumsum().tolist()
 
         current_streak = 0
-        for pnl in reversed(df['PNL_Net'].values):
-            if (current_streak >= 0 and pnl > 0) or (current_streak < 0 and pnl < 0):
-                current_streak += 1 if pnl > 0 else -1
-            else:
-                break
+        if not df.empty:
+            pnl_values = df['PNL_Net'].values
+            # Get the sign of the most recent trade (last one in dataframe)
+            last_pnl = pnl_values[-1]
+
+            # Iterate backwards from the last trade
+            for pnl in reversed(pnl_values):
+                # If zero PnL, we can treat it as breaking the streak or ignore it
+                # Here we treat 0 as breaking streak unless we want to skip it
+                if pnl == 0:
+                    break
+
+                if last_pnl > 0:
+                    if pnl > 0:
+                        current_streak += 1
+                    else:
+                        break
+                elif last_pnl < 0:
+                    if pnl < 0:
+                        current_streak -= 1
+                    else:
+                        break
 
         best_win_streak = 0
         worst_loss_streak = 0
@@ -661,6 +730,17 @@ class Database:
         conn.close()
         logger.info(f"已记录出入金: {amount} ({type})")
 
+    def save_ws_event(self, event_type: str, event_time: int, payload: Dict):
+        """保存 websocket 事件记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO ws_events (event_type, event_time, payload) VALUES (?, ?, ?)",
+            (event_type, int(event_time), json.dumps(payload, ensure_ascii=False))
+        )
+        conn.commit()
+        conn.close()
+
     def get_transfers(self) -> List[Dict]:
         """获取所有出入金记录"""
         conn = self._get_connection()
@@ -743,7 +823,7 @@ class Database:
 
     def save_open_positions(self, positions: List[Dict]) -> int:
         """
-        保存未平仓订单（全量替换）
+        保存未平仓订单（全量替换，但保留 alerted 状态）
 
         Args:
             positions: 未平仓订单列表
@@ -754,15 +834,42 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # 清空现有未平仓记录
+        # 1. 获取现有记录的 alerted 状态和 last_alert_time
+        state_map = {}
+        try:
+            # 检查列是否存在（为了兼容旧库，虽然上面init做了迁移，但为了保险）
+            cursor.execute("PRAGMA table_info(open_positions)")
+            columns = [info[1] for info in cursor.fetchall()]
+
+            query = "SELECT symbol, order_id, alerted"
+            if 'last_alert_time' in columns:
+                query += ", last_alert_time"
+            query += " FROM open_positions"
+
+            cursor.execute(query)
+            for row in cursor.fetchall():
+                key = f"{row['symbol']}_{row['order_id']}"
+                state_data = {'alerted': row['alerted']}
+                if 'last_alert_time' in columns:
+                    state_data['last_alert_time'] = row['last_alert_time']
+                state_map[key] = state_data
+        except Exception as e:
+            logger.warning(f"读取状态失败: {e}")
+
+        # 2. 清空现有未平仓记录
         cursor.execute("DELETE FROM open_positions")
 
-        # 插入新记录
+        # 3. 插入新记录
         for pos in positions:
+            key = f"{pos['symbol']}_{pos['order_id']}"
+            saved_state = state_map.get(key, {})
+            is_alerted = saved_state.get('alerted', 0)
+            last_alert_time = saved_state.get('last_alert_time', None)
+
             cursor.execute("""
                 INSERT INTO open_positions (
-                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id, alerted, last_alert_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 pos['date'],
                 pos['symbol'],
@@ -771,13 +878,27 @@ class Database:
                 pos['entry_price'],
                 pos['qty'],
                 pos['entry_amount'],
-                pos['order_id']
+                pos['order_id'],
+                is_alerted,
+                last_alert_time
             ))
 
         conn.commit()
         conn.close()
 
         return len(positions)
+
+    def set_position_alerted(self, symbol: str, order_id: int):
+        """标记订单为已通知，并更新最后通知时间"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE open_positions
+            SET alerted = 1, last_alert_time = CURRENT_TIMESTAMP
+            WHERE symbol = ? AND order_id = ?
+        """, (symbol, order_id))
+        conn.commit()
+        conn.close()
 
     def get_open_positions(self) -> List[Dict]:
         """获取所有未平仓订单"""

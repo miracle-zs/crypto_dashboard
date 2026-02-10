@@ -5,17 +5,13 @@ Binance Futures Order Analyzer
 Analyze trading history based on orders (not individual trades)
 """
 
-import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional
-import os
-import hashlib
-import hmac
-from urllib.parse import urlencode
-from dotenv import load_dotenv
 import time
+from dotenv import load_dotenv
 from app.logger import logger
+from app.binance_client import BinanceFuturesRestClient
 
 # 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
@@ -27,71 +23,7 @@ class BinanceOrderAnalyzer:
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.base_url = 'https://fapi.binance.com'
-        self.headers = {
-            'X-MBX-APIKEY': api_key
-        }
-        self._last_request_ts = 0.0
-        self._min_request_interval = float(os.getenv('BINANCE_MIN_REQUEST_INTERVAL', 0.3))
-
-    def _generate_signature(self, params: dict) -> str:
-        """Generate signature for authenticated requests"""
-        query_string = urlencode(params)
-        signature = hmac.new(
-            self.api_secret.encode('utf-8'),
-            query_string.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        return signature
-
-    def _request(self, method: str, endpoint: str, params: dict = None) -> dict:
-        """Make authenticated request to Binance API"""
-        if params is None:
-            params = {}
-
-        url = f"{self.base_url}{endpoint}"
-
-        max_retries = 4
-        backoff_seconds = 1
-
-        for attempt in range(1, max_retries + 1):
-            # Global rate limit: ensure minimum interval between requests
-            now = time.time()
-            elapsed = now - self._last_request_ts
-            if elapsed < self._min_request_interval:
-                time.sleep(self._min_request_interval - elapsed)
-            self._last_request_ts = time.time()
-
-            params['timestamp'] = int(time.time() * 1000)
-            params['signature'] = self._generate_signature(params)
-
-            try:
-                if method == 'GET':
-                    response = requests.get(url, headers=self.headers, params=params, timeout=30)
-                else:
-                    response = requests.post(url, headers=self.headers, params=params, timeout=30)
-
-                response.raise_for_status()
-                return response.json()
-            except requests.exceptions.HTTPError as e:
-                status_code = e.response.status_code if e.response is not None else None
-                if status_code == 429 and attempt < max_retries:
-                    logger.warning(
-                        f"Rate limited (429) on {endpoint}. Backing off {backoff_seconds}s (attempt {attempt}/{max_retries})"
-                    )
-                    time.sleep(backoff_seconds)
-                    backoff_seconds *= 2
-                    continue
-
-                logger.error(f"API request failed: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    logger.error(f"Response: {e.response.text}")
-                return None
-            except requests.exceptions.RequestException as e:
-                logger.error(f"API request failed: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                    logger.error(f"Response: {e.response.text}")
-                return None
+        self.client = BinanceFuturesRestClient(api_key=api_key, api_secret=api_secret)
 
     def get_recent_financial_flow(self, start_time: int) -> float:
         """
@@ -104,7 +36,7 @@ class BinanceOrderAnalyzer:
             'limit': 1000
         }
 
-        income_data = self._request('GET', endpoint, params)
+        income_data = self.client.signed_get(endpoint, params)
         if not income_data:
             return 0.0
 
@@ -121,7 +53,7 @@ class BinanceOrderAnalyzer:
     def get_account_balance(self) -> Dict[str, float]:
         """Get USD-M Futures account balance (Margin & Wallet)."""
         endpoint = '/fapi/v2/account'
-        account_info = self._request('GET', endpoint)
+        account_info = self.client.signed_get(endpoint)
 
         if account_info:
             return {
@@ -132,7 +64,13 @@ class BinanceOrderAnalyzer:
             logger.warning("Could not retrieve account balance.")
             return None
 
-    def get_all_orders(self, symbol: str, limit: int = 1000, start_time: int = None) -> List[Dict]:
+    def get_all_orders(
+        self,
+        symbol: str,
+        limit: int = 1000,
+        start_time: int = None,
+        end_time: int = None
+    ) -> List[Dict]:
         """Get all orders for a symbol"""
         endpoint = '/fapi/v1/allOrders'
         params = {
@@ -140,29 +78,74 @@ class BinanceOrderAnalyzer:
             'limit': limit
         }
 
-        if start_time:
-            params['startTime'] = start_time
+        # No time filter: one-shot fetch (Binance default window)
+        if start_time is None and end_time is None:
+            result = self.client.signed_get(endpoint, params)
+            if result is None:
+                logger.warning(f"API request failed for {symbol}")
+            elif isinstance(result, list) and len(result) == 0:
+                logger.debug(f"No orders in time range for {symbol}")
+            return result if result else []
 
-        result = self._request('GET', endpoint, params)
+        # Ensure time range
+        if start_time is None and end_time is not None:
+            # fallback to last 7 days window
+            start_time = end_time - (7 * 24 * 60 * 60 * 1000) + 1
+        if end_time is None and start_time is not None:
+            end_time = int(time.time() * 1000)
 
-        if result is None:
-            logger.warning(f"API request failed for {symbol}")
-        elif isinstance(result, list) and len(result) == 0:
+        max_window_ms = (7 * 24 * 60 * 60 * 1000) - 1
+        current_start = start_time
+        all_orders: List[Dict] = []
+        seen_order_ids = set()
+
+        while current_start <= end_time:
+            current_end = min(end_time, current_start + max_window_ms)
+            window_start = current_start
+
+            while True:
+                params = {
+                    'symbol': symbol,
+                    'limit': limit,
+                    'startTime': window_start,
+                    'endTime': current_end
+                }
+
+                batch = self.client.signed_get(endpoint, params) or []
+                if not batch:
+                    break
+
+                for order in batch:
+                    order_id = order.get('orderId')
+                    if order_id in seen_order_ids:
+                        continue
+                    seen_order_ids.add(order_id)
+                    all_orders.append(order)
+
+                if len(batch) < limit:
+                    break
+
+                last_update = int(batch[-1].get('updateTime', window_start))
+                if last_update <= window_start:
+                    window_start += 1
+                else:
+                    window_start = last_update + 1
+
+                if window_start > current_end:
+                    break
+
+            current_start = current_end + 1
+
+        if not all_orders:
             logger.debug(f"No orders in time range for {symbol}")
 
-        return result if result else []
+        return all_orders
 
     def get_exchange_info(self) -> dict:
         """Get exchange information"""
         endpoint = '/fapi/v1/exchangeInfo'
-        try:
-            url = f"{self.base_url}{endpoint}"
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Get exchange info failed: {e}")
-            return {}
+        result = self.client.public_get(endpoint)
+        return result or {}
 
     def get_all_symbols(self) -> List[str]:
         """Get all USDT perpetual contract symbols"""
@@ -187,13 +170,8 @@ class BinanceOrderAnalyzer:
             'limit': limit
         }
 
-        try:
-            url = f"{self.base_url}{endpoint}"
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            return []
+        result = self.client.public_get(endpoint, params)
+        return result or []
 
     def get_utc_day_start(self, timestamp: int) -> int:
         """Get UTC+0 00:00 timestamp for given timestamp"""
@@ -224,40 +202,23 @@ class BinanceOrderAnalyzer:
         """Get commission and funding fees for a symbol"""
         endpoint = '/fapi/v1/income'
 
-        # Get commission fees
-        commission_params = {
+        # Optimize: Get all income types in one request to save API weight (30 vs 60)
+        params = {
             'symbol': symbol,
-            'incomeType': 'COMMISSION',
             'startTime': since,
             'endTime': until,
             'limit': 1000
         }
-        commission_records = self._request('GET', endpoint, commission_params)
 
-        # Get funding fees
-        funding_params = {
-            'symbol': symbol,
-            'incomeType': 'FUNDING_FEE',
-            'startTime': since,
-            'endTime': until,
-            'limit': 1000
-        }
-        funding_records = self._request('GET', endpoint, funding_params)
-
-        # Build a map of time -> total fees
+        records = self.client.signed_get(endpoint, params)
         fees_map = {}
 
-        if commission_records:
-            for record in commission_records:
-                time = int(record['time'])
-                income = float(record['income'])
-                fees_map[time] = fees_map.get(time, 0) + income
-
-        if funding_records:
-            for record in funding_records:
-                time = int(record['time'])
-                income = float(record['income'])
-                fees_map[time] = fees_map.get(time, 0) + income
+        if records:
+            for record in records:
+                if record.get('incomeType') in ['COMMISSION', 'FUNDING_FEE']:
+                    time_ts = int(record['time'])
+                    income = float(record['income'])
+                    fees_map[time_ts] = fees_map.get(time_ts, 0) + income
 
         return fees_map
 
@@ -274,7 +235,7 @@ class BinanceOrderAnalyzer:
         short_positions = []
 
         for order in sorted(orders, key=lambda x: x['updateTime']):
-            if order['status'] != 'FILLED':
+            if float(order['executedQty']) <= 0:
                 continue
 
             side = order['side']
@@ -415,7 +376,7 @@ class BinanceOrderAnalyzer:
                 'limit': 1000
             }
 
-            result = self._request('GET', endpoint, params)
+            result = self.client.signed_get(endpoint, params)
             if not result or len(result) == 0:
                 logger.warning("Failed to fetch income history")
                 break
@@ -431,7 +392,7 @@ class BinanceOrderAnalyzer:
             current_start = last_time + 1
             
             # Add a small delay to avoid rate limiting
-            time.sleep(0.1)            
+            time.sleep(0.5)            
 
         symbols_list = list(symbols)
 
@@ -442,7 +403,13 @@ class BinanceOrderAnalyzer:
 
         return symbols_list
 
-    def analyze_orders(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> pd.DataFrame:
+    def analyze_orders(
+        self,
+        since: int,
+        until: int,
+        traded_symbols: Optional[List[str]] = None,
+        use_time_filter: bool = True
+    ) -> pd.DataFrame:
         """Analyze orders and convert to DataFrame"""
 
         # 获取有交易记录的币种
@@ -462,15 +429,22 @@ class BinanceOrderAnalyzer:
             processed += 1
             logger.info(f"[{processed}/{len(traded_symbols)}] Processing {symbol}...")
 
-            # Get all orders without time filter (API limit issue)
-            orders = self.get_all_orders(symbol, limit=1000, start_time=None)
+            if use_time_filter:
+                orders = self.get_all_orders(symbol, limit=1000, start_time=since, end_time=until)
+            else:
+                # Get all orders without time filter (API limit issue)
+                orders = self.get_all_orders(symbol, limit=1000, start_time=None, end_time=None)
             if not orders:
                 logger.debug(f"No orders found for {symbol}")
                 continue
 
-            # Filter by time range and status
-            filled_orders = [o for o in orders if o['status'] == 'FILLED' and o['updateTime'] >= since]
-            logger.debug(f"Found {len(filled_orders)} filled orders in time range for {symbol}")
+            # Filter filled or partially filled orders (executedQty > 0)
+            # This handles FILLED, PARTIALLY_FILLED, and liquidations (often IOC/EXPIRED but with execution)
+            filled_orders = [
+                o for o in orders
+                if float(o['executedQty']) > 0 and o['updateTime'] >= since
+            ]
+            logger.debug(f"Found {len(filled_orders)} executed orders in time range for {symbol}")
 
             if len(filled_orders) < 1:
                 continue
@@ -487,7 +461,8 @@ class BinanceOrderAnalyzer:
             if positions:
                 logger.debug(f"Found {len(positions)} closed positions for {symbol}")
 
-            time.sleep(0.1)
+            # Increase sleep to avoid rate limits (Weight limit: 2400/min)
+            time.sleep(0.8)
 
         logger.info(f"Found {len(all_positions)} closed positions total")
 
@@ -721,32 +696,63 @@ class BinanceOrderAnalyzer:
             traceback.print_exc()
 
 
+    def get_real_positions(self) -> Dict[str, float]:
+        """Get actual open positions from Binance (Symbol -> NetQty)"""
+        endpoint = '/fapi/v2/positionRisk'
+        try:
+            positions = self.client.signed_get(endpoint)
+            # Filter for non-zero positions
+            real_pos = {}
+            if positions:
+                for p in positions:
+                    amt = float(p.get('positionAmt', 0))
+                    if abs(amt) > 0:
+                        real_pos[p['symbol']] = amt
+            return real_pos
+        except Exception as e:
+            logger.error(f"Failed to fetch position risk: {e}")
+            return {}
+
     def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> List[Dict]:
         """
-        获取未平仓的入场订单（已开仓但未平仓）
-
-        Returns:
-            List[Dict]: 未平仓订单列表
+        Get open entry orders (Opened but not closed)
+        Uses PositionRisk as source of truth to filter out closed/liquidated positions.
         """
+        # 1. Get Real Positions (Source of Truth)
+        real_positions_map = self.get_real_positions()
+
         if traded_symbols is None:
             traded_symbols = self.get_traded_symbols(since, until)
-        if not traded_symbols:
+
+        # Add any symbols that have real positions but might be missed (unlikely but safe)
+        all_target_symbols = set(traded_symbols) if traded_symbols else set()
+        all_target_symbols.update(real_positions_map.keys())
+
+        if not all_target_symbols:
             return []
 
         open_positions = []
 
-        for symbol in traded_symbols:
-            orders = self.get_all_orders(symbol, limit=1000, start_time=since)
+        for symbol in all_target_symbols:
+            # Check if we actually hold this position
+            real_net_qty = real_positions_map.get(symbol, 0.0)
+
+            # If real position is 0, skip calculation (fixes "Ghost Position" issue)
+            if real_net_qty == 0:
+                continue
+
+            orders = self.get_all_orders(symbol, limit=1000, start_time=since, end_time=until)
             if not orders:
                 continue
 
-            # 过滤已成交的订单
-            filled_orders = [o for o in orders if o['status'] == 'FILLED' and o['updateTime'] >= since]
+            # Filter filled orders
+            filled_orders = [
+                o for o in orders
+                if float(o['executedQty']) > 0 and o['updateTime'] >= since
+            ]
 
-            # 分别追踪 LONG 和 SHORT 的持仓
-            long_qty = 0.0
+            # Track positions locally
             long_entries = []
-            short_qty = 0.0
             short_entries = []
 
             for order in sorted(filled_orders, key=lambda x: x['updateTime']):
@@ -755,38 +761,30 @@ class BinanceOrderAnalyzer:
                 qty = float(order['executedQty'])
                 price = float(order['avgPrice'])
                 order_time = order['updateTime']
+                order_id = order['orderId']
 
-                # LONG 仓位
+                # LONG
                 if (position_side == 'LONG' and side == 'BUY') or \
                    (position_side == 'BOTH' and side == 'BUY'):
-                    long_qty += qty
                     long_entries.append({
-                        'price': price,
-                        'qty': qty,
-                        'time': order_time,
-                        'order_id': order['orderId']
+                        'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
                     })
                 elif (position_side == 'LONG' and side == 'SELL') or \
                      (position_side == 'BOTH' and side == 'SELL'):
-                    # 平仓，FIFO 扣减
+                    # FIFO Close
                     remaining = qty
                     while remaining > 0 and long_entries:
                         entry = long_entries[0]
                         close_qty = min(remaining, entry['qty'])
                         entry['qty'] -= close_qty
                         remaining -= close_qty
-                        long_qty -= close_qty
                         if entry['qty'] <= 0.0001:
                             long_entries.pop(0)
 
-                # SHORT 仓位
+                # SHORT
                 if position_side == 'SHORT' and side == 'SELL':
-                    short_qty += qty
                     short_entries.append({
-                        'price': price,
-                        'qty': qty,
-                        'time': order_time,
-                        'order_id': order['orderId']
+                        'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
                     })
                 elif position_side == 'SHORT' and side == 'BUY':
                     remaining = qty
@@ -795,34 +793,72 @@ class BinanceOrderAnalyzer:
                         close_qty = min(remaining, entry['qty'])
                         entry['qty'] -= close_qty
                         remaining -= close_qty
-                        short_qty -= close_qty
                         if entry['qty'] <= 0.0001:
                             short_entries.pop(0)
 
-            # 收集未平仓的入场订单
+            # Sync with Real Position
+            # We trust real_net_qty. If local calculation differs, we adjust.
+            # real_net_qty > 0 means Net Long, < 0 means Net Short.
+
+            final_entries = []
+
+            if real_net_qty > 0:
+                # We should only have Long entries
+                calculated_qty = sum(e['qty'] for e in long_entries)
+                # Allow small float diff
+                if abs(calculated_qty - real_net_qty) > 0.0001:
+                    logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc={calculated_qty}. Adjusting to Real.")
+
+                    # If we have TOO MANY locals, it means we missed some sells.
+                    # Trim from HEAD (FIFO) to match real qty.
+                    if calculated_qty > real_net_qty:
+                        diff = calculated_qty - real_net_qty
+                        while diff > 0.0001 and long_entries:
+                            entry = long_entries[0] # Oldest entry
+                            if entry['qty'] > diff:
+                                entry['qty'] -= diff
+                                diff = 0
+                            else:
+                                diff -= entry['qty']
+                                long_entries.pop(0)
+                    else:
+                        # Calculated < Real: We missed some BUYS or started monitoring late.
+                        # Can't invent history, so we just show what we have.
+                        pass
+
+                final_entries = long_entries
+
+            elif real_net_qty < 0:
+                # We should only have Short entries
+                abs_real_qty = abs(real_net_qty)
+                calculated_qty = sum(e['qty'] for e in short_entries)
+                if abs(calculated_qty - abs_real_qty) > 0.0001:
+                    logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc=-{calculated_qty}. Adjusting to Real.")
+
+                    if calculated_qty > abs_real_qty:
+                        diff = calculated_qty - abs_real_qty
+                        while diff > 0.0001 and short_entries:
+                            entry = short_entries[0]
+                            if entry['qty'] > diff:
+                                entry['qty'] -= diff
+                                diff = 0
+                            else:
+                                diff -= entry['qty']
+                                short_entries.pop(0)
+
+                final_entries = short_entries
+
+            # Add to results
             base = symbol[:-4] if symbol.endswith('USDT') else symbol
+            side_str = 'LONG' if real_net_qty > 0 else 'SHORT'
 
-            for entry in long_entries:
+            for entry in final_entries:
                 if entry['qty'] > 0.0001:
                     dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
                     open_positions.append({
                         'date': dt.strftime('%Y%m%d'),
                         'symbol': base,
-                        'side': 'LONG',
-                        'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
-                        'entry_price': entry['price'],
-                        'qty': entry['qty'],
-                        'entry_amount': round(entry['price'] * entry['qty']),
-                        'order_id': entry['order_id']
-                    })
-
-            for entry in short_entries:
-                if entry['qty'] > 0.0001:
-                    dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
-                    open_positions.append({
-                        'date': dt.strftime('%Y%m%d'),
-                        'symbol': base,
-                        'side': 'SHORT',
+                        'side': side_str,
                         'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
                         'entry_price': entry['price'],
                         'qty': entry['qty'],
