@@ -215,6 +215,43 @@ class TradeDataScheduler:
                     if should_alert:
                         hours = int(duration.total_seconds() / 3600)
                         pos['hours_held'] = hours
+
+                        # 获取实时标记价格计算浮盈
+                        try:
+                            # 注意：scheduler中没有public_rest实例，需临时创建或直接调analyzer的client
+                            # 简单起见，这里复用analyzer的client，它有signed_get，也可以用来获取mark price
+                            # /fapi/v1/premiumIndex?symbol=...
+                            mark_price = pos.get('mark_price')
+                            # 如果DB没存mark_price(目前没存)，尝试实时获取或估算
+                            # 为了不阻塞主线程太多，这里尝试快速获取，如果拿不到就显示'--'
+                            # 实际上在analyze_open_positions时已经拿过一次了，但没存进DB...
+                            # 更好的方式是analyze时就把unrealized_pnl算好存进DB(目前只存了entry_price/qty)
+                            # 既然现在无法轻易拿到实时pnl，我们临时调一次API获取最新价格
+
+                            # 临时获取当前价格
+                            ticker = self.analyzer.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
+                            if ticker:
+                                current_price = float(ticker['price'])
+                                entry_price = float(pos['entry_price'])
+                                qty = float(pos['qty'])
+                                side = pos['side']
+
+                                if side == 'LONG':
+                                    pnl = (current_price - entry_price) * qty
+                                else:
+                                    pnl = (entry_price - current_price) * qty
+
+                                pos['current_pnl'] = pnl
+                                pos['current_price'] = current_price
+                            else:
+                                pos['current_pnl'] = 0.0
+                                pos['current_price'] = 0.0
+
+                        except Exception as e:
+                            logger.warning(f"获取实时价格失败: {e}")
+                            pos['current_pnl'] = 0.0
+                            pos['current_price'] = 0.0
+
                         stale_positions.append(pos)
 
             if stale_positions:
@@ -225,14 +262,21 @@ class TradeDataScheduler:
                 content += "--- \n"
 
                 for pos in stale_positions:
+                    pnl_str = "N/A"
+                    if 'current_pnl' in pos:
+                        pnl_val = pos['current_pnl']
+                        emoji = "🟢" if pnl_val >= 0 else "🔴"
+                        pnl_str = f"{emoji} {pnl_val:+.2f} U"
+
                     content += (
                         f"**{pos['symbol']}** ({pos['side']})\n"
+                        f"- 盈亏: {pnl_str}\n"
                         f"- 时长: {pos['hours_held']} 小时\n"
-                        f"- 开仓: {pos['entry_time']}\n"
-                        f"- 价格: {pos['entry_price']}\n\n"
+                        f"- 开仓: {pos['entry_price']}\n"
+                        f"- 现价: {pos.get('current_price', '--')}\n\n"
                     )
 
-                content += "请及时处理。"
+                content += "请关注风险，及时处理。"
 
                 send_server_chan_notification(title, content)
 
