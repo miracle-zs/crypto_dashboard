@@ -1,132 +1,157 @@
-# 加密货币交易仪表盘 (Crypto Trading Dashboard)
+# 🚀 ZS's Crypto Shorting Cockpit (加密货币空头驾驶舱)
 
-这是一个基于 FastAPI 和币安 API 构建的专业级交易分析与实时监控系统。不仅提供机构级的绩效分析，还专为移动端优化，让您随时随地掌控交易状态。
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Status](https://img.shields.io/badge/Status-Stable-success.svg)
 
-## ✨ 核心功能
+> **"Slow is Smooth, Smooth is Fast." (慢就是快)**
+>
+> 这是一个为量化交易者打造的、**移动端优先**的专业级加密货币交易分析与实时监控系统。它不仅仅是一个记账工具，更是一个集成了机构级风控标准、绩效归因分析和实时战场监控的完整解决方案。
 
-### 📊 交易分析 (Analytics)
-- **多维度绩效评估**: 自动计算夏普比率 (Sharpe)、卡玛比率 (Calmar)、SQN、凯利公式建议仓位等专业指标。
-- **可视化报表**: 交互式权益曲线图、盈亏分布散点图、小时级盈亏热力图。
-- **完整交易记录**: 自动同步合约历史订单，计算准确的净盈亏与费率。
+---
 
-### 📱 实时监控 (Live Monitor)
-- **驾驶舱模式**: 实时追踪账户总权益、未结盈亏、风险敞口和杠杆率。
-- **移动端优先**: 专为手机设计的**卡片式视图**，自动适配屏幕，关键信息一目了然。
-- **极速体验**: 采用并行数据加载与骨架屏技术，秒级刷新，拒绝等待。
-- **风险风控**: 实时计算当前回撤，配合账户健康度评分系统，及时预警。
+## ✨ 核心功能特性
 
-### 🛡️ 系统运维
-- **实时日志 (Logs)**: 内置 Web 控制台，实时查看系统后台运行状态与 API 交互日志。
-- **指标文档 (Metrics)**: 集成完整的量化指标说明书与计算公式，方便查阅。
-- **后台自动同步**: 基于 APScheduler 的定时任务，支持断点续传与增量更新。
+### 📊 1. 深度交易分析 (Analytics Dashboard)
+超越交易所自带的基础报表，提供核心量化指标：
+- **机构级绩效评估**: 自动计算 **夏普比率 (Sharpe)**、**卡玛比率 (Calmar)**、**索提诺比率 (Sortino)** 和 **系统质量数 (SQN)**。
+- **资金管理辅助**: 内置 **凯利公式 (Kelly Criterion)** 建议，基于历史胜赔率动态推荐最佳仓位比例。
+- **可视化报表**:
+  - **权益曲线**: 精确的累计净值走势（已剔除充提币影响）。
+  - **盈亏分布**: 散点图分析持仓时间与盈亏的关系（Duration Analysis）。
+  - **时段分析**: 24小时盈亏热力图，识别最佳交易时段。
+  - **红黑榜**: 自动统计各币种的胜率与贡献度。
 
-## 🛠️ 技术栈
+### 📱 2. 实时战场监控 (Live Monitor)
+专为多屏协同和移动办公设计的实时监控台：
+- **秒级同步**: 并行数据加载架构，确保价格、持仓和账户余额毫秒级刷新。
+- **移动端适配**: 独创的 **"Card View" (卡片视图)**，在手机端自动将宽表格转换为卡片，关键信息（uPnL, ROI, 持仓时长）一目了然。
+- **全景风险视图**: 实时计算 **真实杠杆率 (Real Leverage)**、**风险敞口 (Exposure)** 和 **未结盈亏**。
 
-- **后端**: FastAPI (Python 3.11+), APScheduler
-- **数据存储**: SQLite (本地轻量化存储)
-- **数据处理**: Pandas, NumPy
-- **前端**: HTML5, Tailwind CSS (响应式), ApexCharts.js (可视化)
-- **部署**: Uvicorn / Gunicorn + Nginx
+### 🛡️ 3. 智能风控协议 (Risk Protocols)
+系统内置自动化风控规则，时刻监控账户健康：
+- **回撤熔断**: 实时监控当前回撤 (Drawdown)，配合账户健康度评分系统 (Health Score)。
+- **僵尸仓位预警**: 自动标记持仓超过 **48小时** 的短线订单 (Stale Position)。
+- **过夜风险提示**: 监控每日 23:00 后的持仓符号数量，防止过度分散。
+- **连败保护**: 监控近期连续亏损笔数，触发“熔断”建议。
 
-## 🚀 本地开发与运行
+### ⚡ 4. 极致性能与体验
+- **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
+- **暗黑模式 (Dark Mode)**: 深度适配的 OLED 黑夜模式，不仅护眼，更是交易员的信仰。
+- **本地化架构**: 核心数据存储于本地 SQLite，不依赖第三方云服务，数据绝对私有安全。
 
-### 1. 克隆项目
+---
 
-```bash
-git clone <您的仓库URL>
-cd crypto_dashboard
+## 🛠️ 系统架构
+
+本项目采用 **前后端分离** 的设计思想，基于 Python 生态构建：
+
+```mermaid
+graph TD
+    User[用户 (PC/Mobile)] -->|HTTP/WebSocket| Nginx[Nginx / Uvicorn]
+    Nginx --> FastAPI[FastAPI 后端]
+
+    subgraph "Core System"
+        FastAPI -->|Query| SQLite[(SQLite 数据库)]
+        Scheduler[APScheduler 定时任务] -->|Write| SQLite
+        Scheduler -->|REST API| Binance[Binance Exchange]
+    end
+
+    subgraph "Frontend"
+        HTML[Jinja2 Templates]
+        JS[Vanilla JS + ApexCharts]
+        CSS[TailwindCSS]
+    end
 ```
 
-### 2. 创建并激活虚拟环境
+- **后端**: FastAPI (高性能异步框架) + APScheduler (后台调度)
+- **数据层**: Pandas (清洗计算) + SQLite (持久化存储)
+- **前端**: 原生 JavaScript (无框架依赖) + Tailwind CSS + ApexCharts.js
 
-为了隔离项目依赖，建议使用虚拟环境。
+---
 
+## 🚀 快速开始
+
+### 环境要求
+- Python 3.10+
+- 能够访问币安 API 的网络环境 (建议使用香港/日本节点)
+
+### 1. 安装
 ```bash
+# 克隆仓库
+git clone <repository_url>
+cd crypto_dashboard
+
 # 创建虚拟环境
 python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 激活虚拟环境
-# Windows:
-# venv\Scripts\activate
-# macOS / Linux:
-source venv/bin/activate
-```
-
-### 3. 安装依赖
-
-```bash
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-### 4. 配置 API 密钥
-
-在项目根目录下创建一个名为 `.env` 的文件。
-
+### 2. 配置
+复制环境变量模板并填入您的 API Key：
 ```bash
-# 创建 .env 文件
 touch .env
 ```
 
-然后编辑该文件，填入您的币安 API 密钥和 Secret。**请确保 API 密钥有查询合约交易的权限。**
+在 `.env` 文件中填入：
+```ini
+# 币安 API 凭证 (必须)
+BINANCE_API_KEY=your_api_key_here
+BINANCE_API_SECRET=your_api_secret_here
 
-```env
-BINANCE_API_KEY=YOUR_API_KEY
-BINANCE_API_SECRET=YOUR_API_SECRET
-
-# (可选) 自定义首次同步的时间范围
-# 如果不设置，默认为最近30天
-# START_DATE=2023-01-01
-# END_DATE=2023-12-31
-
-# (可选) 同步配置
-# 交易同步间隔(分钟)，默认10
-# UPDATE_INTERVAL_MINUTES=10
-# 同步天数，默认30
-# DAYS_TO_FETCH=30
-
-# (可选) Binance 全局请求限速(秒)，默认0.3
-# BINANCE_MIN_REQUEST_INTERVAL=0.3
+# 系统配置 (可选)
+# 交易同步间隔 (分钟), 建议设为 1 以获得最佳实时性
+UPDATE_INTERVAL_MINUTES=1
+# 同步回溯天数
+DAYS_TO_FETCH=90
 ```
 
-> 时间说明：交易同步时间窗口与月度统计按北京时间(UTC+8)计算。
-
-### 5. (可选) 网络代理配置
-
-如果在中国大陆地区运行，通常需要配置代理才能连接币安 API。请在运行前设置环境变量：
-
-**Linux / macOS:**
+### 3. 运行
 ```bash
-export http_proxy=http://127.0.0.1:7890
-export https_proxy=http://127.0.0.1:7890
+# 启动开发服务器
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+访问 `http://localhost:8000` 即可看到仪表盘。
+
+---
+
+## 📂 项目结构
+
+```
+crypto_dashboard/
+├── app/
+│   ├── main.py            # FastAPI 入口与路由
+│   ├── scheduler.py       # 后台数据同步调度器
+│   ├── services.py        # 业务逻辑层
+│   ├── models.py          # 数据模型定义
+│   └── database.py        # 数据库连接管理
+├── data/
+│   └── trades.db          # SQLite 数据库文件 (自动生成)
+├── templates/             # 前端页面
+│   ├── index.html         # 主仪表盘 (Dashboard)
+│   ├── live_monitor.html  # 实时监控 (Monitor)
+│   ├── logs.html          # 系统日志
+│   └── metrics.html       # 指标说明文档
+├── static/                # 静态资源 (CSS/JS)
+├── requirements.txt       # 项目依赖
+└── trade_analyzer.py      # (Legacy) 独立分析脚本
 ```
 
-**Windows (PowerShell):**
-```powershell
-$env:http_proxy="http://127.0.0.1:7890"
-$env:https_proxy="http://127.0.0.1:7890"
-```
+---
 
-### 6. 启动开发服务器
+## ⚠️ 免责声明
 
-完成以上步骤后，运行以下命令即可启动应用：
+本软件仅供**教育和研究目的**使用。
+- 加密货币交易具有极高风险，可能导致资金全额损失。
+- 开发者不对因软件错误、API故障或网络延迟导致的任何资金损失负责。
+- 请务必在实盘使用前充分测试。
 
-```bash
-uvicorn app.main:app --reload
-```
+---
 
-服务器启动后，后台会自动开始首次数据同步，这可能需要几分钟时间，具体取决于您的交易历史数量。
+## 📄 License
 
-## 🌐 访问应用
-
-当您在**本地开发环境**中成功启动服务后：
-
-- **主仪表盘 (交易分析)**:
-  - 访问 `http://127.0.0.1:8000`
-- **实时监控页**:
-  - 访问 `http://127.0.0.1:8000/live-monitor`
-
-您可以在页面头部的导航栏在这两个页面之间轻松切换。
-
-## ☁️ 生产部署
-
-对于生产环境部署，推荐使用 **Gunicorn** 作为应用服务器，并配置 **Nginx** 作为反向代理。详细的部署指南请参考我之前提供的步骤。在生产环境中，Nginx 通常监听 `80` 端口 (HTTP) 或 `443` 端口 (HTTPS)，用户直接通过服务器 IP 或域名访问，无需指定端口号。
+MIT License

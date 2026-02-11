@@ -456,9 +456,56 @@
             color: #f87171;
             border: 1px solid rgba(239, 68, 68, 0.4);
         }
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            min-width: 250px;
+            background: var(--panel-strong);
+            border: 1px solid var(--border);
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            font-size: 13px;
+            font-weight: 500;
+        }
+        body.dark-mode .toast {
+            background: #1e293b;
+            border-color: #334155;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .toast.toast-success { border-left: 4px solid var(--success); }
+        .toast.toast-error { border-left: 4px solid var(--danger); }
+        .toast.toast-warn { border-left: 4px solid var(--warn); }
+        .toast.toast-info { border-left: 4px solid var(--accent); }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; transform: translateY(10px); }
+        }
     </style>
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
 
     <header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-50">
         <div class="flex flex-col gap-3 text-center lg:text-left items-center lg:items-start">
@@ -1653,6 +1700,32 @@
             logEl.scrollTop = logEl.scrollHeight;
         }
 
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+
+            let icon = '';
+            // Using existing lucide icons logic
+            if (type === 'success') icon = '<i data-lucide="check-circle" class="w-5 h-5 text-emerald-500"></i>';
+            else if (type === 'error') icon = '<i data-lucide="x-circle" class="w-5 h-5 text-rose-500"></i>';
+            else if (type === 'warn') icon = '<i data-lucide="alert-triangle" class="w-5 h-5 text-amber-500"></i>';
+            else icon = '<i data-lucide="info" class="w-5 h-5 text-cyan-500"></i>';
+
+            toast.innerHTML = `${icon}<span>${message}</span>`;
+
+            container.appendChild(toast);
+            lucide.createIcons(); // Refresh icons for the new element
+
+            // Auto remove
+            setTimeout(() => {
+                toast.style.animation = 'fadeOut 0.3s forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
         function formatMinutes(minutes) {
             if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return '--';
             if (minutes <= 0) return '0m';
@@ -1696,6 +1769,8 @@
             } catch (error) {
                 console.error("Open positions fetch error:", error);
                 logToTerminal(`持仓获取失败: ${error.message}`, "warn");
+                // Only toast on manual actions or critical failures, avoiding spam on auto-refresh
+                // showToast(`持仓数据更新失败`, 'warn');
             }
         }
 
@@ -1705,7 +1780,9 @@
                     method: 'POST'
                 });
                 if (response.ok) {
-                    logToTerminal(`${symbol} 已标记为${isLongTerm ? '长期' : '普通'}持仓`);
+                    const status = isLongTerm ? '长期' : '普通';
+                    logToTerminal(`${symbol} 已标记为${status}持仓`);
+                    showToast(`${symbol} 已标记为${status}持仓`, 'success');
                     // 立即局部更新 UI 而不是全量刷新
                     await fetchOpenPositions();
                 } else {
@@ -1713,6 +1790,7 @@
                 }
             } catch (error) {
                 logToTerminal(`设置失败: ${error.message}`, "error");
+                showToast(`设置失败: ${error.message}`, 'error');
                 await fetchOpenPositions(); // 失败则恢复状态
             }
         }
