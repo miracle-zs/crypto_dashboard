@@ -1719,12 +1719,13 @@
 
         function renderOpenPositions(openData) {
             const tbody = document.getElementById('open-positions-body');
+            const mobileContainer = document.getElementById('open-positions-mobile');
             const emptyEl = document.getElementById('open-positions-empty');
             const summary = openData && openData.summary ? openData.summary : {};
             const positions = openData && openData.positions ? openData.positions : [];
 
-            if (!tbody) return;
-            tbody.innerHTML = '';
+            if (tbody) tbody.innerHTML = '';
+            if (mobileContainer) mobileContainer.innerHTML = '';
 
             if (!positions.length) {
                 if (emptyEl) emptyEl.classList.remove('hidden');
@@ -1754,33 +1755,84 @@
                 const holdingStyle = isStale && !isLongTerm ? 'text-orange-400 font-bold' : 'text-xs font-mono';
                 const holdingIcon = isLongTerm ? '<i data-lucide="timer" class="w-3 h-3 inline mr-1 text-cyan-400"></i>' : (isStale ? '<i data-lucide="alert-triangle" class="w-3 h-3 inline mr-1 text-orange-400"></i>' : '');
 
-                const row = `
-                    <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800 ${rowOpacity}">
-                        <td class="px-6 py-4 font-bold text-cyan-400">
-                            ${pos.symbol}
-                            ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded ml-1">LT</span>' : ''}
-                        </td>
-                        <td class="px-6 py-4">
-                            <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
-                        </td>
-                        <td class="px-6 py-4 text-xs font-mono">${pos.entry_time}</td>
-                        <td class="px-6 py-4 ${holdingStyle}">
-                            ${holdingIcon}${pos.holding_time}
-                        </td>
-                        <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.entry_price, 3)}</td>
-                        <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.mark_price, 3)}</td>
-                        <td class="px-6 py-4 text-right font-mono">${formatMoney(pos.notional, 0)}</td>
-                        <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatSignedMoney(pos.unrealized_pnl, 0)}</td>
-                        <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatPct(pos.unrealized_pnl_pct, 2)}</td>
-                        <td class="px-6 py-4 text-center">
-                            <input type="checkbox"
-                                   ${isLongTerm ? 'checked' : ''}
-                                   onchange="toggleLongTerm('${pos.symbol}', ${pos.order_id || 0}, this.checked)"
-                                   class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-cyan-600 focus:ring-cyan-500 cursor-pointer">
-                        </td>
-                    </tr>
-                `;
-                tbody.innerHTML += row;
+                // Desktop Table Row
+                if (tbody) {
+                    const row = `
+                        <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800 ${rowOpacity}">
+                            <td class="px-6 py-4 font-bold text-cyan-400">
+                                ${pos.symbol}
+                                ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded ml-1">LT</span>' : ''}
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
+                            </td>
+                            <td class="px-6 py-4 text-xs font-mono">${pos.entry_time}</td>
+                            <td class="px-6 py-4 ${holdingStyle}">
+                                ${holdingIcon}${pos.holding_time}
+                            </td>
+                            <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.entry_price, 3)}</td>
+                            <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.mark_price, 3)}</td>
+                            <td class="px-6 py-4 text-right font-mono">${formatMoney(pos.notional, 0)}</td>
+                            <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatSignedMoney(pos.unrealized_pnl, 0)}</td>
+                            <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatPct(pos.unrealized_pnl_pct, 2)}</td>
+                            <td class="px-6 py-4 text-center">
+                                <input type="checkbox"
+                                       ${isLongTerm ? 'checked' : ''}
+                                       onchange="toggleLongTerm('${pos.symbol}', ${pos.order_id || 0}, this.checked)"
+                                       class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-cyan-600 focus:ring-cyan-500 cursor-pointer">
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                }
+
+                // Mobile Card View
+                if (mobileContainer) {
+                    const card = `
+                        <div class="p-4 bg-gray-800/30 border border-gray-700 rounded-lg ${rowOpacity}">
+                            <div class="flex justify-between items-start mb-3">
+                                <div>
+                                    <div class="font-bold text-cyan-400 flex items-center gap-2">
+                                        ${pos.symbol}
+                                        ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded">LT</span>' : ''}
+                                    </div>
+                                    <div class="text-[10px] text-gray-500 mt-1">${pos.entry_time}</div>
+                                </div>
+                                <div class="flex flex-col items-end gap-1">
+                                    <span class="${sideClass} text-[10px] border px-1.5 py-0.5 rounded font-bold">${pos.side}</span>
+                                    <span class="${pnlClass} text-xs font-bold font-mono">${formatPct(pos.unrealized_pnl_pct, 2)}</span>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2 text-xs">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">Unrealized PnL</span>
+                                    <span class="${pnlClass} font-mono font-bold">${formatSignedMoney(pos.unrealized_pnl, 0)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">Notional</span>
+                                    <span class="text-gray-300 font-mono">${formatMoney(pos.notional, 0)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">Price</span>
+                                    <span class="text-gray-400 font-mono">${formatNumber(pos.entry_price, 3)} → ${formatNumber(pos.mark_price, 3)}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-gray-500">Holding</span>
+                                    <span class="${holdingStyle} font-mono">${holdingIcon}${pos.holding_time}</span>
+                                </div>
+                                <div class="flex justify-between items-center pt-2 border-t border-gray-800/50">
+                                    <span class="text-gray-500">Long-term</span>
+                                    <input type="checkbox"
+                                           ${isLongTerm ? 'checked' : ''}
+                                           onchange="toggleLongTerm('${pos.symbol}', ${pos.order_id || 0}, this.checked)"
+                                           class="w-4 h-4 rounded border-gray-700 bg-gray-800 text-cyan-600 focus:ring-cyan-500 cursor-pointer">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    mobileContainer.innerHTML += card;
+                }
             });
 
             // 重新渲染图标（因为是动态插入的 HTML）
