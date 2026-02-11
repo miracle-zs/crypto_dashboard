@@ -633,8 +633,9 @@
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8 relative z-20">
         <div class="lg:col-span-8">
             <div class="section-label mb-4">TRADE LOG</div>
-            <div class="cyber-panel rounded-xl overflow-hidden panel-reveal">
-                <div class="overflow-x-auto">
+            <div class="cyber-panel rounded-xl overflow-hidden panel-reveal min-h-[300px]">
+                <!-- Desktop Table View -->
+                <div class="hidden md:block overflow-x-auto">
                     <table class="w-full text-left text-sm text-gray-400 min-w-[600px] md:min-w-full">
                         <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold sticky top-0 z-10 backdrop-blur">
                             <tr>
@@ -649,8 +650,44 @@
                             </tr>
                         </thead>
                         <tbody id="trade-table-body" class="divide-y divide-gray-800">
+                             <!-- Skeleton Loader -->
+                            <tr class="animate-pulse">
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-24"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-20"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-32"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16 ml-auto"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12 ml-auto"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12 mx-auto"></div></td>
+                            </tr>
+                            <tr class="animate-pulse">
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-24"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-20"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-32"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16 ml-auto"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12 ml-auto"></div></td>
+                                <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12 mx-auto"></div></td>
+                            </tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Mobile Card View -->
+                <div id="trade-list-mobile" class="md:hidden p-4 space-y-3">
+                    <!-- Skeleton Loader for Mobile -->
+                    <div class="p-4 bg-gray-800/30 border border-gray-700 rounded-lg animate-pulse">
+                        <div class="flex justify-between mb-3">
+                            <div class="h-5 bg-gray-700 rounded w-20"></div>
+                            <div class="h-5 bg-gray-700 rounded w-12"></div>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="flex justify-between"><div class="h-4 bg-gray-800 rounded w-24"></div><div class="h-4 bg-gray-800 rounded w-16"></div></div>
+                            <div class="flex justify-between"><div class="h-4 bg-gray-800 rounded w-32"></div></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -708,8 +745,15 @@
 
         async function fetchDashboardData() {
             try {
-                // Check status first
-                const statusRes = await fetch('/api/status');
+                // Parallel fetching for performance
+                const [statusRes, summaryRes, tradesRes, dailyStatsRes] = await Promise.all([
+                    fetch('/api/status'),
+                    fetch('/api/summary'),
+                    fetch('/api/trades'),
+                    fetch('/api/daily-stats')
+                ]);
+
+                // Check status
                 const status = await statusRes.json();
 
                 if (!status.configured) {
@@ -720,16 +764,9 @@
                     return;
                 }
 
-                // Fetch Summary Stats
-                const summaryRes = await fetch('/api/summary');
+                // Process data
                 const summaryData = await summaryRes.json();
-
-                // Fetch Trade History
-                const tradesRes = await fetch('/api/trades');
                 const tradesData = await tradesRes.json();
-
-                // Fetch Daily Stats
-                const dailyStatsRes = await fetch('/api/daily-stats');
                 const dailyStatsData = await dailyStatsRes.json();
 
                 updateUI(summaryData, tradesData, dailyStatsData);
@@ -1195,10 +1232,19 @@
         // ============================================
         function renderTable(tradeData) {
             const tbody = document.getElementById('trade-table-body');
-            tbody.innerHTML = '';
+            const mobileContainer = document.getElementById('trade-list-mobile');
+
+            if (tbody) tbody.innerHTML = '';
+            if (mobileContainer) mobileContainer.innerHTML = '';
 
             // Reverse to show latest first
             const reversedData = [...tradeData].reverse();
+
+            if (reversedData.length === 0) {
+                 if(tbody) tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">暂无交易记录</td></tr>';
+                 if(mobileContainer) mobileContainer.innerHTML = '<div class="text-center text-gray-500 py-8">暂无交易记录</div>';
+                 return;
+            }
 
             reversedData.forEach(t => {
                 const isWin = t.pnl_net > 0;
@@ -1207,6 +1253,7 @@
                 const dateStr = dateParts[0].substring(5); // Remove YYYY-
                 const timeStr = dateParts[1].substring(0, 5); // HH:MM
 
+                // Desktop Table Row
                 const row = `
                     <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800">
                         <td class="px-6 py-4">
@@ -1234,7 +1281,55 @@
                         </td>
                     </tr>
                 `;
-                tbody.innerHTML += row;
+                if(tbody) tbody.innerHTML += row;
+
+                // Mobile Card View
+                const card = `
+                    <div class="p-4 bg-gray-800/30 border border-gray-700/50 rounded-lg hover:border-gray-600 transition-colors">
+                        <div class="flex justify-between items-start mb-3 border-b border-gray-700/50 pb-2">
+                            <div class="flex flex-col">
+                                <span class="font-bold text-white text-base">${t.symbol}</span>
+                                <span class="text-[10px] text-gray-500">${dateStr} ${timeStr}</span>
+                            </div>
+                            <div class="flex flex-col items-end gap-1">
+                                <span class="${t.side === 'LONG' ? 'text-green-400 border-green-500/30' : 'text-red-400 border-red-500/30'} text-[10px] border px-1.5 py-0.5 rounded font-bold">
+                                    ${t.side}
+                                </span>
+                                <span class="text-[10px] ${isWin ? 'text-green-400' : 'text-red-400'} font-bold">
+                                    ${isWin ? 'WIN' : 'LOSS'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-500 text-xs">PnL (Net)</span>
+                                <span class="font-mono font-bold ${isWin ? 'text-green-400' : 'text-red-500'}">
+                                    ${isWin ? '+' : ''}${t.pnl_net}
+                                </span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-500 text-xs">ROI</span>
+                                <span class="font-mono ${isWin ? 'text-green-400' : 'text-red-500'}">
+                                    ${t.return_rate}
+                                </span>
+                            </div>
+                             <div class="flex justify-between items-center">
+                                <span class="text-gray-500 text-xs">Price</span>
+                                <span class="font-mono text-xs text-gray-300">
+                                    ${t.entry_price} → ${t.exit_price}
+                                </span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-500 text-xs">Duration</span>
+                                <span class="font-mono text-xs text-gray-300">
+                                    ${t.holding_time}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                if(mobileContainer) mobileContainer.innerHTML += card;
             });
 
         }
