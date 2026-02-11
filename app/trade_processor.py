@@ -107,6 +107,40 @@ class TradeDataProcessor:
 
         return flow
 
+    def _fetch_income_history(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None,
+    ) -> List[Dict]:
+        """
+        Fetch income history once in a paginated way for a time window.
+        """
+        client = client or self.client
+        endpoint = '/fapi/v1/income'
+        records: List[Dict] = []
+        current_start = since
+
+        while True:
+            params = {
+                'startTime': current_start,
+                'endTime': until,
+                'limit': 1000
+            }
+            batch = client.signed_get(endpoint, params)
+            if not batch:
+                break
+
+            records.extend(batch)
+            if len(batch) < 1000:
+                break
+
+            last_time = int(batch[-1]['time'])
+            current_start = last_time + 1
+            time.sleep(0.2)
+
+        return records
+
     def get_account_balance(self) -> Dict[str, float]:
         """Get USD-M Futures account balance (Margin & Wallet)."""
         endpoint = '/fapi/v2/account'
@@ -278,29 +312,43 @@ class TradeDataProcessor:
         until: int,
         client: Optional[BinanceFuturesRestClient] = None
     ) -> Dict[int, float]:
-        """Get commission and funding fees for a symbol"""
-        client = client or self.client
-        endpoint = '/fapi/v1/income'
-
-        # Optimize: Get all income types in one request to save API weight (30 vs 60)
-        params = {
-            'symbol': symbol,
-            'startTime': since,
-            'endTime': until,
-            'limit': 1000
-        }
-
-        records = client.signed_get(endpoint, params)
+        """Get commission and funding fees for a symbol (fallback helper)."""
+        records = self._fetch_income_history(since=since, until=until, client=client)
         fees_map = {}
 
         if records:
             for record in records:
+                if record.get('symbol') != symbol:
+                    continue
                 if record.get('incomeType') in ['COMMISSION', 'FUNDING_FEE']:
                     time_ts = int(record['time'])
                     income = float(record['income'])
                     fees_map[time_ts] = fees_map.get(time_ts, 0) + income
 
         return fees_map
+
+    def get_fee_totals_by_symbol(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> Dict[str, float]:
+        """
+        Batch fetch income once and aggregate commission/funding by symbol.
+        """
+        records = self._fetch_income_history(since=since, until=until, client=client)
+        fee_totals: Dict[str, float] = {}
+
+        for record in records:
+            symbol = record.get('symbol')
+            if not symbol:
+                continue
+            if record.get('incomeType') not in ['COMMISSION', 'FUNDING_FEE']:
+                continue
+            income = float(record.get('income', 0.0))
+            fee_totals[symbol] = fee_totals.get(symbol, 0.0) + income
+
+        return fee_totals
 
     def match_orders_to_positions(self, orders: List[Dict], symbol: str, fees_map: Dict[int, float] = None) -> List[Dict]:
         """Match orders to closed positions (handles partial fills)"""
@@ -450,35 +498,12 @@ class TradeDataProcessor:
         """Get symbols that have actual trades using income history"""
         client = client or self.client
         logger.info("Fetching traded symbols from income history...")
-
-        endpoint = '/fapi/v1/income'
-        symbols = set()
-        current_start = since
-
-        while True:
-            params = {
-                'startTime': current_start,
-                'endTime': until,
-                'limit': 1000
-            }
-
-            result = client.signed_get(endpoint, params)
-            if not result or len(result) == 0:
-                logger.warning("Failed to fetch income history")
-                break
-
-            # Extract unique symbols from income records
-            batch_symbols = list(set([record['symbol'] for record in result if 'symbol' in record and record['symbol']]))
-            symbols.update(batch_symbols)
-            if len(result) < 1000:
-                break
-            # Move start time to the time of the last record + 1ms
-            # This ensures we don't get duplicate records
-            last_time = int(result[-1]['time'])
-            current_start = last_time + 1
-            
-            # Add a small delay to avoid rate limiting
-            time.sleep(0.5)            
+        result = self._fetch_income_history(since=since, until=until, client=client)
+        symbols = {
+            record['symbol']
+            for record in result
+            if 'symbol' in record and record['symbol']
+        }
 
         symbols_list = list(symbols)
 
@@ -495,6 +520,7 @@ class TradeDataProcessor:
         since: int,
         until: int,
         use_time_filter: bool = True,
+        fee_totals_by_symbol: Optional[Dict[str, float]] = None,
     ) -> tuple[List[Dict], float]:
         """
         Extract and transform closed positions for one symbol.
@@ -532,7 +558,12 @@ class TradeDataProcessor:
         if len(filled_orders) < 1:
             return [], time.perf_counter() - started_at
 
-        fees_map = self.get_fees_for_symbol(symbol, since, until, client=worker_client)
+        symbol_total_fees = 0.0
+        if fee_totals_by_symbol is not None:
+            symbol_total_fees = fee_totals_by_symbol.get(symbol, 0.0)
+            fees_map = {0: symbol_total_fees} if symbol_total_fees != 0 else {}
+        else:
+            fees_map = self.get_fees_for_symbol(symbol, since, until, client=worker_client)
         positions = self.match_orders_to_positions(filled_orders, symbol, fees_map)
         return positions, time.perf_counter() - started_at
 
@@ -562,6 +593,12 @@ class TradeDataProcessor:
         success_count = 0
         failure_count = 0
         symbol_timings: List[tuple[str, float, int]] = []
+        fee_prefetch_started = time.perf_counter()
+        fee_totals_by_symbol = self.get_fee_totals_by_symbol(since=since, until=until)
+        fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
+        logger.info(
+            f"Income fee cache: symbols={len(fee_totals_by_symbol)}, elapsed={fee_prefetch_elapsed:.2f}s"
+        )
 
         if worker_count == 1:
             for idx, symbol in enumerate(symbols, 1):
@@ -571,7 +608,8 @@ class TradeDataProcessor:
                         symbol=symbol,
                         since=since,
                         until=until,
-                        use_time_filter=use_time_filter
+                        use_time_filter=use_time_filter,
+                        fee_totals_by_symbol=fee_totals_by_symbol
                     )
                     symbol_timings.append((symbol, elapsed, len(positions)))
                     success_count += 1
@@ -589,7 +627,8 @@ class TradeDataProcessor:
                         symbol,
                         since,
                         until,
-                        use_time_filter
+                        use_time_filter,
+                        fee_totals_by_symbol
                     ): symbol
                     for symbol in symbols
                 }
