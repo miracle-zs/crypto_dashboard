@@ -19,6 +19,7 @@ from app.trade_processor import TradeDataProcessor
 from app.database import Database
 from app.logger import logger
 from app.notifier import send_server_chan_notification
+from app.binance_client import BinanceFuturesRestClient
 
 load_dotenv()
 
@@ -44,7 +45,7 @@ class TradeDataScheduler:
 
         if not api_key or not api_secret:
             logger.warning("未配置Binance API密钥，定时任务将无法运行")
-            self.analyzer = None
+            self.processor = None
         else:
             self.processor = TradeDataProcessor(api_key, api_secret)
 
@@ -57,10 +58,21 @@ class TradeDataScheduler:
         self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
         self.force_full_sync = os.getenv('FORCE_FULL_SYNC', '0').lower() in ('1', 'true', 'yes')
 
+    def _is_api_cooldown_active(self, source: str) -> bool:
+        remaining = BinanceFuturesRestClient.cooldown_remaining_seconds()
+        if remaining > 0:
+            logger.warning(
+                f"Binance API冷却中，跳过{source}: remaining={remaining:.1f}s"
+            )
+            return True
+        return False
+
     def sync_trades_data(self):
         """同步交易数据到数据库"""
         if not self.processor:
             logger.warning("无法同步: API密钥未配置")
+            return
+        if self._is_api_cooldown_active(source='交易同步'):
             return
 
         sync_started_at = time.perf_counter()
@@ -187,7 +199,9 @@ class TradeDataScheduler:
             logger.info("同步未平仓订单...")
             stage_started = time.perf_counter()
             open_positions = self.processor.get_open_positions(since, until, traded_symbols=traded_symbols)
-            if open_positions:
+            if open_positions is None:
+                logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
+            elif open_positions:
                 open_count = self.db.save_open_positions(open_positions)
                 open_saved = open_count
                 logger.info(f"保存 {open_count} 条未平仓订单")
@@ -466,6 +480,8 @@ class TradeDataScheduler:
         """同步账户余额数据到数据库"""
         if not self.processor:
             return  # 如果没有配置API密钥，则不执行
+        if self._is_api_cooldown_active(source='余额同步'):
+            return
 
         try:
             logger.info("开始同步账户余额...")

@@ -949,12 +949,15 @@ class TradeDataProcessor:
             traceback.print_exc()
 
 
-    def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Dict[str, float]:
+    def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Optional[Dict[str, float]]:
         """Get actual open positions from Binance (Symbol -> NetQty)"""
         client = client or self.client
         endpoint = '/fapi/v2/positionRisk'
         try:
             positions = client.signed_get(endpoint)
+            if positions is None:
+                logger.warning("PositionRisk request failed, returning None")
+                return None
             # Filter for non-zero positions
             real_pos = {}
             if positions:
@@ -965,7 +968,7 @@ class TradeDataProcessor:
             return real_pos
         except Exception as e:
             logger.error(f"Failed to fetch position risk: {e}")
-            return {}
+            return None
 
     def _extract_open_positions_for_symbol(
         self,
@@ -1108,13 +1111,16 @@ class TradeDataProcessor:
                 })
         return output, time.perf_counter() - started_at
 
-    def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> List[Dict]:
+    def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> Optional[List[Dict]]:
         """
         Get open entry orders (Opened but not closed)
         Uses PositionRisk as source of truth to filter out closed/liquidated positions.
         """
         # 1. Get Real Positions (Source of Truth)
         real_positions_map = self.get_real_positions()
+        if real_positions_map is None:
+            logger.warning("Skip open positions refresh because PositionRisk failed")
+            return None
 
         if traded_symbols is None:
             traded_symbols = self.get_traded_symbols(since, until)

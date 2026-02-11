@@ -7,6 +7,8 @@ import hashlib
 import hmac
 import json
 import os
+import re
+import threading
 import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
@@ -18,6 +20,8 @@ from app.logger import logger
 
 class BinanceFuturesRestClient:
     """Lightweight REST client for Binance USD-M Futures."""
+    _cooldown_until_ms = 0
+    _cooldown_lock = threading.Lock()
 
     def __init__(
         self,
@@ -37,6 +41,7 @@ class BinanceFuturesRestClient:
         self._recv_window = int(os.getenv("BINANCE_RECV_WINDOW", 10000))
         self._last_request_ts = 0.0
         self._time_offset_ms = 0
+        self._last_cooldown_log_ts = 0.0
 
     def _headers(self) -> Dict[str, str]:
         if not self.api_key:
@@ -74,6 +79,37 @@ class BinanceFuturesRestClient:
             logger.error(f"Failed to sync Binance server time: {exc}")
             return False
 
+    @classmethod
+    def _set_global_cooldown_until(cls, until_ms: int, reason: str):
+        with cls._cooldown_lock:
+            if until_ms > cls._cooldown_until_ms:
+                cls._cooldown_until_ms = until_ms
+                logger.warning(
+                    f"Binance API cooldown activated until {until_ms} (epoch ms), reason={reason}"
+                )
+
+    @classmethod
+    def cooldown_remaining_seconds(cls) -> float:
+        with cls._cooldown_lock:
+            now_ms = int(time.time() * 1000)
+            return max(0.0, (cls._cooldown_until_ms - now_ms) / 1000)
+
+    @classmethod
+    def is_global_cooldown_active(cls) -> bool:
+        return cls.cooldown_remaining_seconds() > 0
+
+    @staticmethod
+    def _extract_ban_until_ms(message: Optional[str]) -> Optional[int]:
+        if not message:
+            return None
+        matched = re.search(r"banned until (\d+)", message)
+        if matched:
+            try:
+                return int(matched.group(1))
+            except Exception:
+                return None
+        return None
+
     def request(
         self,
         method: str,
@@ -82,6 +118,15 @@ class BinanceFuturesRestClient:
         signed: bool = False,
     ) -> Optional[Any]:
         base_params: Dict[str, Any] = dict(params) if params else {}
+        cooldown_left = self.cooldown_remaining_seconds()
+        if cooldown_left > 0:
+            now = time.time()
+            if now - self._last_cooldown_log_ts > 30:
+                self._last_cooldown_log_ts = now
+                logger.warning(
+                    f"Skip Binance request {path}: cooldown active ({cooldown_left:.1f}s remaining)"
+                )
+            return None
 
         url = f"{self.base_url}{path}"
 
@@ -109,9 +154,12 @@ class BinanceFuturesRestClient:
             except requests.exceptions.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
                 err_code = None
+                err_msg = None
                 if exc.response is not None:
                     try:
-                        err_code = exc.response.json().get("code")
+                        payload = exc.response.json()
+                        err_code = payload.get("code")
+                        err_msg = payload.get("msg")
                     except (json.JSONDecodeError, ValueError, TypeError):
                         err_code = None
 
@@ -120,6 +168,22 @@ class BinanceFuturesRestClient:
                     clock_synced = self._sync_server_time()
                     if clock_synced:
                         continue
+
+                if err_code == -1003 or status_code in (418, 429):
+                    now_ms = int(time.time() * 1000)
+                    ban_until_ms = self._extract_ban_until_ms(err_msg or "")
+                    if ban_until_ms is None:
+                        fallback_seconds = 600 if status_code == 418 else 60
+                        ban_until_ms = now_ms + fallback_seconds * 1000
+                    self._set_global_cooldown_until(
+                        until_ms=ban_until_ms,
+                        reason=f"status={status_code}, code={err_code}"
+                    )
+                    # -1003 means request budget is exhausted; stop retrying to avoid prolonging ban.
+                    logger.error(f"API request failed: {exc}")
+                    if hasattr(exc, "response") and exc.response is not None:
+                        logger.error(f"Response: {exc.response.text}")
+                    return None
 
                 if status_code == 429 and attempt < max_retries:
                     logger.warning(
