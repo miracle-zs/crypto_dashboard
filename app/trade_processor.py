@@ -9,6 +9,8 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional
 import time
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from app.logger import logger
 from app.binance_client import BinanceFuturesRestClient
@@ -24,6 +26,61 @@ class TradeDataProcessor:
         self.api_key = api_key
         self.api_secret = api_secret
         self.client = BinanceFuturesRestClient(api_key=api_key, api_secret=api_secret)
+        self.max_etl_workers = self._load_max_workers()
+        self.max_price_workers = self._load_price_workers()
+
+    def _load_max_workers(self) -> int:
+        raw = os.getenv('ETL_MAX_WORKERS', '2')
+        try:
+            workers = int(raw)
+            if workers < 1:
+                raise ValueError("must be >= 1")
+            return workers
+        except Exception:
+            logger.warning(f"Invalid ETL_MAX_WORKERS={raw}, fallback to 2")
+            return 2
+
+    def _load_price_workers(self) -> int:
+        raw = os.getenv('ETL_PRICE_WORKERS', str(self.max_etl_workers))
+        try:
+            workers = int(raw)
+            if workers < 1:
+                raise ValueError("must be >= 1")
+            return workers
+        except Exception:
+            logger.warning(f"Invalid ETL_PRICE_WORKERS={raw}, fallback to {self.max_etl_workers}")
+            return self.max_etl_workers
+
+    def _resolve_workers(self, task_count: int, max_workers: Optional[int] = None) -> int:
+        cap = self.max_etl_workers if max_workers is None else max_workers
+        if task_count <= 1:
+            return 1
+        return min(cap, task_count)
+
+    def _create_worker_client(self) -> BinanceFuturesRestClient:
+        return BinanceFuturesRestClient(api_key=self.api_key, api_secret=self.api_secret)
+
+    def _fetch_open_price_for_key(
+        self,
+        symbol: str,
+        utc_day_start_ms: int
+    ) -> tuple[str, int, Optional[float], float]:
+        started_at = time.perf_counter()
+        worker_client = self._create_worker_client()
+        try:
+            kline_start = self.get_kline_data(
+                symbol=symbol,
+                interval='1h',
+                start_time=utc_day_start_ms,
+                limit=1,
+                client=worker_client
+            )
+            if not kline_start:
+                return symbol, utc_day_start_ms, None, time.perf_counter() - started_at
+            open_price = float(kline_start[0][1])
+            return symbol, utc_day_start_ms, open_price, time.perf_counter() - started_at
+        except Exception:
+            return symbol, utc_day_start_ms, None, time.perf_counter() - started_at
 
     def get_recent_financial_flow(self, start_time: int) -> float:
         """
@@ -69,9 +126,11 @@ class TradeDataProcessor:
         symbol: str,
         limit: int = 1000,
         start_time: int = None,
-        end_time: int = None
+        end_time: int = None,
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> List[Dict]:
         """Get all orders for a symbol"""
+        client = client or self.client
         endpoint = '/fapi/v1/allOrders'
         params = {
             'symbol': symbol,
@@ -80,7 +139,7 @@ class TradeDataProcessor:
 
         # No time filter: one-shot fetch (Binance default window)
         if start_time is None and end_time is None:
-            result = self.client.signed_get(endpoint, params)
+            result = client.signed_get(endpoint, params)
             if result is None:
                 logger.warning(f"API request failed for {symbol}")
             elif isinstance(result, list) and len(result) == 0:
@@ -111,7 +170,7 @@ class TradeDataProcessor:
                     'endTime': current_end
                 }
 
-                batch = self.client.signed_get(endpoint, params) or []
+                batch = client.signed_get(endpoint, params) or []
                 if not batch:
                     break
 
@@ -141,15 +200,16 @@ class TradeDataProcessor:
 
         return all_orders
 
-    def get_exchange_info(self) -> dict:
+    def get_exchange_info(self, client: Optional[BinanceFuturesRestClient] = None) -> dict:
         """Get exchange information"""
+        client = client or self.client
         endpoint = '/fapi/v1/exchangeInfo'
-        result = self.client.public_get(endpoint)
+        result = client.public_get(endpoint)
         return result or {}
 
-    def get_all_symbols(self) -> List[str]:
+    def get_all_symbols(self, client: Optional[BinanceFuturesRestClient] = None) -> List[str]:
         """Get all USDT perpetual contract symbols"""
-        info = self.get_exchange_info()
+        info = self.get_exchange_info(client=client)
         if not info or 'symbols' not in info:
             return []
 
@@ -160,8 +220,16 @@ class TradeDataProcessor:
 
         return symbols
 
-    def get_kline_data(self, symbol: str, interval: str, start_time: int, limit: int = 1) -> List:
+    def get_kline_data(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int,
+        limit: int = 1,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> List:
         """Get kline/candlestick data"""
+        client = client or self.client
         endpoint = '/fapi/v1/klines'
         params = {
             'symbol': symbol,
@@ -170,7 +238,7 @@ class TradeDataProcessor:
             'limit': limit
         }
 
-        result = self.client.public_get(endpoint, params)
+        result = client.public_get(endpoint, params)
         return result or []
 
     def get_utc_day_start(self, timestamp: int) -> int:
@@ -179,7 +247,12 @@ class TradeDataProcessor:
         day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
         return int(day_start.timestamp() * 1000)
 
-    def get_price_change_from_utc_start(self, symbol: str, timestamp: int) -> Optional[float]:
+    def get_price_change_from_utc_start(
+        self,
+        symbol: str,
+        timestamp: int,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> Optional[float]:
         """Get the opening price for the UTC day of the given timestamp
         
         Returns:
@@ -188,7 +261,7 @@ class TradeDataProcessor:
         try:
             day_start = self.get_utc_day_start(timestamp)
 
-            kline_start = self.get_kline_data(symbol, '1h', day_start, 1)
+            kline_start = self.get_kline_data(symbol, '1h', day_start, 1, client=client)
             if not kline_start:
                 return None
 
@@ -198,8 +271,15 @@ class TradeDataProcessor:
         except Exception as e:
             return None
 
-    def get_fees_for_symbol(self, symbol: str, since: int, until: int) -> Dict[int, float]:
+    def get_fees_for_symbol(
+        self,
+        symbol: str,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> Dict[int, float]:
         """Get commission and funding fees for a symbol"""
+        client = client or self.client
         endpoint = '/fapi/v1/income'
 
         # Optimize: Get all income types in one request to save API weight (30 vs 60)
@@ -210,7 +290,7 @@ class TradeDataProcessor:
             'limit': 1000
         }
 
-        records = self.client.signed_get(endpoint, params)
+        records = client.signed_get(endpoint, params)
         fees_map = {}
 
         if records:
@@ -361,8 +441,14 @@ class TradeDataProcessor:
 
         return positions
 
-    def get_traded_symbols(self, since: int, until: int) -> List[str]:
+    def get_traded_symbols(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> List[str]:
         """Get symbols that have actual trades using income history"""
+        client = client or self.client
         logger.info("Fetching traded symbols from income history...")
 
         endpoint = '/fapi/v1/income'
@@ -376,7 +462,7 @@ class TradeDataProcessor:
                 'limit': 1000
             }
 
-            result = self.client.signed_get(endpoint, params)
+            result = client.signed_get(endpoint, params)
             if not result or len(result) == 0:
                 logger.warning("Failed to fetch income history")
                 break
@@ -403,6 +489,53 @@ class TradeDataProcessor:
 
         return symbols_list
 
+    def _extract_symbol_closed_positions(
+        self,
+        symbol: str,
+        since: int,
+        until: int,
+        use_time_filter: bool = True,
+    ) -> tuple[List[Dict], float]:
+        """
+        Extract and transform closed positions for one symbol.
+        Designed for parallel ETL workers.
+        """
+        started_at = time.perf_counter()
+        worker_client = self._create_worker_client()
+
+        if use_time_filter:
+            orders = self.get_all_orders(
+                symbol,
+                limit=1000,
+                start_time=since,
+                end_time=until,
+                client=worker_client
+            )
+        else:
+            # Get all orders without time filter (API limit issue)
+            orders = self.get_all_orders(
+                symbol,
+                limit=1000,
+                start_time=None,
+                end_time=None,
+                client=worker_client
+            )
+
+        if not orders:
+            return [], time.perf_counter() - started_at
+
+        # Filter filled or partially filled orders (executedQty > 0)
+        filled_orders = [
+            o for o in orders
+            if float(o['executedQty']) > 0 and o['updateTime'] >= since
+        ]
+        if len(filled_orders) < 1:
+            return [], time.perf_counter() - started_at
+
+        fees_map = self.get_fees_for_symbol(symbol, since, until, client=worker_client)
+        positions = self.match_orders_to_positions(filled_orders, symbol, fees_map)
+        return positions, time.perf_counter() - started_at
+
     def analyze_orders(
         self,
         since: int,
@@ -420,49 +553,75 @@ class TradeDataProcessor:
             logger.warning("No trading history found in the specified period")
             return pd.DataFrame()
 
-        logger.info(f"Analyzing {len(traded_symbols)} symbols...")
+        symbols = sorted(set(traded_symbols))
+        logger.info(f"Analyzing {len(symbols)} symbols...")
 
-        all_positions = []
-        processed = 0
+        all_positions: List[Dict] = []
+        worker_count = self._resolve_workers(len(symbols))
+        logger.info(f"ETL worker count: {worker_count}")
+        success_count = 0
+        failure_count = 0
+        symbol_timings: List[tuple[str, float, int]] = []
 
-        for symbol in traded_symbols:
-            processed += 1
-            logger.info(f"[{processed}/{len(traded_symbols)}] Processing {symbol}...")
+        if worker_count == 1:
+            for idx, symbol in enumerate(symbols, 1):
+                logger.info(f"[{idx}/{len(symbols)}] Processing {symbol}...")
+                try:
+                    positions, elapsed = self._extract_symbol_closed_positions(
+                        symbol=symbol,
+                        since=since,
+                        until=until,
+                        use_time_filter=use_time_filter
+                    )
+                    symbol_timings.append((symbol, elapsed, len(positions)))
+                    success_count += 1
+                    if positions:
+                        all_positions.extend(positions)
+                        logger.debug(f"Found {len(positions)} closed positions for {symbol}")
+                except Exception as exc:
+                    failure_count += 1
+                    logger.error(f"Processing {symbol} failed: {exc}")
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_map = {
+                    executor.submit(
+                        self._extract_symbol_closed_positions,
+                        symbol,
+                        since,
+                        until,
+                        use_time_filter
+                    ): symbol
+                    for symbol in symbols
+                }
 
-            if use_time_filter:
-                orders = self.get_all_orders(symbol, limit=1000, start_time=since, end_time=until)
-            else:
-                # Get all orders without time filter (API limit issue)
-                orders = self.get_all_orders(symbol, limit=1000, start_time=None, end_time=None)
-            if not orders:
-                logger.debug(f"No orders found for {symbol}")
-                continue
+                for idx, future in enumerate(as_completed(future_map), 1):
+                    symbol = future_map[future]
+                    try:
+                        positions, elapsed = future.result()
+                        symbol_timings.append((symbol, elapsed, len(positions)))
+                        success_count += 1
+                        if positions:
+                            all_positions.extend(positions)
+                            logger.debug(f"Found {len(positions)} closed positions for {symbol}")
+                        logger.info(f"[{idx}/{len(symbols)}] Processed {symbol}")
+                    except Exception as exc:
+                        failure_count += 1
+                        logger.error(f"[{idx}/{len(symbols)}] Processing {symbol} failed: {exc}")
 
-            # Filter filled or partially filled orders (executedQty > 0)
-            # This handles FILLED, PARTIALLY_FILLED, and liquidations (often IOC/EXPIRED but with execution)
-            filled_orders = [
-                o for o in orders
-                if float(o['executedQty']) > 0 and o['updateTime'] >= since
-            ]
-            logger.debug(f"Found {len(filled_orders)} executed orders in time range for {symbol}")
-
-            if len(filled_orders) < 1:
-                continue
-
-            # Get fees for this symbol
-            logger.debug(f"Fetching fees for {symbol}...")
-            fees_map = self.get_fees_for_symbol(symbol, since, until)
-            total_fees = sum(fees_map.values())
-            logger.debug(f"Total fees for {symbol}: {total_fees:.2f} USDT")
-
-            positions = self.match_orders_to_positions(filled_orders, symbol, fees_map)
-            all_positions.extend(positions)
-
-            if positions:
-                logger.debug(f"Found {len(positions)} closed positions for {symbol}")
-
-            # Increase sleep to avoid rate limits (Weight limit: 2400/min)
-            time.sleep(0.8)
+        if symbol_timings:
+            slowest = sorted(symbol_timings, key=lambda item: item[1], reverse=True)[:5]
+            slowest_str = ", ".join(
+                f"{symbol}:{elapsed:.2f}s/{count}"
+                for symbol, elapsed, count in slowest
+            )
+            logger.info(
+                f"Closed ETL stats: success={success_count}, failed={failure_count}, "
+                f"workers={worker_count}, slowest=[{slowest_str}]"
+            )
+        elif symbols:
+            logger.info(
+                f"Closed ETL stats: success={success_count}, failed={failure_count}, workers={worker_count}"
+            )
 
         logger.info(f"Found {len(all_positions)} closed positions total")
 
@@ -470,14 +629,65 @@ class TradeDataProcessor:
             logger.warning("No closed positions found")
             return pd.DataFrame()
 
+        # Prefetch daily open price by unique (symbol, UTC day) to avoid per-trade network call.
+        price_prefetch_started = time.perf_counter()
+        price_keys = sorted(
+            {
+                (pos['symbol'], self.get_utc_day_start(pos['entry_time']))
+                for pos in all_positions
+            }
+        )
+        open_price_cache: Dict[tuple[str, int], Optional[float]] = {}
+        price_timings: List[tuple[str, float, bool]] = []
+        price_worker_count = self._resolve_workers(len(price_keys), max_workers=self.max_price_workers)
+
+        if price_worker_count == 1:
+            for symbol, day_start_ms in price_keys:
+                fetched_symbol, fetched_day_start, price, elapsed = self._fetch_open_price_for_key(
+                    symbol=symbol,
+                    utc_day_start_ms=day_start_ms
+                )
+                open_price_cache[(fetched_symbol, fetched_day_start)] = price
+                price_timings.append((fetched_symbol, elapsed, price is not None))
+        else:
+            with ThreadPoolExecutor(max_workers=price_worker_count) as executor:
+                future_map = {
+                    executor.submit(self._fetch_open_price_for_key, symbol, day_start_ms): (symbol, day_start_ms)
+                    for symbol, day_start_ms in price_keys
+                }
+                for future in as_completed(future_map):
+                    symbol, day_start_ms = future_map[future]
+                    try:
+                        fetched_symbol, fetched_day_start, price, elapsed = future.result()
+                        open_price_cache[(fetched_symbol, fetched_day_start)] = price
+                        price_timings.append((fetched_symbol, elapsed, price is not None))
+                    except Exception:
+                        open_price_cache[(symbol, day_start_ms)] = None
+                        price_timings.append((symbol, 0.0, False))
+
+        price_prefetch_elapsed = time.perf_counter() - price_prefetch_started
+        if price_keys:
+            hit_count = sum(1 for _symbol, _elapsed, ok in price_timings if ok)
+            slowest_price = sorted(price_timings, key=lambda item: item[1], reverse=True)[:5]
+            slowest_price_str = ", ".join(
+                f"{symbol}:{elapsed:.2f}s"
+                for symbol, elapsed, _ok in slowest_price
+            )
+            logger.info(
+                f"Open price cache: keys={len(price_keys)}, hits={hit_count}, workers={price_worker_count}, "
+                f"elapsed={price_prefetch_elapsed:.2f}s, slowest=[{slowest_price_str}]"
+            )
+
         trades_data = []
+        transform_started = time.perf_counter()
         for idx, pos in enumerate(all_positions, 1):
             try:
                 symbol = pos['symbol']
                 entry_time = pos['entry_time']
                 exit_time = pos['exit_time']
 
-                open_price = self.get_price_change_from_utc_start(symbol, entry_time)
+                day_start_ms = self.get_utc_day_start(entry_time)
+                open_price = open_price_cache.get((symbol, day_start_ms))
 
                 dt = datetime.fromtimestamp(entry_time / 1000, tz=UTC8)
                 date_str = dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -566,6 +776,10 @@ class TradeDataProcessor:
         logger.info("Post-processing: Merging positions with same entry time...")
         df = self.merge_same_entry_positions(df)
         logger.info(f"After merging: {len(df)} positions")
+        transform_elapsed = time.perf_counter() - transform_started
+        logger.info(
+            f"Closed ETL transform stats: prefetch={price_prefetch_elapsed:.2f}s, transform={transform_elapsed:.2f}s"
+        )
 
         return df
 
@@ -696,11 +910,12 @@ class TradeDataProcessor:
             traceback.print_exc()
 
 
-    def get_real_positions(self) -> Dict[str, float]:
+    def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Dict[str, float]:
         """Get actual open positions from Binance (Symbol -> NetQty)"""
+        client = client or self.client
         endpoint = '/fapi/v2/positionRisk'
         try:
-            positions = self.client.signed_get(endpoint)
+            positions = client.signed_get(endpoint)
             # Filter for non-zero positions
             real_pos = {}
             if positions:
@@ -712,6 +927,147 @@ class TradeDataProcessor:
         except Exception as e:
             logger.error(f"Failed to fetch position risk: {e}")
             return {}
+
+    def _extract_open_positions_for_symbol(
+        self,
+        symbol: str,
+        real_net_qty: float,
+        since: int,
+        until: int
+    ) -> tuple[List[Dict], float]:
+        started_at = time.perf_counter()
+        worker_client = self._create_worker_client()
+        orders = self.get_all_orders(
+            symbol,
+            limit=1000,
+            start_time=since,
+            end_time=until,
+            client=worker_client
+        )
+        if not orders:
+            return [], time.perf_counter() - started_at
+
+        # Filter filled orders
+        filled_orders = [
+            o for o in orders
+            if float(o['executedQty']) > 0 and o['updateTime'] >= since
+        ]
+
+        # Track positions locally
+        long_entries = []
+        short_entries = []
+
+        for order in sorted(filled_orders, key=lambda x: x['updateTime']):
+            side = order['side']
+            position_side = order['positionSide']
+            qty = float(order['executedQty'])
+            price = float(order['avgPrice'])
+            order_time = order['updateTime']
+            order_id = order['orderId']
+
+            # LONG
+            if (position_side == 'LONG' and side == 'BUY') or \
+               (position_side == 'BOTH' and side == 'BUY'):
+                long_entries.append({
+                    'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
+                })
+            elif (position_side == 'LONG' and side == 'SELL') or \
+                    (position_side == 'BOTH' and side == 'SELL'):
+                # FIFO Close
+                remaining = qty
+                while remaining > 0 and long_entries:
+                    entry = long_entries[0]
+                    close_qty = min(remaining, entry['qty'])
+                    entry['qty'] -= close_qty
+                    remaining -= close_qty
+                    if entry['qty'] <= 0.0001:
+                        long_entries.pop(0)
+
+            # SHORT
+            if position_side == 'SHORT' and side == 'SELL':
+                short_entries.append({
+                    'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
+                })
+            elif position_side == 'SHORT' and side == 'BUY':
+                remaining = qty
+                while remaining > 0 and short_entries:
+                    entry = short_entries[0]
+                    close_qty = min(remaining, entry['qty'])
+                    entry['qty'] -= close_qty
+                    remaining -= close_qty
+                    if entry['qty'] <= 0.0001:
+                        short_entries.pop(0)
+
+        # Sync with Real Position
+        # We trust real_net_qty. If local calculation differs, we adjust.
+        # real_net_qty > 0 means Net Long, < 0 means Net Short.
+        final_entries = []
+
+        if real_net_qty > 0:
+            # We should only have Long entries
+            calculated_qty = sum(e['qty'] for e in long_entries)
+            # Allow small float diff
+            if abs(calculated_qty - real_net_qty) > 0.0001:
+                logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc={calculated_qty}. Adjusting to Real.")
+
+                # If we have TOO MANY locals, it means we missed some sells.
+                # Trim from HEAD (FIFO) to match real qty.
+                if calculated_qty > real_net_qty:
+                    diff = calculated_qty - real_net_qty
+                    while diff > 0.0001 and long_entries:
+                        entry = long_entries[0]  # Oldest entry
+                        if entry['qty'] > diff:
+                            entry['qty'] -= diff
+                            diff = 0
+                        else:
+                            diff -= entry['qty']
+                            long_entries.pop(0)
+                else:
+                    # Calculated < Real: We missed some BUYS or started monitoring late.
+                    # Can't invent history, so we just show what we have.
+                    pass
+
+            final_entries = long_entries
+
+        elif real_net_qty < 0:
+            # We should only have Short entries
+            abs_real_qty = abs(real_net_qty)
+            calculated_qty = sum(e['qty'] for e in short_entries)
+            if abs(calculated_qty - abs_real_qty) > 0.0001:
+                logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc=-{calculated_qty}. Adjusting to Real.")
+
+                if calculated_qty > abs_real_qty:
+                    diff = calculated_qty - abs_real_qty
+                    while diff > 0.0001 and short_entries:
+                        entry = short_entries[0]
+                        if entry['qty'] > diff:
+                            entry['qty'] -= diff
+                            diff = 0
+                        else:
+                            diff -= entry['qty']
+                            short_entries.pop(0)
+
+            final_entries = short_entries
+
+        # Add to results
+        base = symbol[:-4] if symbol.endswith('USDT') else symbol
+        side_str = 'LONG' if real_net_qty > 0 else 'SHORT'
+
+        output = []
+        for entry in final_entries:
+            if entry['qty'] > 0.0001:
+                dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
+                output.append({
+                    'date': dt.strftime('%Y%m%d'),
+                    'symbol': base,
+                    'side': side_str,
+                    'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    'entry_price': entry['price'],
+                    'qty': entry['qty'],
+                    'entry_amount': round(entry['price'] * entry['qty']),
+                    'order_id': entry['order_id']
+                })
+        return output, time.perf_counter() - started_at
 
     def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> List[Dict]:
         """
@@ -731,140 +1087,80 @@ class TradeDataProcessor:
         if not all_target_symbols:
             return []
 
-        open_positions = []
+        active_symbols = sorted(
+            symbol for symbol in all_target_symbols
+            if real_positions_map.get(symbol, 0.0) != 0
+        )
 
-        for symbol in all_target_symbols:
-            # Check if we actually hold this position
-            real_net_qty = real_positions_map.get(symbol, 0.0)
+        if not active_symbols:
+            return []
 
-            # If real position is 0, skip calculation (fixes "Ghost Position" issue)
-            if real_net_qty == 0:
-                continue
+        worker_count = self._resolve_workers(len(active_symbols))
+        open_positions: List[Dict] = []
+        success_count = 0
+        failure_count = 0
+        symbol_timings: List[tuple[str, float, int]] = []
 
-            orders = self.get_all_orders(symbol, limit=1000, start_time=since, end_time=until)
-            if not orders:
-                continue
+        if worker_count == 1:
+            for symbol in active_symbols:
+                try:
+                    positions, elapsed = self._extract_open_positions_for_symbol(
+                        symbol=symbol,
+                        real_net_qty=real_positions_map[symbol],
+                        since=since,
+                        until=until
+                    )
+                    symbol_timings.append((symbol, elapsed, len(positions)))
+                    success_count += 1
+                    open_positions.extend(positions)
+                except Exception as exc:
+                    failure_count += 1
+                    logger.error(f"Failed to extract open positions for {symbol}: {exc}")
+            if symbol_timings:
+                slowest = sorted(symbol_timings, key=lambda item: item[1], reverse=True)[:5]
+                slowest_str = ", ".join(
+                    f"{symbol}:{elapsed:.2f}s/{count}"
+                    for symbol, elapsed, count in slowest
+                )
+                logger.info(
+                    f"Open ETL stats: success={success_count}, failed={failure_count}, "
+                    f"workers={worker_count}, slowest=[{slowest_str}]"
+                )
+            return open_positions
 
-            # Filter filled orders
-            filled_orders = [
-                o for o in orders
-                if float(o['executedQty']) > 0 and o['updateTime'] >= since
-            ]
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {
+                executor.submit(
+                    self._extract_open_positions_for_symbol,
+                    symbol,
+                    real_positions_map[symbol],
+                    since,
+                    until
+                ): symbol
+                for symbol in active_symbols
+            }
 
-            # Track positions locally
-            long_entries = []
-            short_entries = []
+            for future in as_completed(future_map):
+                symbol = future_map[future]
+                try:
+                    positions, elapsed = future.result()
+                    symbol_timings.append((symbol, elapsed, len(positions)))
+                    success_count += 1
+                    open_positions.extend(positions)
+                except Exception as exc:
+                    failure_count += 1
+                    logger.error(f"Failed to extract open positions for {symbol}: {exc}")
 
-            for order in sorted(filled_orders, key=lambda x: x['updateTime']):
-                side = order['side']
-                position_side = order['positionSide']
-                qty = float(order['executedQty'])
-                price = float(order['avgPrice'])
-                order_time = order['updateTime']
-                order_id = order['orderId']
-
-                # LONG
-                if (position_side == 'LONG' and side == 'BUY') or \
-                   (position_side == 'BOTH' and side == 'BUY'):
-                    long_entries.append({
-                        'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
-                    })
-                elif (position_side == 'LONG' and side == 'SELL') or \
-                     (position_side == 'BOTH' and side == 'SELL'):
-                    # FIFO Close
-                    remaining = qty
-                    while remaining > 0 and long_entries:
-                        entry = long_entries[0]
-                        close_qty = min(remaining, entry['qty'])
-                        entry['qty'] -= close_qty
-                        remaining -= close_qty
-                        if entry['qty'] <= 0.0001:
-                            long_entries.pop(0)
-
-                # SHORT
-                if position_side == 'SHORT' and side == 'SELL':
-                    short_entries.append({
-                        'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
-                    })
-                elif position_side == 'SHORT' and side == 'BUY':
-                    remaining = qty
-                    while remaining > 0 and short_entries:
-                        entry = short_entries[0]
-                        close_qty = min(remaining, entry['qty'])
-                        entry['qty'] -= close_qty
-                        remaining -= close_qty
-                        if entry['qty'] <= 0.0001:
-                            short_entries.pop(0)
-
-            # Sync with Real Position
-            # We trust real_net_qty. If local calculation differs, we adjust.
-            # real_net_qty > 0 means Net Long, < 0 means Net Short.
-
-            final_entries = []
-
-            if real_net_qty > 0:
-                # We should only have Long entries
-                calculated_qty = sum(e['qty'] for e in long_entries)
-                # Allow small float diff
-                if abs(calculated_qty - real_net_qty) > 0.0001:
-                    logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc={calculated_qty}. Adjusting to Real.")
-
-                    # If we have TOO MANY locals, it means we missed some sells.
-                    # Trim from HEAD (FIFO) to match real qty.
-                    if calculated_qty > real_net_qty:
-                        diff = calculated_qty - real_net_qty
-                        while diff > 0.0001 and long_entries:
-                            entry = long_entries[0] # Oldest entry
-                            if entry['qty'] > diff:
-                                entry['qty'] -= diff
-                                diff = 0
-                            else:
-                                diff -= entry['qty']
-                                long_entries.pop(0)
-                    else:
-                        # Calculated < Real: We missed some BUYS or started monitoring late.
-                        # Can't invent history, so we just show what we have.
-                        pass
-
-                final_entries = long_entries
-
-            elif real_net_qty < 0:
-                # We should only have Short entries
-                abs_real_qty = abs(real_net_qty)
-                calculated_qty = sum(e['qty'] for e in short_entries)
-                if abs(calculated_qty - abs_real_qty) > 0.0001:
-                    logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc=-{calculated_qty}. Adjusting to Real.")
-
-                    if calculated_qty > abs_real_qty:
-                        diff = calculated_qty - abs_real_qty
-                        while diff > 0.0001 and short_entries:
-                            entry = short_entries[0]
-                            if entry['qty'] > diff:
-                                entry['qty'] -= diff
-                                diff = 0
-                            else:
-                                diff -= entry['qty']
-                                short_entries.pop(0)
-
-                final_entries = short_entries
-
-            # Add to results
-            base = symbol[:-4] if symbol.endswith('USDT') else symbol
-            side_str = 'LONG' if real_net_qty > 0 else 'SHORT'
-
-            for entry in final_entries:
-                if entry['qty'] > 0.0001:
-                    dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
-                    open_positions.append({
-                        'date': dt.strftime('%Y%m%d'),
-                        'symbol': base,
-                        'side': side_str,
-                        'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
-                        'entry_price': entry['price'],
-                        'qty': entry['qty'],
-                        'entry_amount': round(entry['price'] * entry['qty']),
-                        'order_id': entry['order_id']
-                    })
+        if symbol_timings:
+            slowest = sorted(symbol_timings, key=lambda item: item[1], reverse=True)[:5]
+            slowest_str = ", ".join(
+                f"{symbol}:{elapsed:.2f}s/{count}"
+                for symbol, elapsed, count in slowest
+            )
+            logger.info(
+                f"Open ETL stats: success={success_count}, failed={failure_count}, "
+                f"workers={worker_count}, slowest=[{slowest_str}]"
+            )
 
         return open_positions
 

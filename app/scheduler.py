@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
+import time
 from dotenv import load_dotenv
 import sys
 from pathlib import Path
@@ -54,6 +55,7 @@ class TradeDataScheduler:
         self.sync_lookback_minutes = int(os.getenv('SYNC_LOOKBACK_MINUTES', 1440))
         self.use_time_filter = os.getenv('SYNC_USE_TIME_FILTER', '1').lower() in ('1', 'true', 'yes')
         self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
+        self.force_full_sync = os.getenv('FORCE_FULL_SYNC', '0').lower() in ('1', 'true', 'yes')
 
     def sync_trades_data(self):
         """同步交易数据到数据库"""
@@ -61,9 +63,25 @@ class TradeDataScheduler:
             logger.warning("无法同步: API密钥未配置")
             return
 
+        sync_started_at = time.perf_counter()
+        symbols_elapsed = 0.0
+        analyze_elapsed = 0.0
+        save_trades_elapsed = 0.0
+        open_positions_elapsed = 0.0
+        risk_check_elapsed = 0.0
+        trades_saved = 0
+        open_saved = 0
+        symbol_count = 0
+
         try:
             logger.info("=" * 50)
             logger.info("开始同步交易数据...")
+            if self.force_full_sync:
+                logger.info("同步策略: FORCE_FULL_SYNC=ON (始终走全量模式)")
+            elif self.start_date:
+                logger.info("同步策略: START_DATE 全量模式")
+            else:
+                logger.info("同步策略: 增量模式(带回溯窗口)")
 
             # 更新同步状态为进行中
             self.db.update_sync_status(status='syncing')
@@ -76,7 +94,20 @@ class TradeDataScheduler:
             # 2) 否则如果数据库已有最后入场时间 -> 增量(带回溯窗口)
             # 3) 否则 -> DAYS_TO_FETCH 天全量
             last_entry_time = self.db.get_last_entry_time()
-            if self.start_date:
+            if self.force_full_sync:
+                if self.start_date:
+                    try:
+                        start_dt = datetime.strptime(self.start_date, '%Y-%m-%d').replace(tzinfo=UTC8)
+                        start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+                        since = int(start_dt.timestamp() * 1000)
+                        logger.info(f"全量更新模式(FORCE_FULL_SYNC) - 从自定义日期 {self.start_date} 开始")
+                    except ValueError as e:
+                        logger.error(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
+                        since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+                else:
+                    logger.warning("FORCE_FULL_SYNC=1 但未设置 START_DATE，回退为 DAYS_TO_FETCH 窗口")
+                    since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
+            elif self.start_date:
                 # 使用自定义起始日期
                 try:
                     start_dt = datetime.strptime(self.start_date, '%Y-%m-%d').replace(tzinfo=UTC8)
@@ -115,13 +146,21 @@ class TradeDataScheduler:
 
             # 从Binance获取数据
             logger.info("从Binance API抓取数据...")
+            stage_started = time.perf_counter()
             traded_symbols = self.processor.get_traded_symbols(since, until)
+            symbols_elapsed = time.perf_counter() - stage_started
+            symbol_count = len(traded_symbols)
+            logger.info(f"拉取活跃交易币种完成: count={symbol_count}, elapsed={symbols_elapsed:.2f}s")
+
+            stage_started = time.perf_counter()
             df = self.processor.analyze_orders(
                 since=since,
                 until=until,
                 traded_symbols=traded_symbols,
                 use_time_filter=self.use_time_filter
             )
+            analyze_elapsed = time.perf_counter() - stage_started
+            logger.info(f"闭仓ETL完成: rows={len(df)}, elapsed={analyze_elapsed:.2f}s")
 
             if df.empty:
                 logger.info("没有新数据需要更新")
@@ -130,28 +169,38 @@ class TradeDataScheduler:
                 # 如果是全量更新模式（start_date 或无 last_entry_time），建议使用覆盖模式防止重复
                 # 这里简单起见，只要有新数据计算出来，我们就认为这批数据是最新的真理
                 # 尤其是当重新计算了历史盈亏时，覆盖旧数据是必须的
-                is_full_sync = self.start_date is not None or self.db.get_last_entry_time() is None
+                is_full_sync = self.force_full_sync or self.start_date is not None or self.db.get_last_entry_time() is None
 
                 logger.info(f"保存 {len(df)} 条记录到数据库 (覆盖模式={is_full_sync})...")
+                stage_started = time.perf_counter()
                 saved_count = self.db.save_trades(df, overwrite=is_full_sync)
+                save_trades_elapsed += time.perf_counter() - stage_started
+                trades_saved = saved_count
 
                 if saved_count > 0:
                     logger.info("检测到新平仓单，重算统计快照...")
+                    stage_started = time.perf_counter()
                     self.db.recompute_trade_summary()
+                    save_trades_elapsed += time.perf_counter() - stage_started
 
             # 同步未平仓订单
             logger.info("同步未平仓订单...")
+            stage_started = time.perf_counter()
             open_positions = self.processor.get_open_positions(since, until, traded_symbols=traded_symbols)
             if open_positions:
                 open_count = self.db.save_open_positions(open_positions)
+                open_saved = open_count
                 logger.info(f"保存 {open_count} 条未平仓订单")
             else:
                 # 清空未平仓记录（如果没有未平仓订单）
                 self.db.save_open_positions([])
                 logger.info("当前无未平仓订单")
+            open_positions_elapsed = time.perf_counter() - stage_started
 
             # 检查持仓超时告警
+            stage_started = time.perf_counter()
             self.check_long_held_positions()
+            risk_check_elapsed = time.perf_counter() - stage_started
 
             # 更新同步状态
             self.db.update_sync_status(status='idle')
@@ -161,11 +210,34 @@ class TradeDataScheduler:
             logger.info("同步完成!")
             logger.info(f"数据库统计: 总交易数={stats['total_trades']}, 币种数={stats['unique_symbols']}")
             logger.info(f"时间范围: {stats['earliest_trade']} ~ {stats['latest_trade']}")
+            total_elapsed = time.perf_counter() - sync_started_at
+            logger.info(
+                "同步耗时汇总: "
+                f"symbols={symbols_elapsed:.2f}s, "
+                f"analyze={analyze_elapsed:.2f}s, "
+                f"save={save_trades_elapsed:.2f}s, "
+                f"open_positions={open_positions_elapsed:.2f}s, "
+                f"risk_check={risk_check_elapsed:.2f}s, "
+                f"total={total_elapsed:.2f}s, "
+                f"symbol_count={symbol_count}, "
+                f"trades_saved={trades_saved}, "
+                f"open_saved={open_saved}"
+            )
             logger.info("=" * 50)
 
         except Exception as e:
             error_msg = f"同步失败: {str(e)}"
             logger.error(error_msg)
+            total_elapsed = time.perf_counter() - sync_started_at
+            logger.error(
+                "同步失败耗时汇总: "
+                f"symbols={symbols_elapsed:.2f}s, "
+                f"analyze={analyze_elapsed:.2f}s, "
+                f"save={save_trades_elapsed:.2f}s, "
+                f"open_positions={open_positions_elapsed:.2f}s, "
+                f"risk_check={risk_check_elapsed:.2f}s, "
+                f"total={total_elapsed:.2f}s"
+            )
             self.db.update_sync_status(status='error', error_message=error_msg)
             import traceback
             logger.error(traceback.format_exc())
@@ -220,21 +292,11 @@ class TradeDataScheduler:
                         hours = int(duration.total_seconds() / 3600)
                         pos['hours_held'] = hours
 
-                        # 获取实时标记价格计算浮盈
+                        # 获取实时价格计算浮盈
                         try:
-                            # 注意：scheduler中没有public_rest实例，需临时创建或直接调analyzer的client
-                            # 简单起见，这里复用processor的client，它有signed_get，也可以用来获取mark price
-                            # /fapi/v1/premiumIndex?symbol=...
-                            mark_price = pos.get('mark_price')
-                            # 如果DB没存mark_price(目前没存)，尝试实时获取或估算
-                            # 为了不阻塞主线程太多，这里尝试快速获取，如果拿不到就显示'--'
-                            # 实际上在analyze_open_positions时已经拿过一次了，但没存进DB...
-                            # 更好的方式是analyze时就把unrealized_pnl算好存进DB(目前只存了entry_price/qty)
-                            # 既然现在无法轻易拿到实时pnl，我们临时调一次API获取最新价格
-
-                            # 临时获取当前价格
-                            ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
-                            if ticker:
+                            symbol_for_quote = self._normalize_futures_symbol(pos['symbol'])
+                            ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': symbol_for_quote})
+                            if ticker and ticker.get('price') is not None:
                                 current_price = float(ticker['price'])
                                 entry_price = float(pos['entry_price'])
                                 qty = float(pos['qty'])
@@ -248,13 +310,13 @@ class TradeDataScheduler:
                                 pos['current_pnl'] = pnl
                                 pos['current_price'] = current_price
                             else:
-                                pos['current_pnl'] = 0.0
-                                pos['current_price'] = 0.0
+                                pos['current_pnl'] = None
+                                pos['current_price'] = None
 
                         except Exception as e:
                             logger.warning(f"获取实时价格失败: {e}")
-                            pos['current_pnl'] = 0.0
-                            pos['current_price'] = 0.0
+                            pos['current_pnl'] = None
+                            pos['current_price'] = None
 
                         stale_positions.append(pos)
 
@@ -267,17 +329,19 @@ class TradeDataScheduler:
 
                 for pos in stale_positions:
                     pnl_str = "N/A"
-                    if 'current_pnl' in pos:
+                    if pos.get('current_pnl') is not None:
                         pnl_val = pos['current_pnl']
                         emoji = "🟢" if pnl_val >= 0 else "🔴"
                         pnl_str = f"{emoji} {pnl_val:+.2f} U"
+                    current_price = pos.get('current_price')
+                    current_price_str = f"{current_price:.6g}" if current_price is not None else "--"
 
                     content += (
                         f"**{pos['symbol']}** ({pos['side']})\n"
                         f"- 盈亏: {pnl_str}\n"
                         f"- 时长: {pos['hours_held']} 小时\n"
                         f"- 开仓: {pos['entry_price']}\n"
-                        f"- 现价: {pos.get('current_price', '--')}\n\n"
+                        f"- 现价: {current_price_str}\n\n"
                     )
 
                 content += "请关注风险，及时处理。"
@@ -338,9 +402,9 @@ class TradeDataScheduler:
                 if (now - entry_dt).total_seconds() <= 24 * 3600:
                     # 获取实时价格计算浮盈
                     try:
-                        # 临时获取当前价格
-                        ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
-                        if ticker:
+                        symbol_for_quote = self._normalize_futures_symbol(pos['symbol'])
+                        ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': symbol_for_quote})
+                        if ticker and ticker.get('price') is not None:
                             current_price = float(ticker['price'])
                             entry_price = float(pos['entry_price'])
                             qty = float(pos['qty'])
@@ -371,11 +435,13 @@ class TradeDataScheduler:
 
                 for pos in loss_positions:
                     pnl_val = pos['current_pnl']
+                    current_price = pos.get('current_price')
+                    current_price_str = f"{current_price:.6g}" if current_price is not None else "--"
                     content += (
                         f"**{pos['symbol']}** ({pos['side']})\n"
                         f"- 浮亏: 🔴 {pnl_val:.2f} U\n"
                         f"- 开仓: {pos['entry_price']}\n"
-                        f"- 现价: {pos.get('current_price', '--')}\n"
+                        f"- 现价: {current_price_str}\n"
                         f"- 时间: {pos['entry_time']}\n\n"
                     )
 
@@ -385,6 +451,16 @@ class TradeDataScheduler:
 
         except Exception as e:
             logger.error(f"午间风控检查失败: {e}")
+
+    @staticmethod
+    def _normalize_futures_symbol(symbol: str) -> str:
+        """将库内symbol规范化为Binance USDT交易对symbol"""
+        sym = str(symbol or "").upper().strip()
+        if not sym:
+            return sym
+        if sym.endswith("USDT") or sym.endswith("BUSD"):
+            return sym
+        return f"{sym}USDT"
 
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""
