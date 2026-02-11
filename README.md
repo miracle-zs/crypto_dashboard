@@ -49,20 +49,24 @@
 
 ```mermaid
 graph TD
-    User[用户 (PC/Mobile)] -->|HTTP/WebSocket| Nginx[Nginx / Uvicorn]
-    Nginx --> FastAPI[FastAPI 后端]
+    User["用户 (PC/Mobile)"] -->|"HTTP/WebSocket"| Nginx["Nginx / Uvicorn"]
+    Nginx --> FastAPI["FastAPI 后端"]
 
     subgraph "Core System"
-        FastAPI -->|Query| SQLite[(SQLite 数据库)]
-        Scheduler[APScheduler 定时任务] -->|Write| SQLite
-        Scheduler -->|REST API| Binance[Binance Exchange]
+        FastAPI -->|"Query"| SQLite[("SQLite 数据库")]
+        Scheduler["APScheduler 定时任务"] -->|"Write"| SQLite
+        Scheduler -->|"REST API"| Binance["Binance Exchange"]
     end
 
     subgraph "Frontend"
-        HTML[Jinja2 Templates]
-        JS[Vanilla JS + ApexCharts]
-        CSS[TailwindCSS]
+        HTML["Jinja2 Templates"]
+        JS["Vanilla JS + ApexCharts"]
+        CSS["TailwindCSS"]
     end
+
+    FastAPI -->|"Render"| HTML
+    HTML --> JS
+    HTML --> CSS
 ```
 
 - **后端**: FastAPI (高性能异步框架) + APScheduler (后台调度)
