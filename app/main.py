@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Query, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from app.services import BinanceOrderAnalyzer
+from app.services import TradeQueryService
 from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats, OpenPositionsResponse
 from app.scheduler import get_scheduler
 from app.database import Database
@@ -14,6 +14,8 @@ from typing import List, Optional, Dict
 from datetime import datetime, timedelta, timezone
 from app.logger import logger, read_logs
 from collections import defaultdict
+import asyncio
+from functools import partial
 
 # Load environment variables
 load_dotenv()
@@ -26,18 +28,27 @@ app = FastAPI(title="Zero Gravity Dashboard")
 # Setup templates
 templates = Jinja2Templates(directory="templates")
 
-# Initialize Analyzer (now reads from database)
-analyzer = BinanceOrderAnalyzer()
-
 # Initialize database
-db = Database()
+# db = Database()  <-- Deprecated global
 
 # Public REST client (market data)
-public_rest = BinanceFuturesRestClient()
+# public_rest = BinanceFuturesRestClient() <-- Deprecated global
 
 # Scheduler instance
 scheduler = None
 user_stream = None
+
+
+def get_db():
+    return Database()
+
+
+def get_trade_service():
+    return TradeQueryService()
+
+
+def get_public_rest():
+    return BinanceFuturesRestClient()
 
 
 def _format_holding_time(total_minutes: int) -> str:
@@ -58,14 +69,17 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
 
 
-def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
+def _fetch_mark_price_map(symbols: List[str], client: BinanceFuturesRestClient) -> Dict[str, float]:
+    """
+    同步辅助函数，包含阻塞网络IO，需在 executor 中运行
+    """
     if not symbols:
         return {}
 
     unique_symbols = sorted(set(symbols))
 
     try:
-        data = public_rest.public_get("/fapi/v1/premiumIndex")
+        data = client.public_get("/fapi/v1/premiumIndex")
         if isinstance(data, dict):
             data = [data]
         price_map = {
@@ -78,7 +92,7 @@ def _fetch_mark_price_map(symbols: List[str]) -> Dict[str, float]:
         logger.warning(f"Failed to fetch mark prices via premiumIndex: {exc}")
 
     try:
-        data = public_rest.public_get("/fapi/v1/ticker/price")
+        data = client.public_get("/fapi/v1/ticker/price")
         if isinstance(data, dict):
             data = [data]
         price_map = {
@@ -104,12 +118,15 @@ async def startup_event():
 
     if api_key and api_secret:
         scheduler = get_scheduler()
+        # scheduler.start() 通常是非阻塞的，或者已内部处理线程
         scheduler.start()
         logger.info("定时任务调度器已启动")
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
         if enable_user_stream:
-            user_stream = BinanceUserDataStream(api_key=api_key, db=db)
+            # UserDataStream 内部可能涉及网络请求，但在 startup 中初始化通常没问题
+            # 如果 start() 包含阻塞循环，应该在线程中运行，这里假设它是异步启动或在新线程启动
+            user_stream = BinanceUserDataStream(api_key=api_key, db=get_db())
             user_stream.start()
     else:
         logger.warning("未配置API密钥，定时任务未启动")
@@ -153,13 +170,16 @@ async def read_logs_page(request: Request):
 @app.get("/api/logs")
 async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
     """获取最近的日志"""
-    log_lines = read_logs(lines)
+    # read_logs 是文件IO，量大时可能阻塞，放入 executor
+    loop = asyncio.get_event_loop()
+    log_lines = await loop.run_in_executor(None, read_logs, lines)
     return {"logs": log_lines}
 
 
 @app.get("/api/balance-history", response_model=List[BalanceHistoryItem])
 async def get_balance_history(
-    time_range: Optional[str] = Query("1d", description="Time range for balance history (e.g., 1h, 1d, 1w, 1m, 1y)")
+    time_range: Optional[str] = Query("1d", description="Time range for balance history (e.g., 1h, 1d, 1w, 1m, 1y)"),
+    db: Database = Depends(get_db)
 ):
     """Get account balance history with optional time range filtering"""
     end_time = datetime.utcnow()
@@ -172,17 +192,21 @@ async def get_balance_history(
     elif time_range == "1w":
         start_time = end_time - timedelta(weeks=1)
     elif time_range == "1m":
-        start_time = end_time - timedelta(days=30)  # Approximately 1 month
+        start_time = end_time - timedelta(days=30)
     elif time_range == "1y":
-        start_time = end_time - timedelta(days=365)  # Approximately 1 year
+        start_time = end_time - timedelta(days=365)
     else:
-        # Default or invalid time_range, fetch last 2 hours
         start_time = end_time - timedelta(hours=2)
 
-    history_data = db.get_balance_history(start_time=start_time, end_time=end_time)
+    loop = asyncio.get_event_loop()
 
-    # 获取出入金记录
-    transfers = db.get_transfers()
+    # 在 executor 中运行数据库查询
+    history_data = await loop.run_in_executor(
+        None,
+        partial(db.get_balance_history, start_time=start_time, end_time=end_time)
+    )
+
+    transfers = await loop.run_in_executor(None, db.get_transfers)
 
     # 预处理 transfers: 解析时间并排序
     sorted_transfers = []
@@ -214,17 +238,12 @@ async def get_balance_history(
         if i % step != 0 and i != total_points - 1:
             continue
 
-        # 1. 解析来自数据库的ISO格式时间字符串（我们知道它是UTC）
         utc_dt_naive = datetime.fromisoformat(item['timestamp'])
-
-        # 2. 将其设置为UTC时区（使其成为一个"aware"的datetime对象）
         utc_dt_aware = utc_dt_naive.replace(tzinfo=timezone.utc)
-
-        # 3. 转换为UTC+8时区
         utc8_dt = utc_dt_aware.astimezone(UTC8)
         current_ts = int(utc8_dt.timestamp() * 1000)
 
-        # 4. 计算累计净值 (Cumulative Equity) - 优化后的O(N)算法
+        # 计算累计净值 (Cumulative Equity) - 优化后的O(N)算法
         # 推进 transfer 指针，直到超过当前余额记录的时间
         while transfer_idx < total_transfers and sorted_transfers[transfer_idx][0] <= utc_dt_aware:
             current_net_deposits += sorted_transfers[transfer_idx][1]
@@ -243,23 +262,34 @@ async def get_balance_history(
 
 
 @app.get("/api/summary", response_model=TradeSummary)
-async def get_summary():
+async def get_summary(service: TradeQueryService = Depends(get_trade_service)):
     """Get calculated trading metrics and equity curve"""
-    summary = analyzer.get_summary()
+    # Service 层通常调用 DB，视为阻塞
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(None, service.get_summary)
     return summary
 
 
 @app.get("/api/trades", response_model=List[Trade])
-async def get_trades():
+async def get_trades(service: TradeQueryService = Depends(get_trade_service)):
     """Get list of individual trades"""
-    trades = analyzer.get_trades_list()
+    # Service 层通常调用 DB，视为阻塞
+    loop = asyncio.get_event_loop()
+    trades = await loop.run_in_executor(None, service.get_trades_list)
     return trades
 
 
 @app.get("/api/open-positions", response_model=OpenPositionsResponse)
-async def get_open_positions():
+async def get_open_positions(
+    db: Database = Depends(get_db),
+    client: BinanceFuturesRestClient = Depends(get_public_rest)
+):
     """Get open positions with unrealized PnL and concentration metrics"""
-    raw_positions = db.get_open_positions()
+    loop = asyncio.get_event_loop()
+
+    # 数据库查询放入 executor
+    raw_positions = await loop.run_in_executor(None, db.get_open_positions)
+
     now = datetime.now(UTC8)
 
     if not raw_positions:
@@ -284,7 +314,14 @@ async def get_open_positions():
         }
 
     symbols_full = [_normalize_symbol(pos["symbol"]) for pos in raw_positions]
-    mark_prices = _fetch_mark_price_map(symbols_full)
+
+    # 网络请求放入 executor
+    mark_prices = await loop.run_in_executor(
+        None,
+        _fetch_mark_price_map,
+        symbols_full,
+        client
+    )
 
     positions = []
     per_symbol_notional = defaultdict(float)
@@ -407,13 +444,17 @@ async def get_open_positions():
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(db: Database = Depends(get_db)):
     """Check system status"""
     global scheduler
 
-    # 获取数据库统计
-    stats = db.get_statistics()
-    sync_status = db.get_sync_status()
+    loop = asyncio.get_event_loop()
+
+    # 并行执行独立的数据库查询
+    stats, sync_status = await asyncio.gather(
+        loop.run_in_executor(None, db.get_statistics),
+        loop.run_in_executor(None, db.get_sync_status)
+    )
 
     next_run_time = None
     is_configured = scheduler is not None and scheduler.scheduler.running
@@ -449,7 +490,7 @@ async def manual_sync():
         raise HTTPException(status_code=500, detail="调度器未初始化")
 
     try:
-        # 在后台执行同步
+        # 在后台执行同步 - 这本身就是提交到 scheduler 的线程池，不阻塞主线程
         scheduler.scheduler.add_job(
             func=scheduler.sync_trades_data,
             id='manual_sync',
@@ -461,10 +502,15 @@ async def manual_sync():
 
 
 @app.get("/api/database/stats")
-async def get_database_stats():
+async def get_database_stats(db: Database = Depends(get_db)):
     """获取数据库详细统计信息"""
-    stats = db.get_statistics()
-    sync_status = db.get_sync_status()
+    loop = asyncio.get_event_loop()
+
+    # 并行执行
+    stats, sync_status = await asyncio.gather(
+        loop.run_in_executor(None, db.get_statistics),
+        loop.run_in_executor(None, db.get_sync_status)
+    )
 
     return {
         "statistics": stats,
@@ -473,19 +519,22 @@ async def get_database_stats():
 
 
 @app.get("/api/daily-stats", response_model=List[DailyStats])
-async def get_daily_stats():
+async def get_daily_stats(db: Database = Depends(get_db)):
     """获取每日交易统计（开单数量、开单金额）"""
-    daily_stats = db.get_daily_stats()
+    loop = asyncio.get_event_loop()
+    daily_stats = await loop.run_in_executor(None, db.get_daily_stats)
     return daily_stats
 
 
-
-
 @app.get("/api/monthly-progress")
-async def get_monthly_progress():
+async def get_monthly_progress(db: Database = Depends(get_db)):
     """获取本月目标进度"""
-    target = db.get_monthly_target()
-    current_pnl = db.get_monthly_pnl()
+    loop = asyncio.get_event_loop()
+
+    # 串行执行（或 gather 并行）
+    target = await loop.run_in_executor(None, db.get_monthly_target)
+    current_pnl = await loop.run_in_executor(None, db.get_monthly_pnl)
+
     progress = (current_pnl / target * 100) if target > 0 else 0
 
     return {
@@ -496,17 +545,27 @@ async def get_monthly_progress():
 
 
 @app.post("/api/monthly-target")
-async def set_monthly_target(target: float = Query(..., description="Monthly target amount")):
+async def set_monthly_target(
+    target: float = Query(..., description="Monthly target amount"),
+    db: Database = Depends(get_db)
+):
     """设置月度目标"""
     if target <= 0:
         raise HTTPException(status_code=400, detail="目标金额必须大于0")
 
-    db.set_monthly_target(target)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, db.set_monthly_target, target)
     return {"message": "目标已更新", "target": target}
 
 
 @app.post("/api/positions/set-long-term")
-async def set_long_term(symbol: str, order_id: int, is_long_term: bool):
+async def set_long_term(
+    symbol: str,
+    order_id: int,
+    is_long_term: bool,
+    db: Database = Depends(get_db)
+):
     """设置持仓是否为长期持仓"""
-    db.set_position_long_term(symbol, order_id, is_long_term)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, db.set_position_long_term, symbol, order_id, is_long_term)
     return {"message": "状态已更新", "symbol": symbol, "is_long_term": is_long_term}

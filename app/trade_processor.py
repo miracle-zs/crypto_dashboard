@@ -17,7 +17,7 @@ from app.binance_client import BinanceFuturesRestClient
 UTC8 = timezone(timedelta(hours=8))
 
 
-class BinanceOrderAnalyzer:
+class TradeDataProcessor:
     """Binance Order Analyzer"""
 
     def __init__(self, api_key: str, api_secret: str):
@@ -922,7 +922,7 @@ def main():
     logger.info(f"Start timestamp: {since} ({datetime.fromtimestamp(since/1000).strftime('%Y-%m-%d %H:%M:%S')})")
     logger.info(f"End timestamp: {until} ({datetime.fromtimestamp(until/1000).strftime('%Y-%m-%d %H:%M:%S')})")
 
-    analyzer = BinanceOrderAnalyzer(api_key, api_secret)
+    analyzer = TradeDataProcessor(api_key, api_secret)
 
     logger.info("Note: This may take several minutes depending on trading history...")
 

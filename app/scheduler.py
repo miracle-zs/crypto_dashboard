@@ -14,7 +14,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from trade_analyzer import BinanceOrderAnalyzer
+from app.trade_processor import TradeDataProcessor
 from app.database import Database
 from app.logger import logger
 from app.notifier import send_server_chan_notification
@@ -45,7 +45,7 @@ class TradeDataScheduler:
             logger.warning("未配置Binance API密钥，定时任务将无法运行")
             self.analyzer = None
         else:
-            self.analyzer = BinanceOrderAnalyzer(api_key, api_secret)
+            self.processor = TradeDataProcessor(api_key, api_secret)
 
         self.days_to_fetch = int(os.getenv('DAYS_TO_FETCH', 30))
         self.update_interval_minutes = int(os.getenv('UPDATE_INTERVAL_MINUTES', 10))
@@ -57,7 +57,7 @@ class TradeDataScheduler:
 
     def sync_trades_data(self):
         """同步交易数据到数据库"""
-        if not self.analyzer:
+        if not self.processor:
             logger.warning("无法同步: API密钥未配置")
             return
 
@@ -115,8 +115,8 @@ class TradeDataScheduler:
 
             # 从Binance获取数据
             logger.info("从Binance API抓取数据...")
-            traded_symbols = self.analyzer.get_traded_symbols(since, until)
-            df = self.analyzer.analyze_orders(
+            traded_symbols = self.processor.get_traded_symbols(since, until)
+            df = self.processor.analyze_orders(
                 since=since,
                 until=until,
                 traded_symbols=traded_symbols,
@@ -141,7 +141,7 @@ class TradeDataScheduler:
 
             # 同步未平仓订单
             logger.info("同步未平仓订单...")
-            open_positions = self.analyzer.get_open_positions(since, until, traded_symbols=traded_symbols)
+            open_positions = self.processor.get_open_positions(since, until, traded_symbols=traded_symbols)
             if open_positions:
                 open_count = self.db.save_open_positions(open_positions)
                 logger.info(f"保存 {open_count} 条未平仓订单")
@@ -223,7 +223,7 @@ class TradeDataScheduler:
                         # 获取实时标记价格计算浮盈
                         try:
                             # 注意：scheduler中没有public_rest实例，需临时创建或直接调analyzer的client
-                            # 简单起见，这里复用analyzer的client，它有signed_get，也可以用来获取mark price
+                            # 简单起见，这里复用processor的client，它有signed_get，也可以用来获取mark price
                             # /fapi/v1/premiumIndex?symbol=...
                             mark_price = pos.get('mark_price')
                             # 如果DB没存mark_price(目前没存)，尝试实时获取或估算
@@ -233,7 +233,7 @@ class TradeDataScheduler:
                             # 既然现在无法轻易拿到实时pnl，我们临时调一次API获取最新价格
 
                             # 临时获取当前价格
-                            ticker = self.analyzer.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
+                            ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
                             if ticker:
                                 current_price = float(ticker['price'])
                                 entry_price = float(pos['entry_price'])
@@ -339,7 +339,7 @@ class TradeDataScheduler:
                     # 获取实时价格计算浮盈
                     try:
                         # 临时获取当前价格
-                        ticker = self.analyzer.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
+                        ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': pos['symbol']})
                         if ticker:
                             current_price = float(ticker['price'])
                             entry_price = float(pos['entry_price'])
@@ -388,13 +388,13 @@ class TradeDataScheduler:
 
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""
-        if not self.analyzer:
+        if not self.processor:
             return  # 如果没有配置API密钥，则不执行
 
         try:
             logger.info("开始同步账户余额...")
             # balance_info returns {'margin_balance': float, 'wallet_balance': float}
-            balance_info = self.analyzer.get_account_balance()
+            balance_info = self.processor.get_account_balance()
 
             if balance_info:
                 current_margin = balance_info['margin_balance']
@@ -433,7 +433,7 @@ class TradeDataScheduler:
 
                             # 2. 获取该时间段内的交易资金流 (PnL + Fees)
                             # 额外往前多取1秒，防止边界遗漏
-                            trading_flow = self.analyzer.get_recent_financial_flow(start_time=last_ts_ms - 1000)
+                            trading_flow = self.processor.get_recent_financial_flow(start_time=last_ts_ms - 1000)
 
                             # 3. 计算"无法解释的差额" (疑似出入金)
                             transfer_est = wallet_diff - trading_flow
@@ -458,7 +458,7 @@ class TradeDataScheduler:
 
     def start(self):
         """启动定时任务"""
-        if not self.analyzer:
+        if not self.processor:
             logger.warning("定时任务未启动: API密钥未配置")
             return
 

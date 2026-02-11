@@ -7,8 +7,8 @@ from typing import List
 from datetime import datetime
 
 
-class BinanceOrderAnalyzer:
-    """交易数据服务层 - 从数据库读取"""
+class TradeQueryService:
+    """交易数据查询服务 - 从数据库读取 (Read-Only)"""
 
     def __init__(self, api_key: str = None, api_secret: str = None):
         # API密钥用于定时任务，这里只负责读取数据库
