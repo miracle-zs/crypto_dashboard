@@ -677,14 +677,16 @@
             <div class="section-label mt-2">OPEN POSITIONS</div>
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
                 <div class="lg:col-span-8">
-                    <div class="glass-panel rounded-xl overflow-hidden panel-reveal">
+                    <div class="glass-panel rounded-xl overflow-hidden panel-reveal min-h-[200px]">
                         <div class="flex justify-between items-center px-6 py-4 border-b border-gray-800">
                             <h3 class="text-sm font-bold text-gray-300 flex items-center">
                                 <i data-lucide="layers" class="mr-2 w-4 h-4 text-amber-400"></i> OPEN POSITIONS
                             </h3>
                             <span class="text-[11px] text-gray-500">Floating PnL · Mark Price</span>
                         </div>
-                        <div class="overflow-x-auto">
+
+                        <!-- Desktop Table View (Hidden on Mobile) -->
+                        <div class="hidden md:block overflow-x-auto">
                             <table class="w-full text-left text-sm text-gray-400 min-w-[760px] md:min-w-full">
                                 <thead class="bg-black/40 text-[11px] uppercase text-gray-500 font-bold sticky top-0 z-10 backdrop-blur">
                                     <tr>
@@ -700,10 +702,41 @@
                                         <th class="px-6 py-4 text-center">Long-term</th>
                                     </tr>
                                 </thead>
-                                <tbody id="open-positions-body" class="divide-y divide-gray-800"></tbody>
+                                <tbody id="open-positions-body" class="divide-y divide-gray-800">
+                                    <!-- Skeleton Loader for Table -->
+                                    <tr class="animate-pulse">
+                                        <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16"></div></td>
+                                        <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-12"></div></td>
+                                        <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-24"></div></td>
+                                        <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-16"></div></td>
+                                        <td class="px-6 py-4 text-right"><div class="h-4 bg-gray-800 rounded w-16 ml-auto"></div></td>
+                                        <td class="px-6 py-4 text-right"><div class="h-4 bg-gray-800 rounded w-16 ml-auto"></div></td>
+                                        <td class="px-6 py-4 text-right"><div class="h-4 bg-gray-800 rounded w-20 ml-auto"></div></td>
+                                        <td class="px-6 py-4 text-right"><div class="h-4 bg-gray-800 rounded w-16 ml-auto"></div></td>
+                                        <td class="px-6 py-4 text-right"><div class="h-4 bg-gray-800 rounded w-12 ml-auto"></div></td>
+                                        <td class="px-6 py-4"><div class="h-4 bg-gray-800 rounded w-4 mx-auto"></div></td>
+                                    </tr>
+                                </tbody>
                             </table>
                         </div>
-                        <div id="open-positions-empty" class="px-6 py-6 text-sm text-gray-500 hidden">
+
+                        <!-- Mobile Card View (Visible only on Mobile) -->
+                        <div id="open-positions-mobile" class="md:hidden p-4 space-y-3">
+                            <!-- Skeleton Loader for Mobile -->
+                            <div class="p-4 bg-gray-800/30 border border-gray-700 rounded-lg animate-pulse">
+                                <div class="flex justify-between mb-3">
+                                    <div class="h-5 bg-gray-700 rounded w-20"></div>
+                                    <div class="h-5 bg-gray-700 rounded w-12"></div>
+                                </div>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between"><div class="h-4 bg-gray-800 rounded w-16"></div><div class="h-4 bg-gray-800 rounded w-24"></div></div>
+                                    <div class="flex justify-between"><div class="h-4 bg-gray-800 rounded w-16"></div><div class="h-4 bg-gray-800 rounded w-24"></div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="open-positions-empty" class="px-6 py-6 text-sm text-gray-500 hidden text-center">
+                            <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
                             当前无未平仓订单
                         </div>
                     </div>
@@ -925,34 +958,37 @@
         // -------------------------------------
         async function fetchData() {
             const startTime = Date.now();
+
+            // Parallel execution for faster loading
+            const pBalance = fetchBalance();
+            const pPositions = fetchOpenPositions();
+
+            await Promise.all([pBalance, pPositions]);
+            updateLastUpdated();
+        }
+
+        async function fetchBalance() {
             try {
                 const response = await fetch(`/api/balance-history?time_range=${currentTimeRange}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
                 const data = await response.json();
-                
                 if (data && data.length > 0) {
-                    // Check if data is new or time range changed
                     const latestTime = data[data.length - 1].time;
                     if (lastRequestedTimeRange !== currentTimeRange || latestTime > lastFetchTime) {
                         lastFetchTime = latestTime;
-                        lastRequestedTimeRange = currentTimeRange; // Update lastRequestedTimeRange here
+                        lastRequestedTimeRange = currentTimeRange;
                         balanceData = data;
                         logToTerminal(`接收到 ${data.length} 条最新余额数据`);
                         analyzeAndDisplay();
                     }
-                    updateLastUpdated();
                 } else {
                     logToTerminal("未获取到余额数据", "warn");
                 }
-
             } catch (error) {
-                console.error("Fetch error:", error);
-                logToTerminal(`数据获取失败: ${error.message}`, "error");
+                console.error("Fetch balance error:", error);
+                logToTerminal(`余额获取失败: ${error.message}`, "error");
             }
-
-            await fetchOpenPositions();
         }
 
         // -------------------------------------
