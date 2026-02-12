@@ -126,10 +126,35 @@ class TradeDataScheduler:
         if self._api_job_lock.locked():
             self._api_job_lock.release()
 
+    def _is_leaderboard_guard_window(self) -> bool:
+        """
+        在晨间涨幅榜前后短时间窗口内跳过交易同步，避免 API 权重叠加。
+        默认窗口: 榜单前2分钟到后5分钟。
+        """
+        if not self.enable_leaderboard_alert:
+            return False
+
+        now = datetime.now(UTC8)
+        leaderboard_dt = now.replace(
+            hour=self.leaderboard_alert_hour,
+            minute=self.leaderboard_alert_minute,
+            second=0,
+            microsecond=0
+        )
+        window_start = leaderboard_dt - timedelta(minutes=2)
+        window_end = leaderboard_dt + timedelta(minutes=5)
+        return window_start <= now <= window_end
+
     def sync_trades_data(self):
         """同步交易数据到数据库"""
         if not self.processor:
             logger.warning("无法同步: API密钥未配置")
+            return
+        if self._is_leaderboard_guard_window():
+            logger.info(
+                "跳过交易同步: 位于晨间涨幅榜保护窗口内 "
+                f"({self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} 前2分钟至后5分钟)"
+            )
             return
         if self._is_api_cooldown_active(source='交易同步'):
             return
