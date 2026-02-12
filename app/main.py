@@ -190,6 +190,21 @@ async def get_leaderboard_snapshot(
     """获取涨幅榜历史快照（默认返回最新一条，不进行实时计算）"""
     loop = asyncio.get_event_loop()
     if date:
+        try:
+            requested_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            return {
+                "ok": False,
+                "reason": "invalid_date",
+                "message": f"日期格式错误: {date}，请使用 YYYY-MM-DD"
+            }
+        today_utc8 = datetime.now(UTC8).date()
+        if requested_date > today_utc8:
+            return {
+                "ok": False,
+                "reason": "future_date",
+                "message": f"请求日期 {date} 超过今天 {today_utc8.strftime('%Y-%m-%d')}"
+            }
         snapshot = await loop.run_in_executor(None, db.get_leaderboard_snapshot_by_date, date)
     else:
         snapshot = await loop.run_in_executor(None, db.get_latest_leaderboard_snapshot)
@@ -224,14 +239,20 @@ async def get_leaderboard_snapshot(
             None, db.get_leaderboard_snapshot_by_date, yesterday
         )
     yesterday_rank = {}
+    yesterday_losers_rank = {}
     if yesterday_snapshot:
         for idx, row in enumerate(yesterday_snapshot.get("rows", []), start=1):
             symbol = str(row.get("symbol", "")).upper()
             if symbol:
                 yesterday_rank[symbol] = idx
+        for idx, row in enumerate(yesterday_snapshot.get("losers_rows", []), start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if symbol:
+                yesterday_losers_rank[symbol] = idx
 
     # 3) 近7天出现次数（以当前快照日期为截止）
     appearances_7d = {}
+    losers_appearances_7d = {}
     if snap_date is not None:
         start_date = (snap_date - timedelta(days=6)).strftime("%Y-%m-%d")
         end_date = snap_date.strftime("%Y-%m-%d")
@@ -246,6 +267,13 @@ async def get_leaderboard_snapshot(
                     continue
                 seen.add(symbol)
                 appearances_7d[symbol] = appearances_7d.get(symbol, 0) + 1
+            seen_losers = set()
+            for row in snap.get("losers_rows", []):
+                symbol = str(row.get("symbol", "")).upper()
+                if not symbol or symbol in seen_losers:
+                    continue
+                seen_losers.add(symbol)
+                losers_appearances_7d[symbol] = losers_appearances_7d.get(symbol, 0) + 1
 
     enriched_rows = []
     for idx, row in enumerate(snapshot.get("rows", []), start=1):
@@ -259,7 +287,42 @@ async def get_leaderboard_snapshot(
             "appearances_7d": appearances_7d.get(symbol, 0),
         })
 
+    enriched_losers_rows = []
+    for idx, row in enumerate(snapshot.get("losers_rows", []), start=1):
+        symbol = str(row.get("symbol", "")).upper()
+        prev_rank = yesterday_losers_rank.get(symbol)
+        rank_delta = None if prev_rank is None else (prev_rank - idx)
+        prev_gainer_rank = yesterday_rank.get(symbol)
+        was_prev_gainer_top = prev_gainer_rank is not None
+        enriched_losers_rows.append({
+            **row,
+            "is_held": symbol in held_symbols,
+            "rank_delta_vs_yesterday": rank_delta,
+            "appearances_7d": losers_appearances_7d.get(symbol, 0),
+            "was_prev_gainer_top": was_prev_gainer_top,
+            "prev_gainer_rank": prev_gainer_rank,
+        })
+
     snapshot["rows"] = enriched_rows
+    snapshot["losers_rows"] = enriched_losers_rows
+    metric_payload = await loop.run_in_executor(
+        None, db.get_leaderboard_daily_metrics, str(snapshot.get("snapshot_date"))
+    )
+    if not metric_payload:
+        metric_payload = await loop.run_in_executor(
+            None, db.upsert_leaderboard_daily_metrics_for_date, str(snapshot.get("snapshot_date"))
+        )
+
+    metric1 = metric_payload.get("metric1", {}) if metric_payload else {}
+    metric2 = metric_payload.get("metric2", {}) if metric_payload else {}
+    metric3 = metric_payload.get("metric3", {}) if metric_payload else {}
+    snapshot["losers_reversal"] = metric1
+    snapshot["next_day_drop_metric"] = metric2
+    snapshot["change_48h_metric"] = metric3
+    # Backward-compatible keys retained for existing frontend readers.
+    snapshot["short_48h_metric"] = metric3
+    snapshot["hold_48h_metric"] = metric3
+    snapshot.pop("all_rows", None)
     return {"ok": True, **snapshot}
 
 
@@ -272,6 +335,57 @@ async def get_leaderboard_snapshot_dates(
     loop = asyncio.get_event_loop()
     dates = await loop.run_in_executor(None, db.list_leaderboard_snapshot_dates, limit)
     return {"dates": dates}
+
+
+@app.get("/api/leaderboard/metrics-history")
+async def get_leaderboard_metrics_history(
+    limit: int = Query(60, ge=1, le=365),
+    db: Database = Depends(get_db)
+):
+    """按日期返回三指标历史（只回填缺失日期）。"""
+    loop = asyncio.get_event_loop()
+    dates = await loop.run_in_executor(None, db.list_leaderboard_snapshot_dates, limit)
+    if not dates:
+        return {"rows": []}
+
+    metrics_map = await loop.run_in_executor(
+        None, db.get_leaderboard_daily_metrics_by_dates, dates
+    )
+    missing_dates = [d for d in dates if d not in metrics_map]
+    for d in missing_dates:
+        payload = await loop.run_in_executor(None, db.upsert_leaderboard_daily_metrics_for_date, d)
+        if payload:
+            metrics_map[d] = payload
+
+    rows = []
+    for snapshot_date in dates:
+        row = metrics_map.get(snapshot_date)
+        if not row:
+            continue
+        metric1 = row.get("metric1", {}) or {}
+        metric2 = row.get("metric2", {}) or {}
+        metric3 = row.get("metric3", {}) or {}
+        eval3 = int(metric3.get("evaluated_count") or 0)
+        dist3 = metric3.get("distribution", {}) or {}
+        lt_neg10 = int(dist3.get("lt_neg10") or 0)
+        gt_pos10 = int(dist3.get("gt_pos10") or 0)
+        lt_neg10_pct = round(lt_neg10 * 100.0 / eval3, 2) if eval3 > 0 else None
+        gt_pos10_pct = round(gt_pos10 * 100.0 / eval3, 2) if eval3 > 0 else None
+
+        rows.append({
+            "snapshot_date": snapshot_date,
+            "metric1": metric1,
+            "metric2": metric2,
+            "metric3": metric3,
+            "m1_prob_pct": metric1.get("probability_pct"),
+            "m1_hits": metric1.get("hits"),
+            "m2_prob_pct": metric2.get("probability_pct"),
+            "m2_hits": metric2.get("hits"),
+            "m3_eval_count": eval3,
+            "m3_lt_neg10_pct": lt_neg10_pct,
+            "m3_gt_pos10_pct": gt_pos10_pct,
+        })
+    return {"rows": rows}
 
 
 @app.get("/api/balance-history", response_model=List[BalanceHistoryItem])
@@ -667,3 +781,51 @@ async def set_long_term(
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, db.set_position_long_term, symbol, order_id, is_long_term)
     return {"message": "状态已更新", "symbol": symbol, "is_long_term": is_long_term}
+
+
+@app.get("/api/watch-notes")
+async def get_watch_notes(
+    limit: int = Query(200, description="最大返回记录数"),
+    db: Database = Depends(get_db)
+):
+    """获取明日观察列表"""
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, db.get_watch_notes, limit)
+    return {"items": items}
+
+
+@app.post("/api/watch-notes")
+async def create_watch_note(
+    symbol: str = Query(..., description="观察币种"),
+    db: Database = Depends(get_db)
+):
+    """新增明日观察记录（时间自动写入）"""
+    normalized_symbol = (symbol or "").strip().upper()
+    if not normalized_symbol:
+        raise HTTPException(status_code=400, detail="symbol 不能为空")
+
+    loop = asyncio.get_event_loop()
+    try:
+        item = await loop.run_in_executor(None, db.add_watch_note, normalized_symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    exists_today = bool(item.get("exists_today"))
+    return {
+        "message": "已存在" if exists_today else "已记录",
+        "item": item,
+        "exists_today": exists_today
+    }
+
+
+@app.delete("/api/watch-notes/{note_id}")
+async def remove_watch_note(
+    note_id: int,
+    db: Database = Depends(get_db)
+):
+    """删除明日观察记录"""
+    loop = asyncio.get_event_loop()
+    deleted = await loop.run_in_executor(None, db.delete_watch_note, note_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {"message": "已删除", "id": note_id}

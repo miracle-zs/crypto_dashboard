@@ -3,13 +3,14 @@
 """
 import sqlite3
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import os
 from pathlib import Path
 from app.logger import logger
 import json
 import numpy as np
+from zoneinfo import ZoneInfo
 
 
 class Database:
@@ -34,6 +35,11 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # 支持字典访问
         return conn
+
+    @staticmethod
+    def _today_snapshot_date_utc8() -> str:
+        """按UTC+8返回今天日期，用于过滤未来测试快照。"""
+        return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
 
     def _init_database(self):
         """初始化数据库表结构"""
@@ -210,6 +216,19 @@ class Database:
             except Exception as e:
                 logger.warning(f"列添加失败(可能已存在): {e}")
 
+        # 明日观察列表（仅记录 symbol 与自动时间）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS watch_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                noted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_watch_notes_noted_at ON watch_notes(noted_at DESC)
+        """)
+
         # 创建用户设置表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
@@ -264,12 +283,46 @@ class Database:
                 effective INTEGER DEFAULT 0,
                 top_count INTEGER DEFAULT 0,
                 rows_json TEXT,
+                losers_rows_json TEXT,
+                all_rows_json TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(snapshot_date)
             )
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot_time ON leaderboard_snapshots(snapshot_time DESC)
+        """)
+        try:
+            cursor.execute("SELECT losers_rows_json FROM leaderboard_snapshots LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 losers_rows_json 列...")
+            try:
+                cursor.execute("ALTER TABLE leaderboard_snapshots ADD COLUMN losers_rows_json TEXT")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+        try:
+            cursor.execute("SELECT all_rows_json FROM leaderboard_snapshots LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 all_rows_json 列...")
+            try:
+                cursor.execute("ALTER TABLE leaderboard_snapshots ADD COLUMN all_rows_json TEXT")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
+        # 涨幅榜三指标日统计（按快照日保存）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS leaderboard_daily_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL UNIQUE,
+                metric1_json TEXT,
+                metric2_json TEXT,
+                metric3_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_daily_metrics_date ON leaderboard_daily_metrics(snapshot_date DESC)
         """)
 
         conn.commit()
@@ -957,6 +1010,74 @@ class Database:
         conn.close()
         return [dict(row) for row in rows]
 
+    def add_watch_note(self, symbol: str) -> Dict:
+        """新增明日观察记录（自动写入北京时间）"""
+        normalized_symbol = (symbol or "").strip().upper()
+        if not normalized_symbol:
+            raise ValueError("symbol 不能为空")
+
+        today = self._today_snapshot_date_utc8()
+        noted_at = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 同一个 symbol 在北京时间当天只保留一条记录
+        cursor.execute("""
+            SELECT id, symbol, noted_at
+            FROM watch_notes
+            WHERE symbol = ? AND substr(noted_at, 1, 10) = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (normalized_symbol, today))
+        existing = cursor.fetchone()
+        if existing:
+            conn.close()
+            item = dict(existing)
+            item["exists_today"] = True
+            return item
+
+        cursor.execute("""
+            INSERT INTO watch_notes (symbol, noted_at)
+            VALUES (?, ?)
+        """, (normalized_symbol, noted_at))
+        note_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        return {
+            "id": note_id,
+            "symbol": normalized_symbol,
+            "noted_at": noted_at,
+            "exists_today": False
+        }
+
+    def get_watch_notes(self, limit: int = 200) -> List[Dict]:
+        """获取明日观察列表"""
+        safe_limit = max(1, min(int(limit), 1000))
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, symbol, noted_at
+            FROM watch_notes
+            ORDER BY noted_at DESC, id DESC
+            LIMIT ?
+        """, (safe_limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def delete_watch_note(self, note_id: int) -> bool:
+        """删除明日观察记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM watch_notes WHERE id = ?", (note_id,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
+
     def get_monthly_target(self) -> float:
         """获取月度目标"""
         conn = self._get_connection()
@@ -1033,11 +1154,13 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
         rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
+        losers_rows_json = json.dumps(snapshot.get("losers_rows", []), ensure_ascii=False)
+        all_rows_json = json.dumps(snapshot.get("all_rows", []), ensure_ascii=False)
         cursor.execute("""
             INSERT INTO leaderboard_snapshots (
                 snapshot_date, snapshot_time, window_start_utc,
-                candidates, effective, top_count, rows_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(snapshot_date) DO UPDATE SET
                 snapshot_time = excluded.snapshot_time,
                 window_start_utc = excluded.window_start_utc,
@@ -1045,6 +1168,8 @@ class Database:
                 effective = excluded.effective,
                 top_count = excluded.top_count,
                 rows_json = excluded.rows_json,
+                losers_rows_json = excluded.losers_rows_json,
+                all_rows_json = excluded.all_rows_json,
                 created_at = CURRENT_TIMESTAMP
         """, (
             str(snapshot.get("snapshot_date")),
@@ -1053,7 +1178,9 @@ class Database:
             int(snapshot.get("candidates", 0)),
             int(snapshot.get("effective", 0)),
             int(snapshot.get("top", 0)),
-            rows_json
+            rows_json,
+            losers_rows_json,
+            all_rows_json
         ))
         conn.commit()
         conn.close()
@@ -1061,11 +1188,23 @@ class Database:
     def _row_to_leaderboard_snapshot(self, row: sqlite3.Row) -> Dict:
         data = dict(row)
         rows_json = data.get("rows_json")
+        losers_rows_json = data.get("losers_rows_json")
+        all_rows_json = data.get("all_rows_json")
         try:
             data["rows"] = json.loads(rows_json) if rows_json else []
         except Exception:
             data["rows"] = []
+        try:
+            data["losers_rows"] = json.loads(losers_rows_json) if losers_rows_json else []
+        except Exception:
+            data["losers_rows"] = []
+        try:
+            data["all_rows"] = json.loads(all_rows_json) if all_rows_json else []
+        except Exception:
+            data["all_rows"] = []
         data.pop("rows_json", None)
+        data.pop("losers_rows_json", None)
+        data.pop("all_rows_json", None)
         data["top"] = data.pop("top_count", 0)
         return data
 
@@ -1073,12 +1212,14 @@ class Database:
         """获取最近一条涨幅榜快照。"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        today = self._today_snapshot_date_utc8()
         cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
             FROM leaderboard_snapshots
-            ORDER BY snapshot_time DESC
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC, snapshot_time DESC
             LIMIT 1
-        """)
+        """, (today,))
         row = cursor.fetchone()
         conn.close()
         if not row:
@@ -1090,7 +1231,7 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
             FROM leaderboard_snapshots
             WHERE snapshot_date = ?
             LIMIT 1
@@ -1105,12 +1246,14 @@ class Database:
         """按时间倒序列出已存快照日期。"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        today = self._today_snapshot_date_utc8()
         cursor.execute("""
             SELECT snapshot_date
             FROM leaderboard_snapshots
-            ORDER BY snapshot_time DESC
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC, snapshot_time DESC
             LIMIT ?
-        """, (int(limit),))
+        """, (today, int(limit)))
         rows = cursor.fetchall()
         conn.close()
         return [str(row["snapshot_date"]) for row in rows]
@@ -1120,7 +1263,7 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
             FROM leaderboard_snapshots
             WHERE snapshot_date >= ? AND snapshot_date <= ?
             ORDER BY snapshot_date DESC
@@ -1128,3 +1271,321 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         return [self._row_to_leaderboard_snapshot(row) for row in rows]
+
+    @staticmethod
+    def _lb_safe_float(value) -> Optional[float]:
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return None
+        if num != num:  # NaN
+            return None
+        return num
+
+    def _extract_all_rows(self, snapshot: Dict) -> List[Dict]:
+        all_rows = snapshot.get("all_rows", [])
+        if all_rows:
+            return all_rows
+
+        merged = {}
+        for row in snapshot.get("rows", []) + snapshot.get("losers_rows", []):
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            merged[symbol] = row
+        return list(merged.values())
+
+    def _build_symbol_maps(self, snapshot: Dict) -> tuple[Dict[str, float], Dict[str, float]]:
+        change_map: Dict[str, float] = {}
+        price_map: Dict[str, float] = {}
+        for row in self._extract_all_rows(snapshot):
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+
+            change_val = self._lb_safe_float(row.get("change"))
+            if change_val is not None:
+                change_map[symbol] = change_val
+
+            price_val = self._lb_safe_float(row.get("last_price"))
+            if price_val is None:
+                price_val = self._lb_safe_float(row.get("price"))
+            if price_val is not None and price_val > 0:
+                price_map[symbol] = price_val
+        return change_map, price_map
+
+    def build_leaderboard_daily_metrics(
+        self,
+        snapshot_date: str,
+        drop_threshold_pct: float = -10.0,
+    ) -> Optional[Dict]:
+        """基于已保存快照，计算某天的三个指标。"""
+        current_snapshot = self.get_leaderboard_snapshot_by_date(snapshot_date)
+        if not current_snapshot:
+            return None
+
+        try:
+            snap_date = datetime.strptime(snapshot_date, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+        prev_date = (snap_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        prev2_date = (snap_date - timedelta(days=2)).strftime("%Y-%m-%d")
+        prev_snapshot = self.get_leaderboard_snapshot_by_date(prev_date)
+        prev2_snapshot = self.get_leaderboard_snapshot_by_date(prev2_date)
+
+        prev_rows = prev_snapshot.get("rows", []) if prev_snapshot else []
+        current_losers_rows = current_snapshot.get("losers_rows", [])
+
+        # 指标1：前一日涨幅Top10进入次日跌幅Top10概率
+        prev_rank_map = {}
+        for idx, row in enumerate(prev_rows, start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if symbol:
+                prev_rank_map[symbol] = idx
+
+        metric1_hits_details = []
+        for idx, row in enumerate(current_losers_rows, start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            prev_rank = prev_rank_map.get(symbol)
+            if prev_rank is None:
+                continue
+            metric1_hits_details.append({
+                "symbol": symbol,
+                "current_loser_rank": idx,
+                "prev_gainer_rank": prev_rank,
+            })
+
+        metric1_hits = len(metric1_hits_details)
+        metric1_base_count = len(prev_rows)
+        metric1_prob = None
+        if metric1_base_count > 0:
+            metric1_prob = round(metric1_hits * 100.0 / metric1_base_count, 2)
+        metric1 = {
+            "prev_snapshot_date": prev_snapshot.get("snapshot_date") if prev_snapshot else None,
+            "hits": metric1_hits,
+            "base_count": metric1_base_count,
+            "probability_pct": metric1_prob,
+            "symbols": [item["symbol"] for item in metric1_hits_details],
+            "details": metric1_hits_details,
+        }
+
+        # 当前快照symbol映射（change/price）
+        current_change_map, current_price_map = self._build_symbol_maps(current_snapshot)
+
+        # 指标2：前一日涨幅Top10在次日<-10%的概率
+        metric2_details = []
+        metric2_hit_symbols = []
+        for idx, row in enumerate(prev_rows, start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            next_change = current_change_map.get(symbol)
+            prev_change = self._lb_safe_float(row.get("change"))
+            is_hit = next_change is not None and next_change <= drop_threshold_pct
+            metric2_details.append({
+                "prev_rank": idx,
+                "symbol": symbol,
+                "prev_change_pct": prev_change,
+                "next_change_pct": next_change,
+                "is_hit": is_hit,
+            })
+            if is_hit:
+                metric2_hit_symbols.append({
+                    "symbol": symbol,
+                    "next_change_pct": round(next_change, 2),
+                })
+
+        metric2_evaluated_count = sum(
+            1 for item in metric2_details if item.get("next_change_pct") is not None
+        )
+        metric2_hits = sum(1 for item in metric2_details if item.get("is_hit"))
+        metric2_prob = None
+        if metric2_evaluated_count > 0:
+            metric2_prob = round(metric2_hits * 100.0 / metric2_evaluated_count, 2)
+        metric2 = {
+            "base_snapshot_date": prev_snapshot.get("snapshot_date") if prev_snapshot else None,
+            "target_snapshot_date": current_snapshot.get("snapshot_date"),
+            "threshold_pct": drop_threshold_pct,
+            "sample_size": len(metric2_details),
+            "evaluated_count": metric2_evaluated_count,
+            "hits": metric2_hits,
+            "probability_pct": metric2_prob,
+            "hit_symbols": metric2_hit_symbols,
+            "details": metric2_details,
+        }
+
+        # 指标3：前两日涨幅Top10在48h后的涨跌幅
+        prev2_rows = prev2_snapshot.get("rows", []) if prev2_snapshot else []
+        metric3_details = []
+        metric3_changes = []
+        for idx, row in enumerate(prev2_rows, start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+
+            entry_price = self._lb_safe_float(row.get("last_price"))
+            if entry_price is None:
+                entry_price = self._lb_safe_float(row.get("price"))
+            current_price = current_price_map.get(symbol)
+
+            change_pct = None
+            if (
+                entry_price is not None and entry_price > 0
+                and current_price is not None and current_price > 0
+            ):
+                change_pct = (current_price / entry_price - 1.0) * 100.0
+                metric3_changes.append(change_pct)
+
+            metric3_details.append({
+                "prev_rank": idx,
+                "symbol": symbol,
+                "entry_price": entry_price,
+                "current_price": current_price,
+                "change_pct": None if change_pct is None else round(change_pct, 4),
+            })
+
+        metric3_evaluated_count = len(metric3_changes)
+        dist_lt_neg10 = 0
+        dist_mid = 0
+        dist_gt_pos10 = 0
+        if metric3_evaluated_count > 0:
+            dist_lt_neg10 = sum(1 for val in metric3_changes if val < -10.0)
+            dist_gt_pos10 = sum(1 for val in metric3_changes if val > 10.0)
+            dist_mid = metric3_evaluated_count - dist_lt_neg10 - dist_gt_pos10
+
+        metric3 = {
+            "base_snapshot_date": prev2_snapshot.get("snapshot_date") if prev2_snapshot else None,
+            "target_snapshot_date": current_snapshot.get("snapshot_date"),
+            "hold_hours": 48,
+            "sample_size": len(metric3_details),
+            "evaluated_count": metric3_evaluated_count,
+            "distribution": {
+                "lt_neg10": dist_lt_neg10,
+                "mid": dist_mid,
+                "gt_pos10": dist_gt_pos10,
+            },
+            "details": metric3_details,
+        }
+
+        return {
+            "snapshot_date": snapshot_date,
+            "metric1": metric1,
+            "metric2": metric2,
+            "metric3": metric3,
+        }
+
+    def save_leaderboard_daily_metrics(self, payload: Dict) -> None:
+        """保存某天的三指标计算结果。"""
+        snapshot_date = str(payload.get("snapshot_date", ""))
+        if not snapshot_date:
+            return
+
+        metric1_json = json.dumps(payload.get("metric1", {}), ensure_ascii=False)
+        metric2_json = json.dumps(payload.get("metric2", {}), ensure_ascii=False)
+        metric3_json = json.dumps(payload.get("metric3", {}), ensure_ascii=False)
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO leaderboard_daily_metrics (
+                snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(snapshot_date) DO UPDATE SET
+                metric1_json = excluded.metric1_json,
+                metric2_json = excluded.metric2_json,
+                metric3_json = excluded.metric3_json,
+                updated_at = CURRENT_TIMESTAMP
+        """, (snapshot_date, metric1_json, metric2_json, metric3_json))
+        conn.commit()
+        conn.close()
+
+    def upsert_leaderboard_daily_metrics_for_date(self, snapshot_date: str) -> Optional[Dict]:
+        """计算并保存某天三指标。"""
+        payload = self.build_leaderboard_daily_metrics(snapshot_date=snapshot_date)
+        if not payload:
+            return None
+        self.save_leaderboard_daily_metrics(payload)
+        return payload
+
+    def get_leaderboard_daily_metrics(self, snapshot_date: str) -> Optional[Dict]:
+        """读取某天三指标。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
+            FROM leaderboard_daily_metrics
+            WHERE snapshot_date = ?
+            LIMIT 1
+        """, (snapshot_date,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+
+        data = dict(row)
+        for key in ("metric1_json", "metric2_json", "metric3_json"):
+            try:
+                data[key.replace("_json", "")] = json.loads(data.get(key) or "{}")
+            except Exception:
+                data[key.replace("_json", "")] = {}
+            data.pop(key, None)
+        return data
+
+    def list_leaderboard_daily_metrics(self, limit: int = 90) -> List[Dict]:
+        """按日期倒序列出三指标历史。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
+            FROM leaderboard_daily_metrics
+            ORDER BY snapshot_date DESC
+            LIMIT ?
+        """, (int(limit),))
+        rows = cursor.fetchall()
+        conn.close()
+
+        result = []
+        for row in rows:
+            item = dict(row)
+            for key in ("metric1_json", "metric2_json", "metric3_json"):
+                try:
+                    item[key.replace("_json", "")] = json.loads(item.get(key) or "{}")
+                except Exception:
+                    item[key.replace("_json", "")] = {}
+                item.pop(key, None)
+            result.append(item)
+        return result
+
+    def get_leaderboard_daily_metrics_by_dates(self, dates: List[str]) -> Dict[str, Dict]:
+        """按日期批量读取三指标，返回 {snapshot_date: payload}。"""
+        cleaned_dates = sorted({str(d) for d in dates if d})
+        if not cleaned_dates:
+            return {}
+
+        placeholders = ",".join("?" for _ in cleaned_dates)
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
+            FROM leaderboard_daily_metrics
+            WHERE snapshot_date IN ({placeholders})
+        """, cleaned_dates)
+        rows = cursor.fetchall()
+        conn.close()
+
+        result: Dict[str, Dict] = {}
+        for row in rows:
+            item = dict(row)
+            for key in ("metric1_json", "metric2_json", "metric3_json"):
+                try:
+                    item[key.replace("_json", "")] = json.loads(item.get(key) or "{}")
+                except Exception:
+                    item[key.replace("_json", "")] = {}
+                item.pop(key, None)
+            snapshot_date = str(item.get("snapshot_date", ""))
+            if snapshot_date:
+                result[snapshot_date] = item
+        return result
