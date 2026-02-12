@@ -167,6 +167,12 @@ async def read_logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
 
 
+@app.get("/leaderboard", response_class=HTMLResponse)
+async def read_leaderboard_page(request: Request):
+    """Serve the leaderboard HTML"""
+    return templates.TemplateResponse("leaderboard.html", {"request": request})
+
+
 @app.get("/api/logs")
 async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
     """获取最近的日志"""
@@ -174,6 +180,98 @@ async def get_logs(lines: int = Query(200, description="Number of log lines to r
     loop = asyncio.get_event_loop()
     log_lines = await loop.run_in_executor(None, read_logs, lines)
     return {"logs": log_lines}
+
+
+@app.get("/api/leaderboard")
+async def get_leaderboard_snapshot(
+    date: Optional[str] = Query(None, description="Snapshot date in YYYY-MM-DD"),
+    db: Database = Depends(get_db)
+):
+    """获取涨幅榜历史快照（默认返回最新一条，不进行实时计算）"""
+    loop = asyncio.get_event_loop()
+    if date:
+        snapshot = await loop.run_in_executor(None, db.get_leaderboard_snapshot_by_date, date)
+    else:
+        snapshot = await loop.run_in_executor(None, db.get_latest_leaderboard_snapshot)
+
+    if not snapshot:
+        return {
+            "ok": False,
+            "reason": "no_snapshot",
+            "message": "暂无快照数据，请等待下一次07:40定时任务生成"
+        }
+
+    # 1) 已持仓标记
+    open_positions = await loop.run_in_executor(None, db.get_open_positions)
+    held_symbols = set()
+    for pos in open_positions:
+        sym = str(pos.get("symbol", "")).upper().strip()
+        if not sym:
+            continue
+        held_symbols.add(sym)
+        held_symbols.add(_normalize_symbol(sym))
+
+    # 2) 与昨日排名对比
+    try:
+        snap_date = datetime.strptime(snapshot["snapshot_date"], "%Y-%m-%d").date()
+    except Exception:
+        snap_date = None
+
+    yesterday_snapshot = None
+    if snap_date is not None:
+        yesterday = (snap_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday_snapshot = await loop.run_in_executor(
+            None, db.get_leaderboard_snapshot_by_date, yesterday
+        )
+    yesterday_rank = {}
+    if yesterday_snapshot:
+        for idx, row in enumerate(yesterday_snapshot.get("rows", []), start=1):
+            symbol = str(row.get("symbol", "")).upper()
+            if symbol:
+                yesterday_rank[symbol] = idx
+
+    # 3) 近7天出现次数（以当前快照日期为截止）
+    appearances_7d = {}
+    if snap_date is not None:
+        start_date = (snap_date - timedelta(days=6)).strftime("%Y-%m-%d")
+        end_date = snap_date.strftime("%Y-%m-%d")
+        snapshots_7d = await loop.run_in_executor(
+            None, db.get_leaderboard_snapshots_between, start_date, end_date
+        )
+        for snap in snapshots_7d:
+            seen = set()
+            for row in snap.get("rows", []):
+                symbol = str(row.get("symbol", "")).upper()
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                appearances_7d[symbol] = appearances_7d.get(symbol, 0) + 1
+
+    enriched_rows = []
+    for idx, row in enumerate(snapshot.get("rows", []), start=1):
+        symbol = str(row.get("symbol", "")).upper()
+        prev_rank = yesterday_rank.get(symbol)
+        rank_delta = None if prev_rank is None else (prev_rank - idx)
+        enriched_rows.append({
+            **row,
+            "is_held": symbol in held_symbols,
+            "rank_delta_vs_yesterday": rank_delta,
+            "appearances_7d": appearances_7d.get(symbol, 0),
+        })
+
+    snapshot["rows"] = enriched_rows
+    return {"ok": True, **snapshot}
+
+
+@app.get("/api/leaderboard/dates")
+async def get_leaderboard_snapshot_dates(
+    limit: int = Query(90, ge=1, le=365),
+    db: Database = Depends(get_db)
+):
+    """获取涨幅榜快照日期列表（倒序）"""
+    loop = asyncio.get_event_loop()
+    dates = await loop.run_in_executor(None, db.list_leaderboard_snapshot_dates, limit)
+    return {"dates": dates}
 
 
 @app.get("/api/balance-history", response_model=List[BalanceHistoryItem])

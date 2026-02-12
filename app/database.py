@@ -253,6 +253,25 @@ class Database:
             VALUES (1)
         """)
 
+        # 涨幅榜历史快照表（每天07:40记录一次）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS leaderboard_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL,
+                snapshot_time TEXT NOT NULL,
+                window_start_utc TEXT,
+                candidates INTEGER DEFAULT 0,
+                effective INTEGER DEFAULT 0,
+                top_count INTEGER DEFAULT 0,
+                rows_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(snapshot_date)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot_time ON leaderboard_snapshots(snapshot_time DESC)
+        """)
+
         conn.commit()
         conn.close()
 
@@ -1008,3 +1027,104 @@ class Database:
         conn.close()
         # 返回按时间升序排列
         return [dict(row) for row in reversed(rows)]
+
+    def save_leaderboard_snapshot(self, snapshot: Dict) -> None:
+        """保存/覆盖某天的涨幅榜快照（按 snapshot_date 唯一）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
+        cursor.execute("""
+            INSERT INTO leaderboard_snapshots (
+                snapshot_date, snapshot_time, window_start_utc,
+                candidates, effective, top_count, rows_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(snapshot_date) DO UPDATE SET
+                snapshot_time = excluded.snapshot_time,
+                window_start_utc = excluded.window_start_utc,
+                candidates = excluded.candidates,
+                effective = excluded.effective,
+                top_count = excluded.top_count,
+                rows_json = excluded.rows_json,
+                created_at = CURRENT_TIMESTAMP
+        """, (
+            str(snapshot.get("snapshot_date")),
+            str(snapshot.get("snapshot_time")),
+            str(snapshot.get("window_start_utc", "")),
+            int(snapshot.get("candidates", 0)),
+            int(snapshot.get("effective", 0)),
+            int(snapshot.get("top", 0)),
+            rows_json
+        ))
+        conn.commit()
+        conn.close()
+
+    def _row_to_leaderboard_snapshot(self, row: sqlite3.Row) -> Dict:
+        data = dict(row)
+        rows_json = data.get("rows_json")
+        try:
+            data["rows"] = json.loads(rows_json) if rows_json else []
+        except Exception:
+            data["rows"] = []
+        data.pop("rows_json", None)
+        data["top"] = data.pop("top_count", 0)
+        return data
+
+    def get_latest_leaderboard_snapshot(self) -> Optional[Dict]:
+        """获取最近一条涨幅榜快照。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            FROM leaderboard_snapshots
+            ORDER BY snapshot_time DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_leaderboard_snapshot(row)
+
+    def get_leaderboard_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
+        """按日期获取涨幅榜快照，snapshot_date 格式 YYYY-MM-DD。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            FROM leaderboard_snapshots
+            WHERE snapshot_date = ?
+            LIMIT 1
+        """, (snapshot_date,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_leaderboard_snapshot(row)
+
+    def list_leaderboard_snapshot_dates(self, limit: int = 90) -> List[str]:
+        """按时间倒序列出已存快照日期。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date
+            FROM leaderboard_snapshots
+            ORDER BY snapshot_time DESC
+            LIMIT ?
+        """, (int(limit),))
+        rows = cursor.fetchall()
+        conn.close()
+        return [str(row["snapshot_date"]) for row in rows]
+
+    def get_leaderboard_snapshots_between(self, start_date: str, end_date: str) -> List[Dict]:
+        """获取日期区间内的快照（按 snapshot_date 倒序）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json
+            FROM leaderboard_snapshots
+            WHERE snapshot_date >= ? AND snapshot_date <= ?
+            ORDER BY snapshot_date DESC
+        """, (start_date, end_date))
+        rows = cursor.fetchall()
+        conn.close()
+        return [self._row_to_leaderboard_snapshot(row) for row in rows]

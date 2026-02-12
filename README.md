@@ -36,7 +36,13 @@
 - **过夜风险提示**: 监控每日 23:00 后的持仓符号数量，防止过度分散。
 - **连败保护**: 监控近期连续亏损笔数，触发“熔断”建议。
 
-### ⚡ 4. 极致性能与体验
+### 🏆 4. 每日涨幅榜快照与复盘 (Leaderboard Snapshot)
+- **每日固定快照**: 默认每天 **07:40 (UTC+8)** 生成涨幅榜快照并入库（`leaderboard_snapshots`）。
+- **历史回看**: 支持按日期查看历史快照（今天、昨天、近7天等），便于盘前/盘后复盘。
+- **持仓联动**: 榜单会标记“已持仓”币种，帮助快速识别“榜上标的 vs 当前仓位”的重叠。
+- **非实时设计**: 榜单页默认读取数据库快照，不依赖实时计算，稳定且可追溯。
+
+### ⚡ 5. 极致性能与体验
 - **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
 - **暗黑模式 (Dark Mode)**: 深度适配的 OLED 黑夜模式，不仅护眼，更是交易员的信仰。
 - **本地化架构**: 核心数据存储于本地 SQLite，不依赖第三方云服务，数据绝对私有安全。
@@ -112,7 +118,29 @@ BINANCE_API_SECRET=your_api_secret_here
 UPDATE_INTERVAL_MINUTES=1
 # 同步回溯天数
 DAYS_TO_FETCH=90
+# 调度器时区（建议 Asia/Shanghai，对应 UTC+8）
+SCHEDULER_TIMEZONE=Asia/Shanghai
+
+# Server酱通知 (可选)
+SERVERCHAN_SENDKEY=your_serverchan_key_here
+
+# 晨间涨幅榜任务 (可选，默认开启，每天 07:40 UTC+8)
+ENABLE_LEADERBOARD_ALERT=1
+LEADERBOARD_ALERT_HOUR=7
+LEADERBOARD_ALERT_MINUTE=40
+LEADERBOARD_TOP_N=10
+# 最小24h成交额筛选，单位 USDT（默认 5000 万）
+LEADERBOARD_MIN_QUOTE_VOLUME=50000000
+# 候选币种上限（0=不设上限，默认120）
+LEADERBOARD_MAX_SYMBOLS=120
+# API任务互斥锁等待秒数（默认8；0=关闭互斥锁）
+API_JOB_LOCK_WAIT_SECONDS=8
 ```
+
+说明：
+- `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
+- `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
+- 如果你只关心每天 07:40 的快照，可适当调大 `UPDATE_INTERVAL_MINUTES`，减少高频同步压力。
 
 ### 3. 运行
 ```bash
@@ -120,6 +148,25 @@ DAYS_TO_FETCH=90
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 访问 `http://localhost:8000` 即可看到仪表盘。
+
+### 4. 页面与接口
+- 页面：
+  - `/`：交易分析主面板（TRADES）
+  - `/live-monitor`：实时监控（MONITOR）
+  - `/leaderboard`：涨幅榜快照（LEADERBOARD）
+  - `/metrics`：指标文档（METRICS）
+  - `/logs`：系统日志（LOGS）
+- 涨幅榜相关接口：
+  - `/api/leaderboard`：读取最新快照
+  - `/api/leaderboard?date=YYYY-MM-DD`：读取指定日期快照
+  - `/api/leaderboard/dates`：读取可选快照日期列表（倒序）
+
+### 5. 内置调度任务（默认）
+- `sync_trades`：每 `UPDATE_INTERVAL_MINUTES` 分钟同步交易
+- `sync_balance`：每 1 分钟同步余额（启用用户数据流时跳过）
+- `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
+- `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）
+- `send_morning_top_gainers`：每天 07:40 生成晨间涨幅榜快照（UTC+8，可关闭）
 
 ---
 
@@ -138,6 +185,7 @@ crypto_dashboard/
 ├── templates/             # 前端页面
 │   ├── index.html         # 主仪表盘 (Dashboard)
 │   ├── live_monitor.html  # 实时监控 (Monitor)
+│   ├── leaderboard.html   # 涨幅榜快照与复盘 (Leaderboard)
 │   ├── logs.html          # 系统日志
 │   └── metrics.html       # 指标说明文档
 ├── static/                # 静态资源 (CSS/JS)

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
 import time
+import threading
 from dotenv import load_dotenv
 import sys
 from pathlib import Path
@@ -31,6 +32,34 @@ class TradeDataScheduler:
     """交易数据定时更新调度器"""
 
     def __init__(self):
+        def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+            raw = os.getenv(name)
+            if raw is None:
+                value = default
+            else:
+                try:
+                    value = int(raw)
+                except ValueError:
+                    logger.warning(f"环境变量 {name}={raw} 非法，使用默认值 {default}")
+                    value = default
+            if minimum is not None:
+                value = max(minimum, value)
+            return value
+
+        def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+            raw = os.getenv(name)
+            if raw is None:
+                value = default
+            else:
+                try:
+                    value = float(raw)
+                except ValueError:
+                    logger.warning(f"环境变量 {name}={raw} 非法，使用默认值 {default}")
+                    value = default
+            if minimum is not None:
+                value = max(minimum, value)
+            return value
+
         scheduler_tz = os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')
         try:
             self.scheduler = BackgroundScheduler(timezone=ZoneInfo(scheduler_tz))
@@ -49,14 +78,24 @@ class TradeDataScheduler:
         else:
             self.processor = TradeDataProcessor(api_key, api_secret)
 
-        self.days_to_fetch = int(os.getenv('DAYS_TO_FETCH', 30))
-        self.update_interval_minutes = int(os.getenv('UPDATE_INTERVAL_MINUTES', 10))
+        self.days_to_fetch = _env_int('DAYS_TO_FETCH', 30, minimum=1)
+        self.update_interval_minutes = _env_int('UPDATE_INTERVAL_MINUTES', 10, minimum=1)
         self.start_date = os.getenv('START_DATE')  # 自定义起始日期
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
-        self.sync_lookback_minutes = int(os.getenv('SYNC_LOOKBACK_MINUTES', 1440))
+        self.sync_lookback_minutes = _env_int('SYNC_LOOKBACK_MINUTES', 1440, minimum=1)
         self.use_time_filter = os.getenv('SYNC_USE_TIME_FILTER', '1').lower() in ('1', 'true', 'yes')
         self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
         self.force_full_sync = os.getenv('FORCE_FULL_SYNC', '0').lower() in ('1', 'true', 'yes')
+        self.enable_leaderboard_alert = os.getenv('ENABLE_LEADERBOARD_ALERT', '1').lower() in ('1', 'true', 'yes')
+        self.leaderboard_top_n = _env_int('LEADERBOARD_TOP_N', 10, minimum=1)
+        self.leaderboard_min_quote_volume = _env_float('LEADERBOARD_MIN_QUOTE_VOLUME', 50_000_000, minimum=0.0)
+        self.leaderboard_max_symbols = _env_int('LEADERBOARD_MAX_SYMBOLS', 120, minimum=0)
+        self.leaderboard_alert_hour = _env_int('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
+        self.leaderboard_alert_minute = _env_int('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
+        self.leaderboard_alert_hour %= 24
+        self.leaderboard_alert_minute %= 60
+        self.api_job_lock_wait_seconds = _env_int('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
+        self._api_job_lock = threading.Lock()
 
     def _is_api_cooldown_active(self, source: str) -> bool:
         remaining = BinanceFuturesRestClient.cooldown_remaining_seconds()
@@ -67,12 +106,34 @@ class TradeDataScheduler:
             return True
         return False
 
+    def _try_enter_api_job_slot(self, source: str) -> bool:
+        wait_seconds = self.api_job_lock_wait_seconds
+        if wait_seconds <= 0:
+            return True
+
+        acquired = self._api_job_lock.acquire(timeout=wait_seconds)
+
+        if not acquired:
+            logger.warning(
+                f"{source}跳过: API任务互斥锁繁忙(等待{wait_seconds}s后超时)"
+            )
+            return False
+        return True
+
+    def _release_api_job_slot(self):
+        if self.api_job_lock_wait_seconds <= 0:
+            return
+        if self._api_job_lock.locked():
+            self._api_job_lock.release()
+
     def sync_trades_data(self):
         """同步交易数据到数据库"""
         if not self.processor:
             logger.warning("无法同步: API密钥未配置")
             return
         if self._is_api_cooldown_active(source='交易同步'):
+            return
+        if not self._try_enter_api_job_slot(source='交易同步'):
             return
 
         sync_started_at = time.perf_counter()
@@ -255,6 +316,8 @@ class TradeDataScheduler:
             self.db.update_sync_status(status='error', error_message=error_msg)
             import traceback
             logger.error(traceback.format_exc())
+        finally:
+            self._release_api_job_slot()
 
     def check_long_held_positions(self):
         """检查持仓时间超过48小时的订单并发送合并通知 (每24小时复提)"""
@@ -466,6 +529,149 @@ class TradeDataScheduler:
         except Exception as e:
             logger.error(f"午间风控检查失败: {e}")
 
+    def _build_top_gainers_snapshot(self):
+        """构建涨幅榜快照（不处理锁与冷却）。"""
+        now_utc = datetime.now(timezone.utc)
+        midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
+
+        exchange_info = self.processor.get_exchange_info(client=self.processor.client)
+        if not exchange_info or 'symbols' not in exchange_info:
+            raise RuntimeError("无法获取 exchangeInfo")
+
+        usdt_perpetual_symbols = {
+            item.get('symbol')
+            for item in exchange_info.get('symbols', [])
+            if item.get('contractType') == 'PERPETUAL' and item.get('quoteAsset') == 'USDT'
+        }
+        if not usdt_perpetual_symbols:
+            raise RuntimeError("无可用USDT永续交易对")
+
+        ticker_data = self.processor.client.public_get('/fapi/v1/ticker/24hr')
+        if not ticker_data or not isinstance(ticker_data, list):
+            raise RuntimeError("无法获取 24hr ticker")
+
+        candidates = []
+        for item in ticker_data:
+            symbol = item.get('symbol')
+            if not symbol or symbol not in usdt_perpetual_symbols:
+                continue
+            try:
+                last_price = float(item.get('lastPrice', 0.0))
+                quote_volume = float(item.get('quoteVolume', 0.0))
+            except (TypeError, ValueError):
+                continue
+
+            if last_price <= 0:
+                continue
+            if quote_volume < self.leaderboard_min_quote_volume:
+                continue
+
+            candidates.append({
+                'symbol': symbol,
+                'last_price': last_price,
+                'quote_volume': quote_volume,
+            })
+
+        # 先按成交额排序；如配置了上限则截断，避免K线请求过多
+        candidates.sort(key=lambda x: x['quote_volume'], reverse=True)
+        if self.leaderboard_max_symbols > 0:
+            candidates = candidates[:self.leaderboard_max_symbols]
+
+        leaderboard = []
+        for item in candidates:
+            if self._is_api_cooldown_active(source='涨幅榜-逐币种计算'):
+                break
+
+            symbol = item['symbol']
+            open_price = self.processor.get_price_change_from_utc_start(
+                symbol=symbol,
+                timestamp=midnight_utc_ms,
+                client=self.processor.client
+            )
+            if open_price is None or open_price <= 0:
+                continue
+
+            pct_change = (item['last_price'] / open_price - 1) * 100
+            leaderboard.append({
+                'symbol': symbol,
+                'change': pct_change,
+                'volume': item['quote_volume'],
+            })
+
+        leaderboard.sort(key=lambda x: x['change'], reverse=True)
+        top_list = leaderboard[:self.leaderboard_top_n]
+
+        return {
+            "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
+            "snapshot_time": datetime.now(UTC8).strftime('%Y-%m-%d %H:%M:%S'),
+            "window_start_utc": midnight_utc.strftime('%Y-%m-%d %H:%M:%S'),
+            "candidates": len(candidates),
+            "effective": len(leaderboard),
+            "top": len(top_list),
+            "rows": top_list
+        }
+
+    def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
+        """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
+        if not self.processor:
+            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
+        if self._is_api_cooldown_active(source=source):
+            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
+        if not self._try_enter_api_job_slot(source=source):
+            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
+
+        try:
+            snapshot = self._build_top_gainers_snapshot()
+            if snapshot["top"] <= 0:
+                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
+            return {"ok": True, **snapshot}
+        except Exception as e:
+            logger.error(f"{source}失败: {e}")
+            return {"ok": False, "reason": "exception", "message": str(e)}
+        finally:
+            self._release_api_job_slot()
+
+    def send_morning_top_gainers(self):
+        """每天早上发送币安合约涨幅榜（按UTC当日开盘到当前涨幅）"""
+        result = self.get_top_gainers_snapshot(source="晨间涨幅榜")
+        if not result.get("ok"):
+            logger.warning(
+                f"晨间涨幅榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
+            )
+            return
+
+        try:
+            self.db.save_leaderboard_snapshot(result)
+            logger.info(
+                f"涨幅榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
+            )
+        except Exception as e:
+            logger.error(f"保存涨幅榜快照失败: {e}")
+
+        title = f"【币安合约市场涨幅榜 Top {result['top']}】"
+        content = (
+            "### 币安合约市场晨间涨幅榜\n\n"
+            f"**更新时间:** {result['snapshot_time']} (UTC+8)\n"
+            f"**计算区间:** {result['window_start_utc']} UTC 至当前\n\n"
+            "| 排名 | 币种 | 涨幅 | 24h成交额 |\n"
+            "|:---:|:---:|:---:|:---:|\n"
+        )
+
+        for i, row in enumerate(result["rows"], start=1):
+            symbol = row['symbol']
+            change = f"{row['change']:.2f}%"
+            volume = f"{int(row['volume'] / 1_000_000)}M"
+            content += f"| {i} | {symbol} | {change} | {volume} |\n"
+
+        send_server_chan_notification(title, content)
+        logger.info(
+            "晨间涨幅榜已发送: "
+            f"candidates={result['candidates']}, "
+            f"effective={result['effective']}, "
+            f"top={result['top']}"
+        )
+
     @staticmethod
     def _normalize_futures_symbol(symbol: str) -> str:
         """将库内symbol规范化为Binance USDT交易对symbol"""
@@ -481,6 +687,8 @@ class TradeDataScheduler:
         if not self.processor:
             return  # 如果没有配置API密钥，则不执行
         if self._is_api_cooldown_active(source='余额同步'):
+            return
+        if not self._try_enter_api_job_slot(source='余额同步'):
             return
 
         try:
@@ -547,6 +755,8 @@ class TradeDataScheduler:
                 logger.warning("获取余额失败，balance为 None")
         except Exception as e:
             logger.error(f"同步余额失败: {str(e)}")
+        finally:
+            self._release_api_job_slot()
 
     def start(self):
         """启动定时任务"""
@@ -565,6 +775,9 @@ class TradeDataScheduler:
             trigger=IntervalTrigger(minutes=self.update_interval_minutes),
             id='sync_trades',
             name='同步交易数据',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
             replace_existing=True
         )
 
@@ -575,6 +788,9 @@ class TradeDataScheduler:
                 trigger=IntervalTrigger(minutes=1),
                 id='sync_balance',
                 name='同步账户余额',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=60,
                 replace_existing=True
             )
         else:
@@ -586,6 +802,9 @@ class TradeDataScheduler:
             trigger=CronTrigger(hour=23, minute=0, timezone=UTC8),
             id='risk_check_sleep',
             name='睡前风控检查',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
             replace_existing=True
         )
 
@@ -595,8 +814,33 @@ class TradeDataScheduler:
             trigger=CronTrigger(hour=11, minute=50, timezone=UTC8),
             id='check_losses_noon',
             name='午间浮亏检查',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
             replace_existing=True
         )
+
+        if self.enable_leaderboard_alert:
+            self.scheduler.add_job(
+                func=self.send_morning_top_gainers,
+                trigger=CronTrigger(
+                    hour=self.leaderboard_alert_hour,
+                    minute=self.leaderboard_alert_minute,
+                    timezone=UTC8
+                ),
+                id='send_morning_top_gainers',
+                name='晨间涨幅榜',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+                replace_existing=True
+            )
+            logger.info(
+                "晨间涨幅榜任务已启动: "
+                f"每天 {self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} 执行"
+            )
+        else:
+            logger.info("晨间涨幅榜任务未启用: ENABLE_LEADERBOARD_ALERT=0")
 
         self.scheduler.start()
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")

@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZS's CRYPTO SHORTING COCKPIT // LEADERBOARD</title>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.classList.add('dark-mode');
+        }
+    </script>
+    <style>
+        html.dark-mode, html.dark-mode body {
+            background-color: #0f172a !important;
+            color: #f8fafc !important;
+        }
+    </style>
+    <style>
+        :root {
+            --bg: #f7f3ea;
+            --panel: #fffdf8;
+            --panel-strong: #ffffff;
+            --text: #111827;
+            --muted: #6b7280;
+            --border: #111827;
+            --accent: #ff8a00;
+            --success: #16a34a;
+            --danger: #dc2626;
+            --warn: #f97316;
+            --shadow: 6px 6px 0 rgba(17, 24, 39, 0.9);
+        }
+
+        body {
+            font-family: 'Barlow', system-ui, sans-serif;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+            background-color: var(--bg);
+            background-image: linear-gradient(180deg, #f7f3ea 0%, #f1f5f9 55%, #f7f3ea 100%);
+            transition: background-color 0.5s ease, color 0.5s ease;
+        }
+        * { box-sizing: border-box; }
+
+        .font-mono {
+            font-family: 'Space Mono', monospace;
+        }
+
+        body.dark-mode {
+            --bg: #0f172a;
+            --panel: rgba(30, 41, 59, 0.65);
+            --panel-strong: #1e293b;
+            --border: #334155;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(900px 500px at 10% -10%, rgba(255, 138, 0, 0.18), transparent 60%),
+                radial-gradient(800px 500px at 90% 0%, rgba(17, 24, 39, 0.12), transparent 60%),
+                radial-gradient(700px 450px at 50% 110%, rgba(34, 197, 94, 0.12), transparent 65%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(17, 24, 39, 0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(17, 24, 39, 0.06) 1px, transparent 1px);
+            background-size: 30px 30px;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.5;
+        }
+
+        .brand-title {
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-size: clamp(1.7rem, 2.5vw, 2.6rem);
+        }
+
+        .brand-sub {
+            color: var(--muted);
+            font-weight: 600;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            font-size: 0.68rem;
+        }
+
+        .panel-meta {
+            font-size: 0.62rem;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            background: #fff3db;
+            color: #111827;
+            font-size: 10px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+
+        body.dark-mode .status-pill {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: var(--accent);
+            box-shadow: 0 0 8px rgba(255, 138, 0, 0.7);
+            animation: breathe 2s ease-in-out infinite;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.5); opacity: 0.4; }
+        }
+
+        .nav-link {
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            color: var(--text);
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            transition: all 0.2s ease;
+            background: var(--panel);
+        }
+
+        .nav-link:hover {
+            transform: translateY(-1px);
+            box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.8);
+        }
+
+        .nav-link.active {
+            color: #111827;
+            background: var(--accent);
+            border-color: var(--border);
+            box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.9);
+        }
+
+        .theme-toggle {
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            color: var(--muted);
+            background: var(--panel);
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .theme-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+            transform: rotate(15deg);
+        }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.7rem;
+            color: var(--muted);
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+        }
+
+        .section-label::after { content: ''; flex: 1; height: 2px; background: var(--border); }
+
+        .glass-panel {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 0.75rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.22em;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .panel-title strong {
+            color: var(--text);
+        }
+
+        .panel-reveal { animation: rise-in 0.6s ease both; }
+        @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+        .metric-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: var(--muted);
+        }
+
+        .text-l1 {
+            font-size: clamp(2.2rem, 3vw, 3rem);
+            line-height: 1;
+        }
+
+        .text-l2 {
+            font-size: clamp(1.3rem, 2.1vw, 1.7rem);
+            line-height: 1.1;
+        }
+
+        .focus-kpi {
+            background: linear-gradient(135deg, rgba(255, 138, 0, 0.14), rgba(255, 255, 255, 0.65));
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 12px;
+            min-height: 74px;
+        }
+
+        .snapshot-stat {
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .snapshot-stat .stat-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.62rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .snapshot-stat .stat-value {
+            margin-top: 2px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.86rem;
+            font-weight: 700;
+            line-height: 1.35;
+            color: var(--text);
+        }
+
+        .kpi-value {
+            margin-top: 4px;
+            font-family: 'Space Mono', monospace;
+            font-size: 1rem;
+            line-height: 1.25;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .kpi-value-strong {
+            font-size: 1.2rem;
+            font-weight: 800;
+        }
+
+        .refresh-btn {
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-family: 'Space Mono', monospace;
+            letter-spacing: 0.08em;
+            background: var(--panel);
+            color: var(--text);
+            font-weight: 700;
+            transition: all 0.2s ease;
+        }
+        .refresh-btn:hover { transform: translateY(-1px); box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.8); }
+
+        .refresh-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .snap-select {
+            border: 2px solid var(--border);
+            border-radius: 999px;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-family: 'Space Mono', monospace;
+            background: var(--panel);
+            min-width: 140px;
+        }
+
+        .hero-card {
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            padding: 14px;
+            background: var(--panel);
+            transition: transform .15s ease;
+        }
+
+        .hero-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .hero-rank {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .hero-symbol {
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+
+        .rank-up { color: var(--success); font-weight: 700; }
+        .rank-down { color: var(--danger); font-weight: 700; }
+        .rank-flat { color: var(--muted); font-weight: 700; }
+
+        .held-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border: 1px solid var(--danger);
+            border-radius: 999px;
+            color: var(--danger);
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-family: 'Space Mono', monospace;
+        }
+
+        .leader-table thead {
+            background: rgba(15, 23, 42, 0.08);
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .leader-table tbody tr {
+            border-bottom: 1px dashed rgba(15, 23, 42, 0.22);
+        }
+
+        .leader-table tbody tr:hover {
+            background: rgba(255, 138, 0, 0.06);
+        }
+
+        .heat-track {
+            margin-top: 8px;
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(15, 23, 42, 0.35);
+            background: rgba(15, 23, 42, 0.08);
+            overflow: hidden;
+        }
+
+        .heat-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #22c55e 0%, #f59e0b 62%, #ef4444 100%);
+            transition: width 0.25s ease;
+        }
+
+        .mobile-row {
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        body.dark-mode .focus-kpi,
+        body.dark-mode .snapshot-stat,
+        body.dark-mode .hero-card,
+        body.dark-mode .mobile-row {
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        body.dark-mode .snap-select,
+        body.dark-mode .theme-toggle,
+        body.dark-mode .nav-link {
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text);
+            border-color: var(--border);
+        }
+
+        body.dark-mode .nav-link.active {
+            color: #111827;
+            background: var(--accent);
+            border-color: var(--border);
+            box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.9);
+        }
+
+        body.dark-mode .refresh-btn { color: var(--text); background: var(--panel); }
+
+        body.dark-mode .leader-table thead {
+            background: rgba(148, 163, 184, 0.12);
+        }
+
+        body.dark-mode .leader-table tbody tr {
+            border-bottom-color: rgba(148, 163, 184, 0.25);
+        }
+
+        body.dark-mode .heat-track {
+            border-color: rgba(148, 163, 184, 0.45);
+            background: rgba(148, 163, 184, 0.14);
+        }
+
+        .theme-brutal .text-white { color: var(--text) !important; }
+        .theme-brutal .text-gray-300,
+        .theme-brutal .text-gray-400,
+        .theme-brutal .text-gray-500,
+        .theme-brutal .text-gray-600,
+        .theme-brutal .text-slate-400,
+        .theme-brutal .text-slate-500 { color: var(--muted) !important; }
+        .theme-brutal .text-teal-200,
+        .theme-brutal .text-teal-300 { color: var(--accent) !important; }
+        .theme-brutal .text-emerald-300,
+        .theme-brutal .text-emerald-400,
+        .theme-brutal .text-green-400,
+        .theme-brutal .text-green-500 { color: var(--success) !important; }
+        .theme-brutal .text-rose-300,
+        .theme-brutal .text-rose-400,
+        .theme-brutal .text-red-400,
+        .theme-brutal .text-red-500 { color: var(--danger) !important; }
+        .theme-brutal .text-amber-300,
+        .theme-brutal .text-amber-400,
+        .theme-brutal .text-yellow-400 { color: var(--accent) !important; }
+        .theme-brutal .bg-gray-900,
+        .theme-brutal .bg-gray-800,
+        .theme-brutal .bg-slate-800,
+        .theme-brutal .bg-slate-900 { background-color: var(--panel-strong) !important; }
+        .theme-brutal .border-gray-800,
+        .theme-brutal .border-gray-700,
+        .theme-brutal .border-slate-700,
+        .theme-brutal .border-slate-800,
+        .theme-brutal .divide-gray-800 { border-color: var(--border) !important; }
+    </style>
+</head>
+<body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
+
+<header class="topbar flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-6 sm:mb-8 relative z-50">
+    <div class="flex flex-col gap-3 text-center lg:text-left items-center lg:items-start">
+        <div class="status-pill">
+            <span class="status-dot"></span>
+            SYSTEM ONLINE
+        </div>
+        <div>
+            <h1 class="brand-title">慢就是快</h1>
+            <div class="brand-sub">CRYPTO SHORTING COCKPIT · LEADERBOARD</div>
+        </div>
+    </div>
+    <nav class="flex items-center flex-wrap gap-3 text-sm justify-center lg:justify-start w-full lg:w-auto">
+        <a href="/" class="nav-link">TRADES</a>
+        <a href="/live-monitor" class="nav-link">MONITOR</a>
+        <a href="/leaderboard" class="nav-link active">LEADERBOARD</a>
+        <a href="/metrics" class="nav-link">METRICS</a>
+        <a href="/logs" class="nav-link">LOGS</a>
+    </nav>
+    <div class="text-center lg:text-right space-y-2 flex flex-col items-end">
+        <button id="btn-theme-toggle" class="theme-toggle mb-2" title="Toggle Dark Mode">
+            <i data-lucide="moon" class="w-4 h-4"></i>
+        </button>
+        <div class="panel-meta">Trading Philosophy</div>
+        <div class="text-sm font-semibold text-teal-200 font-mono">轻仓分散做空 · 宽止损 · 固定止盈</div>
+        <div class="panel-meta">Last Update (UTC+8): <span id="last-updated" class="text-teal-200">--</span></div>
+    </div>
+</header>
+
+<div class="section-label">LEADERBOARD SNAPSHOT</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
+    <div class="lg:col-span-4 space-y-4">
+        <div class="glass-panel p-4 panel-reveal">
+            <div class="panel-title">
+                <strong>SNAPSHOT CONTROL</strong>
+            </div>
+            <div class="flex items-center gap-2 mt-3">
+                <select id="snapshot-date" class="snap-select w-full">
+                    <option value="">LATEST</option>
+                </select>
+                <button id="btn-refresh" class="refresh-btn whitespace-nowrap">
+                    <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i>REFRESH
+                </button>
+            </div>
+            <div id="status-text" class="text-xs text-slate-500 mt-3">等待加载历史快照...</div>
+        </div>
+
+        <div class="glass-panel p-4 panel-reveal">
+            <div class="panel-title mb-3">
+                <strong>SNAPSHOT META</strong>
+                <span class="panel-meta">compact view</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
+                <div class="snapshot-stat">
+                    <div class="stat-label">Top Size</div>
+                    <div id="metric-top" class="stat-value">--</div>
+                </div>
+                <div class="snapshot-stat">
+                    <div class="stat-label">Snapshot Date</div>
+                    <div id="metric-date" class="stat-value">--</div>
+                </div>
+                <div class="snapshot-stat">
+                    <div class="stat-label">Snapshot Time</div>
+                    <div id="metric-time" class="stat-value">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="lg:col-span-8 space-y-4">
+        <div class="glass-panel p-4 panel-reveal">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="crown" class="mr-2 w-4 h-4 text-amber-500"></i> TOP 3 FOCUS
+                </h3>
+                <span class="text-[11px] text-slate-500">Held marker · Rank delta · 7D appearance</span>
+            </div>
+            <div id="top3-grid" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+        </div>
+
+        <div class="glass-panel overflow-hidden panel-reveal">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i> FULL LEADERBOARD
+                </h3>
+                <span class="text-[11px] text-slate-500">Daily snapshot @ 07:40</span>
+            </div>
+
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[860px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">Change</th>
+                        <th class="px-4 py-3 text-right">Vs Yesterday</th>
+                        <th class="px-4 py-3 text-right">Appear 7D</th>
+                        <th class="px-4 py-3 text-right">24h Quote Volume</th>
+                    </tr>
+                    </thead>
+                    <tbody id="leaderboard-body"></tbody>
+                </table>
+            </div>
+
+            <div id="leaderboard-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const themeKey = 'theme';
+    const btnTheme = document.getElementById('btn-theme-toggle');
+    const btnRefresh = document.getElementById('btn-refresh');
+    const statusText = document.getElementById('status-text');
+    const lastUpdated = document.getElementById('last-updated');
+    const metricTop = document.getElementById('metric-top');
+    const metricDate = document.getElementById('metric-date');
+    const metricTime = document.getElementById('metric-time');
+    const tableBody = document.getElementById('leaderboard-body');
+    const cards = document.getElementById('leaderboard-cards');
+    const top3Grid = document.getElementById('top3-grid');
+    const snapshotDateSelect = document.getElementById('snapshot-date');
+
+    function setTheme(darkMode) {
+        document.body.classList.toggle('dark-mode', darkMode);
+        localStorage.setItem(themeKey, darkMode ? 'dark' : 'light');
+        if (btnTheme) {
+            btnTheme.innerHTML = darkMode
+                ? '<i data-lucide="sun" class="w-4 h-4"></i>'
+                : '<i data-lucide="moon" class="w-4 h-4"></i>';
+            lucide.createIcons();
+        }
+    }
+
+    btnTheme?.addEventListener('click', () => {
+        setTheme(!document.body.classList.contains('dark-mode'));
+    });
+
+    setTheme(localStorage.getItem(themeKey) === 'dark');
+
+    function formatVolume(value) {
+        if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+        if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+        if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+        return value.toFixed(0);
+    }
+
+    function getDeltaMeta(delta) {
+        if (typeof delta !== 'number') return {text: 'N/A', cls: 'rank-flat'};
+        if (delta > 0) return {text: `↑ +${delta}`, cls: 'rank-up'};
+        if (delta < 0) return {text: `↓ ${delta}`, cls: 'rank-down'};
+        return {text: '→ 0', cls: 'rank-flat'};
+    }
+
+    function renderTop3(rows) {
+        top3Grid.innerHTML = '';
+        const top3 = rows.slice(0, 3);
+        if (!top3.length) {
+            top3Grid.innerHTML = '<div class="text-xs text-slate-500">No data</div>';
+            return;
+        }
+
+        const maxChange = Math.max(...top3.map((x) => Number(x.change) || 0), 1);
+
+        top3.forEach((row, idx) => {
+            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
+            const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
+            const changeNorm = Math.max(0, Math.min(1, (Number(row.change) || 0) / maxChange));
+            const freqNorm = Math.max(0, Math.min(1, (Number(row.appearances_7d) || 0) / 7));
+            const heldBoost = row.is_held ? 0.12 : 0.0;
+            const heat = Math.round(Math.min(1, 0.62 * changeNorm + 0.26 * freqNorm + heldBoost) * 100);
+            const el = document.createElement('div');
+            el.className = 'hero-card';
+            el.innerHTML = `
+                <div class="hero-rank">#${idx + 1}</div>
+                <div class="mt-1 flex items-center gap-2">
+                    <div class="hero-symbol">${row.symbol}</div>
+                    ${held}
+                </div>
+                <div class="mt-2 text-xl font-black rank-up">+${row.change.toFixed(2)}%</div>
+                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
+                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0} 次</div>
+                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
+                <div class="mt-2 text-[11px] font-mono tracking-wide text-slate-500">Risk Heat: ${heat}</div>
+                <div class="heat-track"><div class="heat-fill" style="width:${heat}%"></div></div>
+            `;
+            top3Grid.appendChild(el);
+        });
+    }
+
+    function renderRows(rows) {
+        tableBody.innerHTML = '';
+        cards.innerHTML = '';
+
+        rows.forEach((row, idx) => {
+            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
+            const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${idx + 1}</td>
+                <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
+                <td class="px-4 py-3 text-right rank-up font-bold">+${row.change.toFixed(2)}%</td>
+                <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
+                <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
+            `;
+            tableBody.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">#${idx + 1}</span>
+                    <span class="rank-up font-bold">+${row.change.toFixed(2)}%</span>
+                </div>
+                <div class="font-bold">${row.symbol} ${held}</div>
+                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
+                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
+                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
+            `;
+            cards.appendChild(card);
+        });
+    }
+
+    async function loadSnapshotDates() {
+        try {
+            const response = await fetch('/api/leaderboard/dates?limit=120');
+            const payload = await response.json();
+            const dates = Array.isArray(payload.dates) ? payload.dates : [];
+            snapshotDateSelect.innerHTML = '<option value="">LATEST</option>';
+            dates.forEach((d) => {
+                const opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = d;
+                snapshotDateSelect.appendChild(opt);
+            });
+        } catch (err) {
+            statusText.textContent = `加载日期列表失败: ${err.message || err}`;
+        }
+    }
+
+    async function loadLeaderboard() {
+        btnRefresh.disabled = true;
+        statusText.textContent = '正在读取快照...';
+        try {
+            const selectedDate = snapshotDateSelect.value;
+            const endpoint = selectedDate
+                ? `/api/leaderboard?date=${encodeURIComponent(selectedDate)}`
+                : '/api/leaderboard';
+            const response = await fetch(endpoint);
+            const data = await response.json();
+
+            if (!data.ok) {
+                statusText.textContent = `加载失败: ${data.message || data.reason || 'unknown'}`;
+                metricTop.textContent = '--';
+                metricDate.textContent = '--';
+                metricTime.textContent = '--';
+                top3Grid.innerHTML = '';
+                tableBody.innerHTML = '';
+                cards.innerHTML = '';
+                return;
+            }
+
+            metricTop.textContent = data.top;
+            metricDate.textContent = data.snapshot_date;
+            metricTime.textContent = (data.snapshot_time || '').split(' ').slice(1).join(' ') || '--';
+            statusText.textContent = `快照日期: ${data.snapshot_date} · 计算区间: ${data.window_start_utc} UTC 至快照时刻`;
+            lastUpdated.textContent = data.snapshot_time;
+
+            const rows = data.rows || [];
+            renderTop3(rows);
+            renderRows(rows);
+        } catch (err) {
+            statusText.textContent = `请求异常: ${err.message || err}`;
+        } finally {
+            btnRefresh.disabled = false;
+            lucide.createIcons();
+        }
+    }
+
+    btnRefresh?.addEventListener('click', loadLeaderboard);
+    snapshotDateSelect?.addEventListener('change', loadLeaderboard);
+
+    (async () => {
+        await loadSnapshotDates();
+        await loadLeaderboard();
+    })();
+</script>
+</body>
+</html>
