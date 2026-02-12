@@ -359,6 +359,46 @@
             font-family: 'Space Mono', monospace;
         }
 
+        .reversal-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border: 1px solid #0f766e;
+            border-radius: 999px;
+            color: #0f766e;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-family: 'Space Mono', monospace;
+            background: rgba(15, 118, 110, 0.08);
+        }
+
+        .metric-hit-badge,
+        .metric-miss-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-family: 'Space Mono', monospace;
+            border: 1px solid;
+        }
+
+        .metric-hit-badge {
+            color: #991b1b;
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.12);
+        }
+
+        .metric-miss-badge {
+            color: #475569;
+            border-color: #94a3b8;
+            background: rgba(148, 163, 184, 0.12);
+        }
+
         .leader-table thead {
             background: rgba(15, 23, 42, 0.08);
             font-family: 'Space Mono', monospace;
@@ -405,6 +445,24 @@
         body.dark-mode .hero-card,
         body.dark-mode .mobile-row {
             background: rgba(15, 23, 42, 0.7);
+        }
+
+        body.dark-mode .reversal-badge {
+            border-color: #2dd4bf;
+            color: #5eead4;
+            background: rgba(45, 212, 191, 0.16);
+        }
+
+        body.dark-mode .metric-hit-badge {
+            color: #fecaca;
+            border-color: #f87171;
+            background: rgba(248, 113, 113, 0.22);
+        }
+
+        body.dark-mode .metric-miss-badge {
+            color: #cbd5e1;
+            border-color: #64748b;
+            background: rgba(100, 116, 139, 0.18);
         }
 
         body.dark-mode .snap-select,
@@ -539,16 +597,6 @@
     </div>
 
     <div class="lg:col-span-8 space-y-4">
-        <div class="glass-panel p-4 panel-reveal">
-            <div class="flex justify-between items-center mb-3">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="crown" class="mr-2 w-4 h-4 text-amber-500"></i> TOP 3 FOCUS
-                </h3>
-                <span class="text-[11px] text-slate-500">Held marker · Rank delta · 7D appearance</span>
-            </div>
-            <div id="top3-grid" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
-        </div>
-
         <div class="glass-panel overflow-hidden panel-reveal">
             <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-500 flex items-center">
@@ -558,11 +606,12 @@
             </div>
 
             <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[860px]">
+                <table class="leader-table w-full text-left text-sm min-w-[980px]">
                     <thead>
                     <tr>
                         <th class="px-4 py-3">Rank</th>
                         <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">Price</th>
                         <th class="px-4 py-3 text-right">Change</th>
                         <th class="px-4 py-3 text-right">Vs Yesterday</th>
                         <th class="px-4 py-3 text-right">Appear 7D</th>
@@ -574,6 +623,140 @@
             </div>
 
             <div id="leaderboard-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
+
+        <div class="glass-panel overflow-hidden panel-reveal">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i> LOSERS TOP 10
+                </h3>
+                <div class="text-right">
+                    <div id="losers-hit-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
+                    <div class="text-[11px] text-slate-500">Daily snapshot @ 07:40</div>
+                </div>
+            </div>
+            <div id="losers-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                命中 symbols: --
+            </div>
+
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3">Prev Gainer</th>
+                        <th class="px-4 py-3 text-right">Price</th>
+                        <th class="px-4 py-3 text-right">Change</th>
+                        <th class="px-4 py-3 text-right">Vs Yesterday</th>
+                        <th class="px-4 py-3 text-right">Appear 7D</th>
+                        <th class="px-4 py-3 text-right">24h Quote Volume</th>
+                    </tr>
+                    </thead>
+                    <tbody id="losers-body"></tbody>
+                </table>
+            </div>
+
+            <div id="losers-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
+
+        <div class="glass-panel overflow-hidden panel-reveal">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="target" class="mr-2 w-4 h-4 text-orange-500"></i> NEXT-DAY &lt;-10% CHECK
+                </h3>
+                <div id="metric2-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
+            </div>
+            <div id="metric2-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                命中 symbols: --
+            </div>
+            <div id="metric2-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                样本信息: --
+            </div>
+
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Prev Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">Prev Change</th>
+                        <th class="px-4 py-3 text-right">Next Change</th>
+                        <th class="px-4 py-3">&lt;-10%</th>
+                    </tr>
+                    </thead>
+                    <tbody id="metric2-body"></tbody>
+                </table>
+            </div>
+
+            <div id="metric2-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
+
+        <div class="glass-panel overflow-hidden panel-reveal">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="clock-3" class="mr-2 w-4 h-4 text-blue-500"></i> 48H CHANGE OUTCOME
+                </h3>
+                <div id="metric3-summary" class="text-[11px] font-mono text-slate-600">下跌占比 -- · &lt;-10%占比 -- · &gt;+10%占比 --</div>
+            </div>
+            <div id="metric3-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                样本信息: --
+            </div>
+            <div class="px-4 py-2 border-b border-slate-800/20">
+                <div class="flex items-center justify-between text-xs text-slate-500">
+                    <span>48h 涨跌幅分布</span>
+                    <span id="metric3-dist-label">--</span>
+                </div>
+                <div class="mt-2 h-2 rounded-full overflow-hidden flex bg-slate-200/60">
+                    <div id="metric3-dist-neg" class="h-full bg-red-500" style="width: 0%;"></div>
+                    <div id="metric3-dist-mid" class="h-full bg-slate-400" style="width: 0%;"></div>
+                    <div id="metric3-dist-pos" class="h-full bg-emerald-500" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Prev Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">Entry Price</th>
+                        <th class="px-4 py-3 text-right">48h Price</th>
+                        <th class="px-4 py-3 text-right">48h Change</th>
+                    </tr>
+                    </thead>
+                    <tbody id="metric3-body"></tbody>
+                </table>
+            </div>
+
+            <div id="metric3-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
+
+        <div class="glass-panel overflow-hidden panel-reveal">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="line-chart" class="mr-2 w-4 h-4 text-indigo-500"></i> METRICS HISTORY
+                </h3>
+                <div class="text-[11px] text-slate-500">最近 30 天</div>
+            </div>
+
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Date</th>
+                        <th class="px-4 py-3 text-right">M1 进跌幅榜</th>
+                        <th class="px-4 py-3 text-right">M2 次日&lt;-10%</th>
+                        <th class="px-4 py-3 text-right">M3 &lt;-10%</th>
+                        <th class="px-4 py-3 text-right">M3 &gt;+10%</th>
+                        <th class="px-4 py-3 text-right">样本</th>
+                    </tr>
+                    </thead>
+                    <tbody id="metrics-history-body"></tbody>
+                </table>
+            </div>
+
+            <div id="metrics-history-cards" class="md:hidden p-3 space-y-3"></div>
         </div>
     </div>
 </div>
@@ -589,7 +772,25 @@
     const metricTime = document.getElementById('metric-time');
     const tableBody = document.getElementById('leaderboard-body');
     const cards = document.getElementById('leaderboard-cards');
-    const top3Grid = document.getElementById('top3-grid');
+    const losersTableBody = document.getElementById('losers-body');
+    const losersCards = document.getElementById('losers-cards');
+    const losersHitSummary = document.getElementById('losers-hit-summary');
+    const losersHitSymbols = document.getElementById('losers-hit-symbols');
+    const metric2Summary = document.getElementById('metric2-summary');
+    const metric2HitSymbols = document.getElementById('metric2-hit-symbols');
+    const metric2SampleNote = document.getElementById('metric2-sample-note');
+    const metric2Body = document.getElementById('metric2-body');
+    const metric2Cards = document.getElementById('metric2-cards');
+    const metric3Summary = document.getElementById('metric3-summary');
+    const metric3SampleNote = document.getElementById('metric3-sample-note');
+    const metric3DistLabel = document.getElementById('metric3-dist-label');
+    const metric3DistNeg = document.getElementById('metric3-dist-neg');
+    const metric3DistMid = document.getElementById('metric3-dist-mid');
+    const metric3DistPos = document.getElementById('metric3-dist-pos');
+    const metric3Body = document.getElementById('metric3-body');
+    const metric3Cards = document.getElementById('metric3-cards');
+    const metricsHistoryBody = document.getElementById('metrics-history-body');
+    const metricsHistoryCards = document.getElementById('metrics-history-cards');
     const snapshotDateSelect = document.getElementById('snapshot-date');
 
     function setTheme(darkMode) {
@@ -610,10 +811,36 @@
     setTheme(localStorage.getItem(themeKey) === 'dark');
 
     function formatVolume(value) {
-        if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
-        if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-        if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-        return value.toFixed(0);
+        const num = Number(value) || 0;
+        if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
+        if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+        if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+        return num.toFixed(0);
+    }
+
+    function formatChange(value) {
+        const num = Number(value) || 0;
+        return `${num >= 0 ? '+' : ''}${num.toFixed(2)}%`;
+    }
+
+    function formatPrice(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num) || num <= 0) return '--';
+        if (num >= 1000) return num.toLocaleString(undefined, {maximumFractionDigits: 2});
+        if (num >= 1) return num.toFixed(4);
+        return num.toFixed(6);
+    }
+
+    function formatPercent(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '--';
+        return `${num.toFixed(2)}%`;
+    }
+
+    function formatChangeOrDash(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '--';
+        return formatChange(num);
     }
 
     function getDeltaMeta(delta) {
@@ -623,40 +850,230 @@
         return {text: '→ 0', cls: 'rank-flat'};
     }
 
-    function renderTop3(rows) {
-        top3Grid.innerHTML = '';
-        const top3 = rows.slice(0, 3);
-        if (!top3.length) {
-            top3Grid.innerHTML = '<div class="text-xs text-slate-500">No data</div>';
+    function renderLosersReversal(stats) {
+        if (!losersHitSummary || !losersHitSymbols) return;
+
+        const hits = Number(stats?.hits || 0);
+        const baseCount = Number(stats?.base_count || 0);
+        const prevDate = stats?.prev_snapshot_date || '--';
+        const symbols = Array.isArray(stats?.symbols) ? stats.symbols.filter(Boolean) : [];
+
+        if (baseCount <= 0) {
+            losersHitSummary.textContent = '命中 --/-- · 概率 --';
+            losersHitSymbols.textContent = '命中 symbols: --（缺少前一日涨幅榜快照）';
             return;
         }
 
-        const maxChange = Math.max(...top3.map((x) => Number(x.change) || 0), 1);
+        losersHitSummary.textContent = `命中 ${hits}/${baseCount} · 概率 ${formatPercent(stats?.probability_pct)}`;
+        losersHitSymbols.textContent = `对比 ${prevDate} 涨幅榜 · 命中 symbols: ${symbols.length ? symbols.join(', ') : '--'}`;
+    }
 
-        top3.forEach((row, idx) => {
-            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
-            const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
-            const changeNorm = Math.max(0, Math.min(1, (Number(row.change) || 0) / maxChange));
-            const freqNorm = Math.max(0, Math.min(1, (Number(row.appearances_7d) || 0) / 7));
-            const heldBoost = row.is_held ? 0.12 : 0.0;
-            const heat = Math.round(Math.min(1, 0.62 * changeNorm + 0.26 * freqNorm + heldBoost) * 100);
-            const el = document.createElement('div');
-            el.className = 'hero-card';
-            el.innerHTML = `
-                <div class="hero-rank">#${idx + 1}</div>
-                <div class="mt-1 flex items-center gap-2">
-                    <div class="hero-symbol">${row.symbol}</div>
-                    ${held}
-                </div>
-                <div class="mt-2 text-xl font-black rank-up">+${row.change.toFixed(2)}%</div>
-                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
-                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0} 次</div>
-                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
-                <div class="mt-2 text-[11px] font-mono tracking-wide text-slate-500">Risk Heat: ${heat}</div>
-                <div class="heat-track"><div class="heat-fill" style="width:${heat}%"></div></div>
+    function renderMetric2(metric) {
+        if (!metric2Summary || !metric2HitSymbols || !metric2SampleNote || !metric2Body || !metric2Cards) return;
+
+        metric2Body.innerHTML = '';
+        metric2Cards.innerHTML = '';
+
+        const baseDate = metric?.base_snapshot_date || '--';
+        const sampleSize = Number(metric?.sample_size || 0);
+        const evaluatedCount = Number(metric?.evaluated_count || 0);
+        const hits = Number(metric?.hits || 0);
+        const thresholdPct = Number(metric?.threshold_pct);
+        const details = Array.isArray(metric?.details) ? metric.details : [];
+        const hitSymbols = Array.isArray(metric?.hit_symbols) ? metric.hit_symbols : [];
+
+        if (evaluatedCount <= 0) {
+            metric2Summary.textContent = '命中 --/-- · 概率 --';
+            metric2HitSymbols.textContent = '命中 symbols: --';
+            metric2SampleNote.textContent = sampleSize > 0
+                ? `基于 ${baseDate} 涨幅榜Top${sampleSize} · 当前快照缺少有效次日涨跌幅`
+                : '样本信息: 缺少前一日涨幅榜快照';
+            return;
+        }
+
+        metric2Summary.textContent = `命中 ${hits}/${evaluatedCount} · 概率 ${formatPercent(metric?.probability_pct)}`;
+        metric2HitSymbols.textContent = `命中 symbols: ${
+            hitSymbols.length
+                ? hitSymbols.map((item) => `${item.symbol}(${formatChangeOrDash(item.next_change_pct)})`).join(', ')
+                : '--'
+        }`;
+        metric2SampleNote.textContent = `基于 ${baseDate} 涨幅榜Top${sampleSize} · 有效样本 ${evaluatedCount} · 阈值 ${formatChangeOrDash(thresholdPct)}`;
+
+        details.forEach((item) => {
+            const hitBadge = item.is_hit
+                ? '<span class="metric-hit-badge">YES</span>'
+                : '<span class="metric-miss-badge">NO</span>';
+            const nextChangeClass = Number(item.next_change_pct) <= thresholdPct ? 'rank-down' : 'rank-flat';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${item.prev_rank || '--'}</td>
+                <td class="px-4 py-3 font-semibold">${item.symbol || '--'}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatChangeOrDash(item.prev_change_pct)}</td>
+                <td class="px-4 py-3 text-right font-mono ${nextChangeClass}">${formatChangeOrDash(item.next_change_pct)}</td>
+                <td class="px-4 py-3">${hitBadge}</td>
             `;
-            top3Grid.appendChild(el);
+            metric2Body.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">昨排 #${item.prev_rank || '--'}</span>
+                    ${hitBadge}
+                </div>
+                <div class="font-bold">${item.symbol || '--'}</div>
+                <div class="mt-1 text-xs text-slate-500">昨日涨幅: ${formatChangeOrDash(item.prev_change_pct)}</div>
+                <div class="mt-1 text-xs ${nextChangeClass}">次日涨跌: ${formatChangeOrDash(item.next_change_pct)}</div>
+            `;
+            metric2Cards.appendChild(card);
         });
+    }
+
+    function renderMetric3(metric) {
+        if (
+            !metric3Summary || !metric3SampleNote || !metric3DistLabel
+            || !metric3DistNeg || !metric3DistMid || !metric3DistPos
+            || !metric3Body || !metric3Cards
+        ) {
+            return;
+        }
+
+        metric3Body.innerHTML = '';
+        metric3Cards.innerHTML = '';
+
+        const baseDate = metric?.base_snapshot_date || '--';
+        const sampleSize = Number(metric?.sample_size || 0);
+        const evaluatedCount = Number(metric?.evaluated_count || 0);
+        const details = Array.isArray(metric?.details) ? metric.details : [];
+
+        if (evaluatedCount <= 0) {
+            metric3Summary.textContent = '下跌占比 -- · <-10%占比 -- · >+10%占比 --';
+            metric3SampleNote.textContent = sampleSize > 0
+                ? `基于 ${baseDate} 涨幅榜Top${sampleSize} · 当前快照缺少48h有效样本`
+                : '样本信息: 缺少两天前涨幅榜快照';
+            metric3DistLabel.textContent = '--';
+            metric3DistNeg.style.width = '0%';
+            metric3DistMid.style.width = '0%';
+            metric3DistPos.style.width = '0%';
+            return;
+        }
+
+        metric3SampleNote.textContent = `基于 ${baseDate} 涨幅榜Top${sampleSize} · 有效样本 ${evaluatedCount}`;
+
+        const changes = details
+            .map((item) => Number(item.change_pct ?? item.return_pct))
+            .filter((val) => Number.isFinite(val));
+        const downCount = changes.filter((val) => val < 0).length;
+        const negCount = changes.filter((val) => val < -10).length;
+        const midCount = changes.filter((val) => val >= -10 && val <= 10).length;
+        const posCount = changes.filter((val) => val > 10).length;
+        const downPct = evaluatedCount > 0 ? (downCount * 100.0 / evaluatedCount) : 0;
+        const negPct = evaluatedCount > 0 ? (negCount * 100.0 / evaluatedCount) : 0;
+        const midPct = evaluatedCount > 0 ? (midCount * 100.0 / evaluatedCount) : 0;
+        const posPct = evaluatedCount > 0 ? (posCount * 100.0 / evaluatedCount) : 0;
+
+        metric3Summary.textContent = `下跌占比 ${formatPercent(downPct)} · <-10%占比 ${formatPercent(negPct)} · >+10%占比 ${formatPercent(posPct)}`;
+
+        metric3DistNeg.style.width = `${negPct.toFixed(2)}%`;
+        metric3DistMid.style.width = `${midPct.toFixed(2)}%`;
+        metric3DistPos.style.width = `${posPct.toFixed(2)}%`;
+        metric3DistLabel.textContent = `<-10% ${negCount} · -10~+10% ${midCount} · >+10% ${posCount}`;
+
+        const sortedDetails = [...details].sort((a, b) => {
+            const ar = Number(a?.change_pct ?? a?.return_pct);
+            const br = Number(b?.change_pct ?? b?.return_pct);
+            if (Number.isFinite(ar) && Number.isFinite(br)) return ar - br;
+            if (Number.isFinite(ar)) return -1;
+            if (Number.isFinite(br)) return 1;
+            return Number(a?.prev_rank || 9999) - Number(b?.prev_rank || 9999);
+        });
+
+        sortedDetails.forEach((item) => {
+            const chgNum = Number(item.change_pct ?? item.return_pct);
+            const retClass = !Number.isFinite(chgNum)
+                ? 'rank-flat'
+                : (chgNum < 0 ? 'rank-down' : (chgNum > 0 ? 'rank-up' : 'rank-flat'));
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${item.prev_rank || '--'}</td>
+                <td class="px-4 py-3 font-semibold">${item.symbol || '--'}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(item.entry_price)}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(item.current_price)}</td>
+                <td class="px-4 py-3 text-right font-mono ${retClass}">${formatChangeOrDash(item.change_pct ?? item.return_pct)}</td>
+            `;
+            metric3Body.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">昨排 #${item.prev_rank || '--'}</span>
+                    <span class="${retClass} font-bold">${formatChangeOrDash(item.change_pct ?? item.return_pct)}</span>
+                </div>
+                <div class="font-bold">${item.symbol || '--'}</div>
+                <div class="mt-1 text-xs text-slate-500">进场价: ${formatPrice(item.entry_price)}</div>
+                <div class="mt-1 text-xs text-slate-500">48h价: ${formatPrice(item.current_price)}</div>
+                <div class="mt-1 text-xs ${retClass}">48h涨跌幅: ${formatChangeOrDash(item.change_pct ?? item.return_pct)}</div>
+            `;
+            metric3Cards.appendChild(card);
+        });
+    }
+
+    function renderMetricsHistory(rows) {
+        if (!metricsHistoryBody || !metricsHistoryCards) return;
+
+        metricsHistoryBody.innerHTML = '';
+        metricsHistoryCards.innerHTML = '';
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+            metricsHistoryBody.innerHTML = '<tr><td class="px-4 py-3 text-slate-500" colspan="6">暂无数据</td></tr>';
+            return;
+        }
+
+        rows.forEach((item) => {
+            const m1 = formatPercent(item.m1_prob_pct);
+            const m2 = formatPercent(item.m2_prob_pct);
+            const m3Neg = formatPercent(item.m3_lt_neg10_pct);
+            const m3Pos = formatPercent(item.m3_gt_pos10_pct);
+            const evalCount = Number(item.m3_eval_count || 0);
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${item.snapshot_date || '--'}</td>
+                <td class="px-4 py-3 text-right font-mono">${m1}</td>
+                <td class="px-4 py-3 text-right font-mono">${m2}</td>
+                <td class="px-4 py-3 text-right font-mono">${m3Neg}</td>
+                <td class="px-4 py-3 text-right font-mono">${m3Pos}</td>
+                <td class="px-4 py-3 text-right font-mono">${evalCount}</td>
+            `;
+            metricsHistoryBody.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">${item.snapshot_date || '--'}</span>
+                    <span class="text-xs text-slate-500">样本 ${evalCount}</span>
+                </div>
+                <div class="mt-1 text-xs text-slate-500">M1 进跌幅榜: ${m1}</div>
+                <div class="mt-1 text-xs text-slate-500">M2 次日&lt;-10%: ${m2}</div>
+                <div class="mt-1 text-xs text-slate-500">M3 &lt;-10%: ${m3Neg}</div>
+                <div class="mt-1 text-xs text-slate-500">M3 &gt;+10%: ${m3Pos}</div>
+            `;
+            metricsHistoryCards.appendChild(card);
+        });
+    }
+
+    async function loadMetricsHistory() {
+        try {
+            const response = await fetch('/api/leaderboard/metrics-history?limit=30');
+            const data = await response.json();
+            renderMetricsHistory(Array.isArray(data.rows) ? data.rows : []);
+        } catch (err) {
+            renderMetricsHistory([]);
+        }
     }
 
     function renderRows(rows) {
@@ -671,7 +1088,8 @@
             tr.innerHTML = `
                 <td class="px-4 py-3 font-mono">${idx + 1}</td>
                 <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
-                <td class="px-4 py-3 text-right rank-up font-bold">+${row.change.toFixed(2)}%</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
+                <td class="px-4 py-3 text-right rank-up font-bold">${formatChange(row.change)}</td>
                 <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
                 <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
@@ -683,14 +1101,60 @@
             card.innerHTML = `
                 <div class="flex justify-between items-center mb-2">
                     <span class="font-mono text-xs">#${idx + 1}</span>
-                    <span class="rank-up font-bold">+${row.change.toFixed(2)}%</span>
+                    <span class="rank-up font-bold">${formatChange(row.change)}</span>
                 </div>
                 <div class="font-bold">${row.symbol} ${held}</div>
+                <div class="mt-1 text-xs text-slate-500">现价: ${formatPrice(row.last_price ?? row.price)}</div>
                 <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
                 <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
                 <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
             `;
             cards.appendChild(card);
+        });
+    }
+
+    function renderLosersRows(rows) {
+        losersTableBody.innerHTML = '';
+        losersCards.innerHTML = '';
+
+        rows.forEach((row, idx) => {
+            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
+            const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
+            const reversal = row.was_prev_gainer_top
+                ? `<span class="reversal-badge">昨涨#${row.prev_gainer_rank}</span>`
+                : '<span class="text-xs text-slate-400">--</span>';
+            const reversalText = row.was_prev_gainer_top
+                ? `是 (昨涨#${row.prev_gainer_rank})`
+                : '否';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${idx + 1}</td>
+                <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
+                <td class="px-4 py-3">${reversal}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
+                <td class="px-4 py-3 text-right rank-down font-bold">${formatChange(row.change)}</td>
+                <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
+                <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
+            `;
+            losersTableBody.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">#${idx + 1}</span>
+                    <span class="rank-down font-bold">${formatChange(row.change)}</span>
+                </div>
+                <div class="font-bold">${row.symbol} ${held}</div>
+                <div class="mt-1 text-xs text-slate-500">昨涨幅榜Top10: ${reversalText}</div>
+                <div class="mt-1 text-xs text-slate-500">现价: ${formatPrice(row.last_price ?? row.price)}</div>
+                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
+                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
+                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
+            `;
+            losersCards.appendChild(card);
         });
     }
 
@@ -727,9 +1191,14 @@
                 metricTop.textContent = '--';
                 metricDate.textContent = '--';
                 metricTime.textContent = '--';
-                top3Grid.innerHTML = '';
                 tableBody.innerHTML = '';
                 cards.innerHTML = '';
+                losersTableBody.innerHTML = '';
+                losersCards.innerHTML = '';
+                renderLosersReversal(null);
+                renderMetric2(null);
+                renderMetric3(null);
+                renderMetricsHistory([]);
                 return;
             }
 
@@ -740,10 +1209,19 @@
             lastUpdated.textContent = data.snapshot_time;
 
             const rows = data.rows || [];
-            renderTop3(rows);
+            const losersRows = data.losers_rows || [];
             renderRows(rows);
+            renderLosersRows(losersRows);
+            renderLosersReversal(data.losers_reversal || null);
+            renderMetric2(data.next_day_drop_metric || null);
+            renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
+            await loadMetricsHistory();
         } catch (err) {
             statusText.textContent = `请求异常: ${err.message || err}`;
+            renderLosersReversal(null);
+            renderMetric2(null);
+            renderMetric3(null);
+            renderMetricsHistory([]);
         } finally {
             btnRefresh.disabled = false;
             lucide.createIcons();

@@ -530,7 +530,7 @@ class TradeDataScheduler:
             logger.error(f"午间风控检查失败: {e}")
 
     def _build_top_gainers_snapshot(self):
-        """构建涨幅榜快照（不处理锁与冷却）。"""
+        """构建涨跌幅榜快照（不处理锁与冷却）。"""
         now_utc = datetime.now(timezone.utc)
         midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
@@ -597,10 +597,12 @@ class TradeDataScheduler:
                 'symbol': symbol,
                 'change': pct_change,
                 'volume': item['quote_volume'],
+                'last_price': item['last_price'],
             })
 
         leaderboard.sort(key=lambda x: x['change'], reverse=True)
         top_list = leaderboard[:self.leaderboard_top_n]
+        losers_list = sorted(leaderboard, key=lambda x: x['change'])[:self.leaderboard_top_n]
 
         return {
             "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
@@ -609,7 +611,9 @@ class TradeDataScheduler:
             "candidates": len(candidates),
             "effective": len(leaderboard),
             "top": len(top_list),
-            "rows": top_list
+            "rows": top_list,
+            "losers_rows": losers_list,
+            "all_rows": leaderboard,
         }
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
@@ -633,7 +637,7 @@ class TradeDataScheduler:
             self._release_api_job_slot()
 
     def send_morning_top_gainers(self):
-        """每天早上发送币安合约涨幅榜（按UTC当日开盘到当前涨幅）"""
+        """每天早上发送币安合约涨跌幅榜（按UTC当日开盘到当前涨跌幅）"""
         result = self.get_top_gainers_snapshot(source="晨间涨幅榜")
         if not result.get("ok"):
             logger.warning(
@@ -649,11 +653,27 @@ class TradeDataScheduler:
         except Exception as e:
             logger.error(f"保存涨幅榜快照失败: {e}")
 
-        title = f"【币安合约市场涨幅榜 Top {result['top']}】"
+        try:
+            metrics_payload = self.db.upsert_leaderboard_daily_metrics_for_date(
+                str(result.get("snapshot_date"))
+            )
+            if metrics_payload:
+                logger.info(
+                    "涨跌幅指标已保存: "
+                    f"date={result.get('snapshot_date')}, "
+                    f"m1={metrics_payload.get('metric1', {}).get('probability_pct')}, "
+                    f"m2={metrics_payload.get('metric2', {}).get('probability_pct')}, "
+                    f"m3_eval={metrics_payload.get('metric3', {}).get('evaluated_count')}"
+                )
+        except Exception as e:
+            logger.error(f"保存涨跌幅指标失败: {e}")
+
+        title = f"【币安合约市场涨跌幅榜 Top {result['top']}】"
         content = (
-            "### 币安合约市场晨间涨幅榜\n\n"
+            "### 币安合约市场晨间涨跌幅榜\n\n"
             f"**更新时间:** {result['snapshot_time']} (UTC+8)\n"
             f"**计算区间:** {result['window_start_utc']} UTC 至当前\n\n"
+            "#### 涨幅榜 Top10\n\n"
             "| 排名 | 币种 | 涨幅 | 24h成交额 |\n"
             "|:---:|:---:|:---:|:---:|\n"
         )
@@ -664,12 +684,26 @@ class TradeDataScheduler:
             volume = f"{int(row['volume'] / 1_000_000)}M"
             content += f"| {i} | {symbol} | {change} | {volume} |\n"
 
+        losers_rows = result.get("losers_rows", [])
+        if losers_rows:
+            content += (
+                "\n#### 跌幅榜 Top10\n\n"
+                "| 排名 | 币种 | 跌幅 | 24h成交额 |\n"
+                "|:---:|:---:|:---:|:---:|\n"
+            )
+            for i, row in enumerate(losers_rows, start=1):
+                symbol = row['symbol']
+                change = f"{row['change']:.2f}%"
+                volume = f"{int(row['volume'] / 1_000_000)}M"
+                content += f"| {i} | {symbol} | {change} | {volume} |\n"
+
         send_server_chan_notification(title, content)
         logger.info(
             "晨间涨幅榜已发送: "
             f"candidates={result['candidates']}, "
             f"effective={result['effective']}, "
-            f"top={result['top']}"
+            f"top={result['top']}, "
+            f"losers_top={len(result.get('losers_rows', []))}"
         )
 
     @staticmethod
