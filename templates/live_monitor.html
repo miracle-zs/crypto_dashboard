@@ -639,6 +639,18 @@
                             <button id="btn-view-balance" class="px-3 py-1 text-[11px] rounded text-gray-400 hover:text-white transition-all">账户余额</button>
                         </div>
 
+                        <div class="flex items-center gap-1 bg-slate-800 rounded p-1">
+                            <span class="text-[10px] text-black px-1">目标/日</span>
+                            <input
+                                id="equity-daily-target"
+                                type="number"
+                                min="0"
+                                step="100"
+                                value="1000"
+                                class="w-20 px-2 py-1 text-[11px] rounded bg-slate-900 border border-amber-700/60 text-black font-mono text-right focus:outline-none focus:border-amber-400"
+                            />
+                        </div>
+
                         <button id="btn-toggle-markers" class="px-2 py-1 text-[11px] rounded bg-cyan-600 text-white font-bold transition-all">标记:开</button>
 
                         <div class="flex flex-wrap justify-center gap-1 text-[11px] w-full md:w-auto">
@@ -896,6 +908,7 @@
         let lastRequestedTimeRange = '';
         let maxDDWindow = null;
         let showMarkers = true;
+        const EQUITY_DAILY_TARGET_KEY = 'monitorEquityDailyTarget';
 
         const timeRangeButtons = document.querySelectorAll('.time-range-btn');
         const btnViewEquity = document.getElementById('btn-view-equity');
@@ -903,6 +916,13 @@
         const btnViewBalance = document.getElementById('btn-view-balance');
         const btnToggleMarkers = document.getElementById('btn-toggle-markers');
         const btnThemeToggle = document.getElementById('btn-theme-toggle');
+        const equityDailyTargetInput = document.getElementById('equity-daily-target');
+
+        function getDailyTargetValue() {
+            const value = Number(equityDailyTargetInput?.value);
+            if (!Number.isFinite(value) || value < 0) return 1000;
+            return value;
+        }
 
         // Theme Handling
         let isDarkMode = localStorage.getItem('theme') === 'dark';
@@ -943,6 +963,26 @@
                 isDarkMode = !isDarkMode;
                 localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
                 applyTheme(isDarkMode);
+            });
+        }
+
+        if (equityDailyTargetInput) {
+            const savedTarget = localStorage.getItem(EQUITY_DAILY_TARGET_KEY);
+            if (savedTarget !== null && savedTarget !== '') {
+                const parsed = Number(savedTarget);
+                if (Number.isFinite(parsed) && parsed >= 0) {
+                    equityDailyTargetInput.value = String(parsed);
+                }
+            }
+            const onTargetChanged = () => {
+                const target = getDailyTargetValue();
+                localStorage.setItem(EQUITY_DAILY_TARGET_KEY, String(target));
+                fadeChart();
+                setTimeout(updateChart, 120);
+            };
+            equityDailyTargetInput.addEventListener('change', onTargetChanged);
+            equityDailyTargetInput.addEventListener('keyup', (event) => {
+                if (event.key === 'Enter') onTargetChanged();
             });
         }
 
@@ -1435,10 +1475,36 @@
                 if (currentView === 'percent' && initialEquity && initialEquity !== 0) {
                     val = ((val - initialEquity) / initialEquity) * 100;
                 }
-                return { x: d.time, y: currentView === 'percent' ? val.toFixed(4) : val.toFixed(2) };
+                return { x: d.time, y: currentView === 'percent' ? Number(val.toFixed(4)) : Number(val.toFixed(2)) };
             });
 
             const numericSeries = seriesData.map(p => ({ x: p.x, y: Number(p.y) })).filter(p => Number.isFinite(p.y));
+            const dailyTarget = getDailyTargetValue();
+            const firstX = numericSeries.length > 0 ? numericSeries[0].x : null;
+            const firstY = numericSeries.length > 0 ? numericSeries[0].y : null;
+            const dayMs = 24 * 60 * 60 * 1000;
+            const dailyTargetForPercent = initialEquity && initialEquity !== 0
+                ? (dailyTarget / initialEquity) * 100
+                : 0;
+            const idealSeriesData = (firstX !== null && firstY !== null && dailyTarget >= 0)
+                ? numericSeries.map((point) => {
+                    const elapsedDays = Math.max(0, (point.x - firstX) / dayMs);
+                    const idealValue = currentView === 'percent'
+                        ? dailyTargetForPercent * elapsedDays
+                        : firstY + dailyTarget * elapsedDays;
+                    return {
+                        x: point.x,
+                        y: currentView === 'percent' ? Number(idealValue.toFixed(4)) : Number(idealValue.toFixed(2))
+                    };
+                })
+                : [];
+            const showIdeal = currentView === 'equity' && idealSeriesData.length > 0;
+            const primaryName = currentView === 'percent' ? 'Return %' : 'Balance';
+            const idealName = `Ideal (+$${dailyTarget.toLocaleString()}/day)`;
+            const chartSeries = [
+                { name: primaryName, type: 'area', data: seriesData },
+                ...(showIdeal ? [{ name: idealName, type: 'line', data: idealSeriesData }] : [])
+            ];
 
             const ddAnnotation = maxDDWindow ? {
                 xaxis: [
@@ -1613,7 +1679,7 @@
                 const options = {
                     chart: { type: 'area', height: '100%', background: 'transparent', toolbar: { show: false } },
                     theme: { mode: themeMode },
-                    series: [{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }],
+                    series: chartSeries,
                     xaxis: {
                         type: 'datetime',
                         labels: {
@@ -1645,14 +1711,28 @@
                         }
                     },
                     yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b', fontSize: '10px' } } },
-                    stroke: { curve: 'smooth', width: 2, colors: ['#0ea5e9'] },
+                    stroke: {
+                        curve: 'smooth',
+                        width: showIdeal ? [2, 3] : [2],
+                        dashArray: showIdeal ? [0, 7] : [0],
+                        colors: showIdeal ? ['#0ea5e9', '#8b5cf6'] : ['#0ea5e9']
+                    },
                     fill: {
-                        type: 'gradient',
+                        type: showIdeal ? ['gradient', 'solid'] : ['gradient'],
+                        opacity: showIdeal ? [0.5, 1] : [0.5],
                         gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] }
                     },
+                    colors: showIdeal ? ['#0ea5e9', '#8b5cf6'] : ['#0ea5e9'],
+                    markers: { size: 0, hover: { size: 5 } },
                     dataLabels: { enabled: false },
                     grid: { borderColor: gridColor, strokeDashArray: 2 },
                     annotations: finalAnnotations,
+                    legend: {
+                        show: true,
+                        position: 'top',
+                        horizontalAlign: 'left',
+                        labels: { colors: isDark ? '#cbd5e1' : '#475569' }
+                    },
                     tooltip: {
                         x: {
                             formatter: function(value) {
@@ -1674,9 +1754,21 @@
             } else {
                 chart.updateOptions({
                     yaxis: { labels: { formatter: yAxisFormatter, style: { colors: '#64748b', fontSize: '10px' } } },
-                    annotations: finalAnnotations
+                    annotations: finalAnnotations,
+                    stroke: {
+                        curve: 'smooth',
+                        width: showIdeal ? [2, 3] : [2],
+                        dashArray: showIdeal ? [0, 7] : [0],
+                        colors: showIdeal ? ['#0ea5e9', '#8b5cf6'] : ['#0ea5e9']
+                    },
+                    fill: {
+                        type: showIdeal ? ['gradient', 'solid'] : ['gradient'],
+                        opacity: showIdeal ? [0.5, 1] : [0.5],
+                        gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] }
+                    },
+                    colors: showIdeal ? ['#0ea5e9', '#8b5cf6'] : ['#0ea5e9']
                 });
-                chart.updateSeries([{ name: currentView === 'percent' ? 'Return %' : 'Balance', data: seriesData }]);
+                chart.updateSeries(chartSeries);
             }
         }
 
