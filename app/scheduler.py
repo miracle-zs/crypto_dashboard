@@ -4,6 +4,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
@@ -90,6 +91,8 @@ class TradeDataScheduler:
         self.leaderboard_top_n = _env_int('LEADERBOARD_TOP_N', 10, minimum=1)
         self.leaderboard_min_quote_volume = _env_float('LEADERBOARD_MIN_QUOTE_VOLUME', 50_000_000, minimum=0.0)
         self.leaderboard_max_symbols = _env_int('LEADERBOARD_MAX_SYMBOLS', 120, minimum=0)
+        self.leaderboard_kline_workers = _env_int('LEADERBOARD_KLINE_WORKERS', 6, minimum=1)
+        self.leaderboard_weight_budget_per_minute = _env_int('LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.leaderboard_alert_hour = _env_int('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
         self.leaderboard_alert_minute = _env_int('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
         self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
@@ -739,34 +742,74 @@ class TradeDataScheduler:
         leaderboard = []
         progress_step = 20
         total_candidates = len(candidates)
-        for idx, item in enumerate(candidates, start=1):
-            if self._is_api_cooldown_active(source='涨幅榜-逐币种计算'):
-                break
-
-            symbol = item['symbol']
-            open_price = self.processor.get_price_change_from_utc_start(
-                symbol=symbol,
-                timestamp=midnight_utc_ms,
-                client=self.processor.client
+        if total_candidates > 0:
+            # Binance Futures REST REQUEST_WEIGHT limit: 2400/min.
+            # Klines(limit=1) weight=1; we reserve part of budget for other jobs and keep a conservative cap.
+            min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
+            per_worker_rpm = max(1.0, 60.0 / min_interval)  # each request here costs weight=1
+            workers_by_budget = max(1, int(self.leaderboard_weight_budget_per_minute // per_worker_rpm))
+            worker_count = min(total_candidates, self.leaderboard_kline_workers, workers_by_budget)
+            estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
+            estimated_total_weight = 1 + 40 + total_candidates  # exchangeInfo + 24hr ticker + per-symbol klines
+            logger.info(
+                "晨间涨幅榜并发计划: "
+                f"workers={worker_count}, "
+                f"min_interval={min_interval:.2f}s, "
+                f"budget={self.leaderboard_weight_budget_per_minute}/min, "
+                f"est_peak={estimated_peak_weight_per_min}/min, "
+                f"est_total_weight={estimated_total_weight}"
             )
-            if open_price is None or open_price <= 0:
-                continue
 
-            pct_change = (item['last_price'] / open_price - 1) * 100
-            leaderboard.append({
-                'symbol': symbol,
-                'change': pct_change,
-                'volume': item['quote_volume'],
-                'last_price': item['last_price'],
-            })
+            thread_local = threading.local()
 
-            if idx % progress_step == 0 or idx == total_candidates:
-                logger.info(
-                    "晨间涨幅榜进度: "
-                    f"{idx}/{total_candidates}, "
-                    f"effective={len(leaderboard)}, "
-                    f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+            def _kline_task(item: dict):
+                if self._is_api_cooldown_active(source='涨幅榜-逐币种计算'):
+                    return item, None
+                worker_client = getattr(thread_local, "client", None)
+                if worker_client is None:
+                    worker_client = self.processor._create_worker_client()
+                    thread_local.client = worker_client
+                open_price = self.processor.get_price_change_from_utc_start(
+                    symbol=item['symbol'],
+                    timestamp=midnight_utc_ms,
+                    client=worker_client
                 )
+                return item, open_price
+
+            processed = 0
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(_kline_task, item) for item in candidates]
+                for future in as_completed(futures):
+                    processed += 1
+                    try:
+                        item, open_price = future.result()
+                    except Exception as exc:
+                        logger.warning(f"涨幅榜逐币种计算异常: {exc}")
+                        if processed % progress_step == 0 or processed == total_candidates:
+                            logger.info(
+                                "晨间涨幅榜进度: "
+                                f"{processed}/{total_candidates}, "
+                                f"effective={len(leaderboard)}, "
+                                f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+                            )
+                        continue
+
+                    if open_price is not None and open_price > 0:
+                        pct_change = (item['last_price'] / open_price - 1) * 100
+                        leaderboard.append({
+                            'symbol': item['symbol'],
+                            'change': pct_change,
+                            'volume': item['quote_volume'],
+                            'last_price': item['last_price'],
+                        })
+
+                    if processed % progress_step == 0 or processed == total_candidates:
+                        logger.info(
+                            "晨间涨幅榜进度: "
+                            f"{processed}/{total_candidates}, "
+                            f"effective={len(leaderboard)}, "
+                            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+                        )
 
         leaderboard.sort(key=lambda x: x['change'], reverse=True)
         top_list = leaderboard[:self.leaderboard_top_n]
