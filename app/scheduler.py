@@ -556,6 +556,7 @@ class TradeDataScheduler:
 
     def _build_top_gainers_snapshot(self):
         """构建涨跌幅榜快照（不处理锁与冷却）。"""
+        stage_started_at = time.perf_counter()
         now_utc = datetime.now(timezone.utc)
         midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
@@ -602,9 +603,17 @@ class TradeDataScheduler:
         candidates.sort(key=lambda x: x['quote_volume'], reverse=True)
         if self.leaderboard_max_symbols > 0:
             candidates = candidates[:self.leaderboard_max_symbols]
+        logger.info(
+            "晨间涨幅榜候选统计: "
+            f"candidates={len(candidates)}, "
+            f"min_quote_volume={self.leaderboard_min_quote_volume:.0f}, "
+            f"max_symbols={self.leaderboard_max_symbols}"
+        )
 
         leaderboard = []
-        for item in candidates:
+        progress_step = 20
+        total_candidates = len(candidates)
+        for idx, item in enumerate(candidates, start=1):
             if self._is_api_cooldown_active(source='涨幅榜-逐币种计算'):
                 break
 
@@ -625,11 +634,19 @@ class TradeDataScheduler:
                 'last_price': item['last_price'],
             })
 
+            if idx % progress_step == 0 or idx == total_candidates:
+                logger.info(
+                    "晨间涨幅榜进度: "
+                    f"{idx}/{total_candidates}, "
+                    f"effective={len(leaderboard)}, "
+                    f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+                )
+
         leaderboard.sort(key=lambda x: x['change'], reverse=True)
         top_list = leaderboard[:self.leaderboard_top_n]
         losers_list = sorted(leaderboard, key=lambda x: x['change'])[:self.leaderboard_top_n]
 
-        return {
+        snapshot = {
             "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
             "snapshot_time": datetime.now(UTC8).strftime('%Y-%m-%d %H:%M:%S'),
             "window_start_utc": midnight_utc.strftime('%Y-%m-%d %H:%M:%S'),
@@ -640,6 +657,14 @@ class TradeDataScheduler:
             "losers_rows": losers_list,
             "all_rows": leaderboard,
         }
+        logger.info(
+            "晨间涨幅榜快照构建完成: "
+            f"candidates={snapshot['candidates']}, "
+            f"effective={snapshot['effective']}, "
+            f"top={snapshot['top']}, "
+            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+        )
+        return snapshot
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
         """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
@@ -663,7 +688,20 @@ class TradeDataScheduler:
 
     def send_morning_top_gainers(self):
         """每天早上发送币安合约涨跌幅榜（按UTC当日开盘到当前涨跌幅）"""
+        started_at = time.perf_counter()
+        logger.info(
+            "晨间涨幅榜任务开始执行: "
+            f"schedule={self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d}"
+        )
         result = self.get_top_gainers_snapshot(source="晨间涨幅榜")
+        logger.info(
+            "晨间涨幅榜快照结果: "
+            f"ok={result.get('ok')}, "
+            f"reason={result.get('reason', '')}, "
+            f"candidates={result.get('candidates', 0)}, "
+            f"effective={result.get('effective', 0)}, "
+            f"top={result.get('top', 0)}"
+        )
         if not result.get("ok"):
             logger.warning(
                 f"晨间涨幅榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
@@ -728,7 +766,8 @@ class TradeDataScheduler:
             f"candidates={result['candidates']}, "
             f"effective={result['effective']}, "
             f"top={result['top']}, "
-            f"losers_top={len(result.get('losers_rows', []))}"
+            f"losers_top={len(result.get('losers_rows', []))}, "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
         )
 
     @staticmethod
