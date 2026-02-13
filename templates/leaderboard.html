@@ -581,7 +581,7 @@
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
                 <div class="snapshot-stat">
-                    <div class="stat-label">Top Size</div>
+                    <div class="stat-label">Top Count</div>
                     <div id="metric-top" class="stat-value">--</div>
                 </div>
                 <div class="snapshot-stat">
@@ -600,7 +600,8 @@
         <div class="glass-panel overflow-hidden panel-reveal">
             <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i> FULL LEADERBOARD
+                    <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i>
+                    <span id="gainers-title">GAINERS TOP N</span>
                 </h3>
                 <span class="text-[11px] text-slate-500">Daily snapshot @ 07:40</span>
             </div>
@@ -628,7 +629,8 @@
         <div class="glass-panel overflow-hidden panel-reveal">
             <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i> LOSERS TOP 10
+                    <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i>
+                    <span id="losers-title">LOSERS TOP N</span>
                 </h3>
                 <div class="text-right">
                     <div id="losers-hit-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
@@ -770,6 +772,8 @@
     const metricTop = document.getElementById('metric-top');
     const metricDate = document.getElementById('metric-date');
     const metricTime = document.getElementById('metric-time');
+    const gainersTitle = document.getElementById('gainers-title');
+    const losersTitle = document.getElementById('losers-title');
     const tableBody = document.getElementById('leaderboard-body');
     const cards = document.getElementById('leaderboard-cards');
     const losersTableBody = document.getElementById('losers-body');
@@ -1191,6 +1195,8 @@
                 metricTop.textContent = '--';
                 metricDate.textContent = '--';
                 metricTime.textContent = '--';
+                if (gainersTitle) gainersTitle.textContent = 'GAINERS TOP N';
+                if (losersTitle) losersTitle.textContent = 'LOSERS TOP N';
                 tableBody.innerHTML = '';
                 cards.innerHTML = '';
                 losersTableBody.innerHTML = '';
@@ -1205,6 +1211,10 @@
             metricTop.textContent = data.top;
             metricDate.textContent = data.snapshot_date;
             metricTime.textContent = (data.snapshot_time || '').split(' ').slice(1).join(' ') || '--';
+            const gainersTopCount = Number(data.gainers_top_count ?? data.top ?? 0);
+            const losersTopCount = Number(data.losers_top_count ?? (data.losers_rows || []).length ?? 0);
+            if (gainersTitle) gainersTitle.textContent = `GAINERS TOP ${gainersTopCount || 'N'}`;
+            if (losersTitle) losersTitle.textContent = `LOSERS TOP ${losersTopCount || 'N'}`;
             statusText.textContent = `快照日期: ${data.snapshot_date} · 计算区间: ${data.window_start_utc} UTC 至快照时刻`;
             lastUpdated.textContent = data.snapshot_time;
 

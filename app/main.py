@@ -305,6 +305,10 @@ async def get_leaderboard_snapshot(
 
     snapshot["rows"] = enriched_rows
     snapshot["losers_rows"] = enriched_losers_rows
+    # 语义更清晰的别名字段（兼容保留旧字段）
+    snapshot["gainers_top_rows"] = enriched_rows
+    snapshot["gainers_top_count"] = len(enriched_rows)
+    snapshot["losers_top_count"] = len(enriched_losers_rows)
     metric_payload = await loop.run_in_executor(
         None, db.get_leaderboard_daily_metrics, str(snapshot.get("snapshot_date"))
     )
