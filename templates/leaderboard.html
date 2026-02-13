@@ -385,6 +385,53 @@
             color: var(--text);
         }
 
+        .board-switch-btn {
+            flex: 1;
+            border: 2px solid var(--border);
+            border-radius: 999px;
+            padding: 7px 10px;
+            font-size: 11px;
+            font-family: 'Space Mono', monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: var(--panel);
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .board-switch-btn.active {
+            background: var(--accent);
+            color: #111827;
+            border-color: var(--border);
+        }
+
+        .metric-tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .metric-tab-btn {
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 11px;
+            font-family: 'Space Mono', monospace;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: var(--panel);
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .metric-tab-btn.active {
+            background: color-mix(in srgb, var(--accent) 20%, var(--panel) 80%);
+            color: var(--text);
+        }
+
+        .metric-tab-panel { display: none; }
+        .metric-tab-panel.active { display: block; }
+
         .snap-select {
             border: 2px solid var(--border);
             border-radius: 999px;
@@ -604,6 +651,10 @@
         .theme-brutal .border-slate-700,
         .theme-brutal .border-slate-800,
         .theme-brutal .divide-gray-800 { border-color: var(--border) !important; }
+
+        @media (max-width: 767px) {
+            .mobile-board-hidden { display: none; }
+        }
     </style>
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
@@ -641,13 +692,14 @@
     <div class="ctx-main" id="snapshot-context-main">Snapshot: --</div>
     <div class="ctx-sub" id="snapshot-context-sub">Top -- · Window --</div>
 </div>
-<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
-    <div class="lg:col-span-4 space-y-4">
-        <div class="glass-panel panel-tier-subtle p-4 panel-reveal">
-            <div class="panel-title">
-                <strong>SNAPSHOT CONTROL</strong>
-            </div>
-            <div class="flex items-center gap-2 mt-3">
+<div class="space-y-6 mt-4">
+    <div class="glass-panel panel-tier-subtle p-4 panel-reveal">
+        <div class="panel-title mb-3">
+            <strong>SNAPSHOT CONTROL</strong>
+            <span class="panel-meta">top bar</span>
+        </div>
+        <div class="flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between">
+            <div class="flex items-center gap-2 w-full xl:max-w-md">
                 <select id="snapshot-date" class="snap-select w-full">
                     <option value="">LATEST</option>
                 </select>
@@ -655,15 +707,7 @@
                     <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i>REFRESH
                 </button>
             </div>
-            <div id="status-text" class="text-xs text-slate-500 mt-3">等待加载历史快照...</div>
-        </div>
-
-        <div class="glass-panel panel-tier-subtle p-4 panel-reveal">
-            <div class="panel-title mb-3">
-                <strong>SNAPSHOT META</strong>
-                <span class="panel-meta">compact view</span>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
+            <div class="grid grid-cols-3 gap-3 w-full xl:w-auto xl:min-w-[420px]">
                 <div class="snapshot-stat">
                     <div class="stat-label">Top Count</div>
                     <div id="metric-top" class="stat-value">--</div>
@@ -678,171 +722,215 @@
                 </div>
             </div>
         </div>
+        <div id="status-text" class="text-xs text-slate-500 mt-3">等待加载历史快照...</div>
     </div>
 
-    <div class="lg:col-span-8 space-y-4">
-        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
-            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i>
-                    <span id="gainers-title">GAINERS TOP N</span>
-                </h3>
-                <span class="text-[11px] text-slate-500">Daily snapshot @ 07:40</span>
-            </div>
-
-            <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[980px]">
-                    <thead>
-                    <tr>
-                        <th class="px-4 py-3">Rank</th>
-                        <th class="px-4 py-3">Symbol</th>
-                        <th class="px-4 py-3 text-right">Price</th>
-                        <th class="px-4 py-3 text-right">Change</th>
-                        <th class="px-4 py-3 text-right">Vs Yesterday</th>
-                        <th class="px-4 py-3 text-right">Appear 7D</th>
-                        <th class="px-4 py-3 text-right">24h Quote Volume</th>
-                    </tr>
-                    </thead>
-                    <tbody id="leaderboard-body"></tbody>
-                </table>
-            </div>
-
-            <div id="leaderboard-cards" class="md:hidden p-3 space-y-3"></div>
+    <div class="section-label">CORE LEADERBOARD</div>
+    <div class="space-y-3">
+        <div class="md:hidden flex items-center gap-2">
+            <button id="btn-mobile-gainers" class="board-switch-btn active">Gainers</button>
+            <button id="btn-mobile-losers" class="board-switch-btn">Losers</button>
         </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div id="panel-gainers" class="panel-reveal">
+                <div class="glass-panel panel-tier-main overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                        <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                            <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i>
+                            <span id="gainers-title">GAINERS TOP N</span>
+                        </h3>
+                        <span class="text-[11px] text-slate-500">Daily snapshot @ 07:40</span>
+                    </div>
 
-        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
-            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i>
-                    <span id="losers-title">LOSERS TOP N</span>
-                </h3>
-                <div class="text-right">
-                    <div id="losers-hit-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
-                    <div class="text-[11px] text-slate-500">Daily snapshot @ 07:40</div>
-                </div>
-            </div>
-            <div id="losers-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
-                命中 symbols: --
-            </div>
+                    <div class="hidden md:block overflow-x-auto">
+                        <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                            <thead>
+                            <tr>
+                                <th class="px-4 py-3">Rank</th>
+                                <th class="px-4 py-3">Symbol</th>
+                                <th class="px-4 py-3 text-right">Price</th>
+                                <th class="px-4 py-3 text-right">Change</th>
+                                <th class="px-4 py-3 text-right">Vs Yesterday</th>
+                                <th class="px-4 py-3 text-right">Appear 7D</th>
+                                <th class="px-4 py-3 text-right">24h Quote Volume</th>
+                            </tr>
+                            </thead>
+                            <tbody id="leaderboard-body"></tbody>
+                        </table>
+                    </div>
 
-            <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
-                    <thead>
-                    <tr>
-                        <th class="px-4 py-3">Rank</th>
-                        <th class="px-4 py-3">Symbol</th>
-                        <th class="px-4 py-3 text-right">Price</th>
-                        <th class="px-4 py-3 text-right">Change</th>
-                        <th class="px-4 py-3 text-right">Vs Yesterday</th>
-                        <th class="px-4 py-3 text-right">Appear 7D</th>
-                        <th class="px-4 py-3 text-right">24h Quote Volume</th>
-                        <th class="px-4 py-3">Prev Gainer</th>
-                    </tr>
-                    </thead>
-                    <tbody id="losers-body"></tbody>
-                </table>
-            </div>
-
-            <div id="losers-cards" class="md:hidden p-3 space-y-3"></div>
-        </div>
-
-        <div class="glass-panel overflow-hidden panel-reveal">
-            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="target" class="mr-2 w-4 h-4 text-orange-500"></i> NEXT-DAY &lt;-10% CHECK
-                </h3>
-                <div id="metric2-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
-            </div>
-            <div id="metric2-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
-                命中 symbols: --
-            </div>
-            <div id="metric2-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
-                样本信息: --
-            </div>
-
-            <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[980px]">
-                    <thead>
-                    <tr>
-                        <th class="px-4 py-3">Prev Rank</th>
-                        <th class="px-4 py-3">Symbol</th>
-                        <th class="px-4 py-3 text-right">Prev Change</th>
-                        <th class="px-4 py-3 text-right">Next Change</th>
-                        <th class="px-4 py-3">&lt;-10%</th>
-                    </tr>
-                    </thead>
-                    <tbody id="metric2-body"></tbody>
-                </table>
-            </div>
-
-            <div id="metric2-cards" class="md:hidden p-3 space-y-3"></div>
-        </div>
-
-        <div class="glass-panel overflow-hidden panel-reveal">
-            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="clock-3" class="mr-2 w-4 h-4 text-blue-500"></i> 48H CHANGE OUTCOME
-                </h3>
-                <div id="metric3-summary" class="text-[11px] font-mono text-slate-600">下跌占比 -- · &lt;-10%占比 -- · &gt;+10%占比 --</div>
-            </div>
-            <div id="metric3-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
-                样本信息: --
-            </div>
-            <div class="px-4 py-2 border-b border-slate-800/20">
-                <div class="flex items-center justify-between text-xs text-slate-500">
-                    <span>48h 涨跌幅分布</span>
-                    <span id="metric3-dist-label">--</span>
-                </div>
-                <div class="mt-2 h-2 rounded-full overflow-hidden flex bg-slate-200/60">
-                    <div id="metric3-dist-neg" class="h-full bg-red-500" style="width: 0%;"></div>
-                    <div id="metric3-dist-mid" class="h-full bg-slate-400" style="width: 0%;"></div>
-                    <div id="metric3-dist-pos" class="h-full bg-emerald-500" style="width: 0%;"></div>
+                    <div id="leaderboard-cards" class="md:hidden p-3 space-y-3"></div>
                 </div>
             </div>
 
-            <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[980px]">
-                    <thead>
-                    <tr>
-                        <th class="px-4 py-3">Prev Rank</th>
-                        <th class="px-4 py-3">Symbol</th>
-                        <th class="px-4 py-3 text-right">Entry Price</th>
-                        <th class="px-4 py-3 text-right">48h Price</th>
-                        <th class="px-4 py-3 text-right">48h Change</th>
-                    </tr>
-                    </thead>
-                    <tbody id="metric3-body"></tbody>
-                </table>
-            </div>
+            <div id="panel-losers" class="panel-reveal">
+                <div class="glass-panel panel-tier-main overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                        <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                            <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i>
+                            <span id="losers-title">LOSERS TOP N</span>
+                        </h3>
+                        <div class="text-right">
+                            <div id="losers-hit-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
+                            <div class="text-[11px] text-slate-500">Daily snapshot @ 07:40</div>
+                        </div>
+                    </div>
+                    <div id="losers-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                        命中 symbols: --
+                    </div>
 
-            <div id="metric3-cards" class="md:hidden p-3 space-y-3"></div>
+                    <div class="hidden md:block overflow-x-auto">
+                        <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                            <thead>
+                            <tr>
+                                <th class="px-4 py-3">Rank</th>
+                                <th class="px-4 py-3">Symbol</th>
+                                <th class="px-4 py-3 text-right">Price</th>
+                                <th class="px-4 py-3 text-right">Change</th>
+                                <th class="px-4 py-3 text-right">Vs Yesterday</th>
+                                <th class="px-4 py-3 text-right">Appear 7D</th>
+                                <th class="px-4 py-3 text-right">24h Quote Volume</th>
+                                <th class="px-4 py-3">Prev Gainer</th>
+                            </tr>
+                            </thead>
+                            <tbody id="losers-body"></tbody>
+                        </table>
+                    </div>
+
+                    <div id="losers-cards" class="md:hidden p-3 space-y-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-label">METRIC ANALYSIS</div>
+    <div class="space-y-3">
+        <div class="glass-panel panel-tier-subtle p-2 panel-reveal">
+            <div class="metric-tabs">
+                <button class="metric-tab-btn active" data-metric-tab="m2">M2 Next-Day</button>
+                <button class="metric-tab-btn" data-metric-tab="m3">M3 48H</button>
+                <button class="metric-tab-btn" data-metric-tab="history">History</button>
+                <button class="metric-tab-btn" data-metric-tab="m1">M1 Reversal</button>
+            </div>
         </div>
 
-        <div class="glass-panel overflow-hidden panel-reveal">
-            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-                <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                    <i data-lucide="line-chart" class="mr-2 w-4 h-4 text-indigo-500"></i> METRICS HISTORY
-                </h3>
-                <div class="text-[11px] text-slate-500">最近 30 天</div>
-            </div>
+        <div id="metric-panel-m2" class="metric-tab-panel active">
+            <div class="glass-panel overflow-hidden panel-reveal">
+                <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                        <i data-lucide="target" class="mr-2 w-4 h-4 text-orange-500"></i> NEXT-DAY &lt;-10% CHECK
+                    </h3>
+                    <div id="metric2-summary" class="text-[11px] font-mono text-slate-600">命中 --/-- · 概率 --</div>
+                </div>
+                <div id="metric2-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                    命中 symbols: --
+                </div>
+                <div id="metric2-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                    样本信息: --
+                </div>
 
-            <div class="hidden md:block overflow-x-auto">
-                <table class="leader-table w-full text-left text-sm min-w-[980px]">
-                    <thead>
-                    <tr>
-                        <th class="px-4 py-3">Date</th>
-                        <th class="px-4 py-3 text-right">M1 进跌幅榜</th>
-                        <th class="px-4 py-3 text-right">M2 次日&lt;-10%</th>
-                        <th class="px-4 py-3 text-right">M3 &lt;-10%</th>
-                        <th class="px-4 py-3 text-right">M3 &gt;+10%</th>
-                        <th class="px-4 py-3 text-right">样本</th>
-                    </tr>
-                    </thead>
-                    <tbody id="metrics-history-body"></tbody>
-                </table>
-            </div>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                        <thead>
+                        <tr>
+                            <th class="px-4 py-3">Prev Rank</th>
+                            <th class="px-4 py-3">Symbol</th>
+                            <th class="px-4 py-3 text-right">Prev Change</th>
+                            <th class="px-4 py-3 text-right">Next Change</th>
+                            <th class="px-4 py-3">&lt;-10%</th>
+                        </tr>
+                        </thead>
+                        <tbody id="metric2-body"></tbody>
+                    </table>
+                </div>
 
-            <div id="metrics-history-cards" class="md:hidden p-3 space-y-3"></div>
+                <div id="metric2-cards" class="md:hidden p-3 space-y-3"></div>
+            </div>
+        </div>
+
+        <div id="metric-panel-m3" class="metric-tab-panel">
+            <div class="glass-panel overflow-hidden panel-reveal">
+                <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                        <i data-lucide="clock-3" class="mr-2 w-4 h-4 text-blue-500"></i> 48H CHANGE OUTCOME
+                    </h3>
+                    <div id="metric3-summary" class="text-[11px] font-mono text-slate-600">下跌占比 -- · &lt;-10%占比 -- · &gt;+10%占比 --</div>
+                </div>
+                <div id="metric3-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                    样本信息: --
+                </div>
+                <div class="px-4 py-2 border-b border-slate-800/20">
+                    <div class="flex items-center justify-between text-xs text-slate-500">
+                        <span>48h 涨跌幅分布</span>
+                        <span id="metric3-dist-label">--</span>
+                    </div>
+                    <div class="mt-2 h-2 rounded-full overflow-hidden flex bg-slate-200/60">
+                        <div id="metric3-dist-neg" class="h-full bg-red-500" style="width: 0%;"></div>
+                        <div id="metric3-dist-mid" class="h-full bg-slate-400" style="width: 0%;"></div>
+                        <div id="metric3-dist-pos" class="h-full bg-emerald-500" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                        <thead>
+                        <tr>
+                            <th class="px-4 py-3">Prev Rank</th>
+                            <th class="px-4 py-3">Symbol</th>
+                            <th class="px-4 py-3 text-right">Entry Price</th>
+                            <th class="px-4 py-3 text-right">48h Price</th>
+                            <th class="px-4 py-3 text-right">48h Change</th>
+                        </tr>
+                        </thead>
+                        <tbody id="metric3-body"></tbody>
+                    </table>
+                </div>
+
+                <div id="metric3-cards" class="md:hidden p-3 space-y-3"></div>
+            </div>
+        </div>
+
+        <div id="metric-panel-history" class="metric-tab-panel">
+            <div class="glass-panel overflow-hidden panel-reveal">
+                <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                        <i data-lucide="line-chart" class="mr-2 w-4 h-4 text-indigo-500"></i> METRICS HISTORY
+                    </h3>
+                    <div class="text-[11px] text-slate-500">最近 30 天</div>
+                </div>
+
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                        <thead>
+                        <tr>
+                            <th class="px-4 py-3">Date</th>
+                            <th class="px-4 py-3 text-right">M1 进跌幅榜</th>
+                            <th class="px-4 py-3 text-right">M2 次日&lt;-10%</th>
+                            <th class="px-4 py-3 text-right">M3 &lt;-10%</th>
+                            <th class="px-4 py-3 text-right">M3 &gt;+10%</th>
+                            <th class="px-4 py-3 text-right">样本</th>
+                        </tr>
+                        </thead>
+                        <tbody id="metrics-history-body"></tbody>
+                    </table>
+                </div>
+
+                <div id="metrics-history-cards" class="md:hidden p-3 space-y-3"></div>
+            </div>
+        </div>
+
+        <div id="metric-panel-m1" class="metric-tab-panel">
+            <div class="glass-panel panel-tier-subtle overflow-hidden panel-reveal">
+                <div class="px-4 py-3 border-b border-slate-800/20">
+                    <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                        <i data-lucide="flip-horizontal" class="mr-2 w-4 h-4 text-emerald-500"></i> M1 REVERSAL CONTEXT
+                    </h3>
+                    <div class="text-[11px] text-slate-500 mt-1">展示昨涨幅榜进入今跌幅榜命中率摘要（来自 Losers 区块）</div>
+                </div>
+                <div class="p-4">
+                    <div class="text-xs text-slate-500">切换到该标签可快速查看 M1 的定义和读法；具体命中数据在上方 LOSERS 面板实时更新。</div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -882,6 +970,17 @@
     const metricsHistoryBody = document.getElementById('metrics-history-body');
     const metricsHistoryCards = document.getElementById('metrics-history-cards');
     const snapshotDateSelect = document.getElementById('snapshot-date');
+    const btnMobileGainers = document.getElementById('btn-mobile-gainers');
+    const btnMobileLosers = document.getElementById('btn-mobile-losers');
+    const panelGainers = document.getElementById('panel-gainers');
+    const panelLosers = document.getElementById('panel-losers');
+    const metricTabButtons = Array.from(document.querySelectorAll('[data-metric-tab]'));
+    const metricTabPanels = {
+        m1: document.getElementById('metric-panel-m1'),
+        m2: document.getElementById('metric-panel-m2'),
+        m3: document.getElementById('metric-panel-m3'),
+        history: document.getElementById('metric-panel-history'),
+    };
 
     function setTheme(darkMode) {
         document.body.classList.toggle('dark-mode', darkMode);
@@ -938,6 +1037,25 @@
         if (delta > 0) return {text: `↑ +${delta}`, cls: 'rank-up'};
         if (delta < 0) return {text: `↓ ${delta}`, cls: 'rank-down'};
         return {text: '→ 0', cls: 'rank-flat'};
+    }
+
+    function setMobileBoard(board) {
+        const showGainers = board !== 'losers';
+        if (panelGainers) panelGainers.classList.toggle('mobile-board-hidden', !showGainers);
+        if (panelLosers) panelLosers.classList.toggle('mobile-board-hidden', showGainers);
+        if (btnMobileGainers) btnMobileGainers.classList.toggle('active', showGainers);
+        if (btnMobileLosers) btnMobileLosers.classList.toggle('active', !showGainers);
+    }
+
+    function setMetricTab(tabKey) {
+        metricTabButtons.forEach((btn) => {
+            btn.classList.toggle('active', btn.dataset.metricTab === tabKey);
+        });
+
+        Object.entries(metricTabPanels).forEach(([key, panel]) => {
+            if (!panel) return;
+            panel.classList.toggle('active', key === tabKey);
+        });
     }
 
     function renderLosersReversal(stats) {
@@ -1364,6 +1482,14 @@
 
     btnRefresh?.addEventListener('click', loadLeaderboard);
     snapshotDateSelect?.addEventListener('change', loadLeaderboard);
+    btnMobileGainers?.addEventListener('click', () => setMobileBoard('gainers'));
+    btnMobileLosers?.addEventListener('click', () => setMobileBoard('losers'));
+    metricTabButtons.forEach((btn) => {
+        btn.addEventListener('click', () => setMetricTab(btn.dataset.metricTab || 'm2'));
+    });
+
+    setMobileBoard('gainers');
+    setMetricTab('m2');
 
     (async () => {
         await loadSnapshotDates();
