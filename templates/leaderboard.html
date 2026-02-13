@@ -222,6 +222,48 @@
         .panel-reveal { animation: rise-in 0.6s ease both; }
         @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
+        .panel-tier-main {
+            border-width: 3px;
+            box-shadow: 8px 8px 0 rgba(17, 24, 39, 0.9);
+        }
+
+        .panel-tier-subtle {
+            background: color-mix(in srgb, var(--panel) 86%, #dbeafe 14%);
+        }
+
+        .snapshot-context {
+            position: sticky;
+            top: 8px;
+            z-index: 40;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 2px solid var(--border);
+            background: color-mix(in srgb, var(--panel) 86%, #fff 14%);
+            box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.8);
+            margin: 8px 0 14px;
+        }
+
+        .snapshot-context .ctx-main {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            color: var(--text);
+            letter-spacing: 0.06em;
+        }
+
+        .snapshot-context .ctx-sub {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        body.dark-mode .snapshot-context {
+            background: rgba(30, 41, 59, 0.86);
+        }
+
         .metric-label {
             font-family: 'Space Mono', monospace;
             font-size: 0.68rem;
@@ -303,6 +345,44 @@
         .refresh-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        .mobile-core {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .mobile-core .k {
+            font-size: 10px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .mobile-core .v {
+            margin-top: 2px;
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .mobile-more {
+            margin-top: 10px;
+            border-top: 1px dashed color-mix(in srgb, var(--border) 35%, transparent);
+            padding-top: 8px;
+        }
+
+        .mobile-more summary {
+            cursor: pointer;
+            font-size: 11px;
+            color: var(--muted);
+            user-select: none;
+        }
+
+        .mobile-more[open] summary {
+            color: var(--text);
         }
 
         .snap-select {
@@ -557,9 +637,13 @@
 </header>
 
 <div class="section-label">LEADERBOARD SNAPSHOT</div>
+<div class="snapshot-context" id="snapshot-context">
+    <div class="ctx-main" id="snapshot-context-main">Snapshot: --</div>
+    <div class="ctx-sub" id="snapshot-context-sub">Top -- · Window --</div>
+</div>
 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
     <div class="lg:col-span-4 space-y-4">
-        <div class="glass-panel p-4 panel-reveal">
+        <div class="glass-panel panel-tier-subtle p-4 panel-reveal">
             <div class="panel-title">
                 <strong>SNAPSHOT CONTROL</strong>
             </div>
@@ -574,7 +658,7 @@
             <div id="status-text" class="text-xs text-slate-500 mt-3">等待加载历史快照...</div>
         </div>
 
-        <div class="glass-panel p-4 panel-reveal">
+        <div class="glass-panel panel-tier-subtle p-4 panel-reveal">
             <div class="panel-title mb-3">
                 <strong>SNAPSHOT META</strong>
                 <span class="panel-meta">compact view</span>
@@ -597,7 +681,7 @@
     </div>
 
     <div class="lg:col-span-8 space-y-4">
-        <div class="glass-panel overflow-hidden panel-reveal">
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
             <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-500 flex items-center">
                     <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i>
@@ -626,7 +710,7 @@
             <div id="leaderboard-cards" class="md:hidden p-3 space-y-3"></div>
         </div>
 
-        <div class="glass-panel overflow-hidden panel-reveal">
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
             <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
                 <h3 class="text-sm font-bold text-slate-500 flex items-center">
                     <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i>
@@ -647,12 +731,12 @@
                     <tr>
                         <th class="px-4 py-3">Rank</th>
                         <th class="px-4 py-3">Symbol</th>
-                        <th class="px-4 py-3">Prev Gainer</th>
                         <th class="px-4 py-3 text-right">Price</th>
                         <th class="px-4 py-3 text-right">Change</th>
                         <th class="px-4 py-3 text-right">Vs Yesterday</th>
                         <th class="px-4 py-3 text-right">Appear 7D</th>
                         <th class="px-4 py-3 text-right">24h Quote Volume</th>
+                        <th class="px-4 py-3">Prev Gainer</th>
                     </tr>
                     </thead>
                     <tbody id="losers-body"></tbody>
@@ -772,6 +856,8 @@
     const metricTop = document.getElementById('metric-top');
     const metricDate = document.getElementById('metric-date');
     const metricTime = document.getElementById('metric-time');
+    const snapshotContextMain = document.getElementById('snapshot-context-main');
+    const snapshotContextSub = document.getElementById('snapshot-context-sub');
     const gainersTitle = document.getElementById('gainers-title');
     const losersTitle = document.getElementById('losers-title');
     const tableBody = document.getElementById('leaderboard-body');
@@ -1108,10 +1194,25 @@
                     <span class="rank-up font-bold">${formatChange(row.change)}</span>
                 </div>
                 <div class="font-bold">${row.symbol} ${held}</div>
-                <div class="mt-1 text-xs text-slate-500">现价: ${formatPrice(row.last_price ?? row.price)}</div>
-                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
-                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
-                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
+                <div class="mobile-core">
+                    <div>
+                        <div class="k">Price</div>
+                        <div class="v">${formatPrice(row.last_price ?? row.price)}</div>
+                    </div>
+                    <div>
+                        <div class="k">Change</div>
+                        <div class="v rank-up">${formatChange(row.change)}</div>
+                    </div>
+                    <div>
+                        <div class="k">24h Vol</div>
+                        <div class="v">${formatVolume(row.volume)}</div>
+                    </div>
+                </div>
+                <details class="mobile-more">
+                    <summary>展开详情</summary>
+                    <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
+                    <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
+                </details>
             `;
             cards.appendChild(card);
         });
@@ -1135,12 +1236,12 @@
             tr.innerHTML = `
                 <td class="px-4 py-3 font-mono">${idx + 1}</td>
                 <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
-                <td class="px-4 py-3">${reversal}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
                 <td class="px-4 py-3 text-right rank-down font-bold">${formatChange(row.change)}</td>
                 <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
                 <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
+                <td class="px-4 py-3">${reversal}</td>
             `;
             losersTableBody.appendChild(tr);
 
@@ -1152,11 +1253,26 @@
                     <span class="rank-down font-bold">${formatChange(row.change)}</span>
                 </div>
                 <div class="font-bold">${row.symbol} ${held}</div>
-                <div class="mt-1 text-xs text-slate-500">昨涨幅榜Top10: ${reversalText}</div>
-                <div class="mt-1 text-xs text-slate-500">现价: ${formatPrice(row.last_price ?? row.price)}</div>
-                <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
-                <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
-                <div class="mt-1 text-xs text-slate-500">24h成交额: ${formatVolume(row.volume)}</div>
+                <div class="mobile-core">
+                    <div>
+                        <div class="k">Price</div>
+                        <div class="v">${formatPrice(row.last_price ?? row.price)}</div>
+                    </div>
+                    <div>
+                        <div class="k">Change</div>
+                        <div class="v rank-down">${formatChange(row.change)}</div>
+                    </div>
+                    <div>
+                        <div class="k">24h Vol</div>
+                        <div class="v">${formatVolume(row.volume)}</div>
+                    </div>
+                </div>
+                <details class="mobile-more">
+                    <summary>展开详情</summary>
+                    <div class="mt-1 text-xs text-slate-500">昨涨幅榜Top10: ${reversalText}</div>
+                    <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
+                    <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
+                </details>
             `;
             losersCards.appendChild(card);
         });
@@ -1195,6 +1311,8 @@
                 metricTop.textContent = '--';
                 metricDate.textContent = '--';
                 metricTime.textContent = '--';
+                if (snapshotContextMain) snapshotContextMain.textContent = 'Snapshot: --';
+                if (snapshotContextSub) snapshotContextSub.textContent = 'Top -- · Window --';
                 if (gainersTitle) gainersTitle.textContent = 'GAINERS TOP N';
                 if (losersTitle) losersTitle.textContent = 'LOSERS TOP N';
                 tableBody.innerHTML = '';
@@ -1217,6 +1335,12 @@
             if (losersTitle) losersTitle.textContent = `LOSERS TOP ${losersTopCount || 'N'}`;
             statusText.textContent = `快照日期: ${data.snapshot_date} · 计算区间: ${data.window_start_utc} UTC 至快照时刻`;
             lastUpdated.textContent = data.snapshot_time;
+            if (snapshotContextMain) {
+                snapshotContextMain.textContent = `Snapshot: ${data.snapshot_date} ${(data.snapshot_time || '').split(' ').slice(1).join(' ') || '--'} (UTC+8)`;
+            }
+            if (snapshotContextSub) {
+                snapshotContextSub.textContent = `Top ${gainersTopCount || '--'} · Window ${data.window_start_utc || '--'} UTC → snapshot`;
+            }
 
             const rows = data.rows || [];
             const losersRows = data.losers_rows || [];
