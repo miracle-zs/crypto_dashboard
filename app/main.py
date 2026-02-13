@@ -498,6 +498,7 @@ async def get_open_positions(
 ):
     """Get open positions with unrealized PnL and concentration metrics"""
     loop = asyncio.get_event_loop()
+    profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
 
     # 数据库查询放入 executor
     raw_positions = await loop.run_in_executor(None, db.get_open_positions)
@@ -521,7 +522,8 @@ async def get_open_positions(
                 "avg_holding_time": "0m",
                 "concentration_top1": 0.0,
                 "concentration_top3": 0.0,
-                "concentration_hhi": 0.0
+                "concentration_hhi": 0.0,
+                "profit_alert_threshold_pct": profit_alert_threshold_pct
             }
         }
 
@@ -608,6 +610,7 @@ async def get_open_positions(
             "unrealized_pnl": unrealized_pnl,
             "unrealized_pnl_pct": unrealized_pnl_pct,
             "is_long_term": pos.get("is_long_term", 0) == 1,
+            "profit_alerted": pos.get("profit_alerted", 0) == 1,
             "weight": 0.0
         })
 
@@ -645,7 +648,8 @@ async def get_open_positions(
         "concentration_top1": concentration_top1,
         "concentration_top3": concentration_top3,
         "concentration_hhi": concentration_hhi,
-        "recent_loss_count": recent_loss_count
+        "recent_loss_count": recent_loss_count,
+        "profit_alert_threshold_pct": profit_alert_threshold_pct
     }
 
     return {

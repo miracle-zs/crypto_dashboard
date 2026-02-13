@@ -74,6 +74,7 @@ class OpenPositionItem(BaseModel):
     unrealized_pnl_pct: Optional[float] = None
     weight: float
     is_long_term: bool = False
+    profit_alerted: bool = False
 
 
 class OpenPositionsSummary(BaseModel):
@@ -91,6 +92,7 @@ class OpenPositionsSummary(BaseModel):
     concentration_top3: float
     concentration_hhi: float
     recent_loss_count: int = 0  # New field for risk protocol
+    profit_alert_threshold_pct: float = 20.0
 
 
 class OpenPositionsResponse(BaseModel):

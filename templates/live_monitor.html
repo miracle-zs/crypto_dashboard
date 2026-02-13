@@ -2067,6 +2067,7 @@
             const isMobile = window.matchMedia('(max-width: 767px)').matches;
             const summary = openData && openData.summary ? openData.summary : {};
             const positions = openData && openData.positions ? openData.positions : [];
+            const profitAlertThresholdPct = Number(summary.profit_alert_threshold_pct || 20);
 
             if (tbody) tbody.innerHTML = '';
             if (mobileContainer) mobileContainer.innerHTML = '';
@@ -2093,6 +2094,15 @@
                     : 'text-rose-400 border-rose-500/30';
                 const pnlVal = Number(pos.unrealized_pnl);
                 const pnlClass = pnlVal >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                const pnlPctVal = Number(pos.unrealized_pnl_pct);
+                const isProfitAlertHit = Number.isFinite(pnlPctVal) && pnlPctVal >= profitAlertThresholdPct;
+                const isProfitAlerted = pos.profit_alerted === true;
+                const profitAlertBadge = isProfitAlertHit
+                    ? `<span class="text-[10px] bg-amber-900/30 text-amber-300 px-1 rounded">≥${profitAlertThresholdPct.toFixed(0)}%</span>`
+                    : '';
+                const notifiedBadge = isProfitAlerted
+                    ? '<span class="text-[10px] bg-emerald-900/30 text-emerald-300 px-1 rounded">已提醒</span>'
+                    : '';
 
                 // 检查持仓是否超过48小时 (2880分钟)
                 const isStale = (pos.holding_minutes || 0) > 2880;
@@ -2110,6 +2120,7 @@
                             <td class="px-6 py-4 font-bold text-cyan-400">
                                 ${pos.symbol}
                                 ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded ml-1">LT</span>' : ''}
+                                ${notifiedBadge}
                             </td>
                             <td class="px-6 py-4">
                                 <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
@@ -2122,7 +2133,10 @@
                             <td class="px-6 py-4 text-right font-mono">${formatNumber(pos.mark_price, 3)}</td>
                             <td class="px-6 py-4 text-right font-mono">${formatMoney(pos.notional, 0)}</td>
                             <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatSignedMoney(pos.unrealized_pnl, 0)}</td>
-                            <td class="px-6 py-4 text-right font-mono ${pnlClass}">${formatPct(pos.unrealized_pnl_pct, 2)}</td>
+                            <td class="px-6 py-4 text-right font-mono ${pnlClass}">
+                                <span>${formatPct(pos.unrealized_pnl_pct, 2)}</span>
+                                ${profitAlertBadge}
+                            </td>
                             <td class="px-6 py-4 text-center">
                                 <input type="checkbox"
                                        ${isLongTerm ? 'checked' : ''}
@@ -2143,12 +2157,16 @@
                                     <div class="font-bold text-cyan-400 flex items-center gap-2">
                                         ${pos.symbol}
                                         ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded">LT</span>' : ''}
+                                        ${notifiedBadge}
                                     </div>
                                     <div class="text-[10px] text-gray-500 mt-1">${pos.entry_time}</div>
                                 </div>
                                 <div class="flex flex-col items-end gap-1">
                                     <span class="${sideClass} text-[10px] border px-1.5 py-0.5 rounded font-bold">${pos.side}</span>
-                                    <span class="${pnlClass} text-xs font-bold font-mono">${formatPct(pos.unrealized_pnl_pct, 2)}</span>
+                                    <div class="flex items-center gap-1">
+                                        <span class="${pnlClass} text-xs font-bold font-mono">${formatPct(pos.unrealized_pnl_pct, 2)}</span>
+                                        ${profitAlertBadge}
+                                    </div>
                                 </div>
                             </div>
 

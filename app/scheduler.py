@@ -92,6 +92,8 @@ class TradeDataScheduler:
         self.leaderboard_max_symbols = _env_int('LEADERBOARD_MAX_SYMBOLS', 120, minimum=0)
         self.leaderboard_alert_hour = _env_int('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
         self.leaderboard_alert_minute = _env_int('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
+        self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
+        self.profit_alert_threshold_pct = _env_float('PROFIT_ALERT_THRESHOLD_PCT', 20.0, minimum=0.0)
         self.leaderboard_alert_hour %= 24
         self.leaderboard_alert_minute %= 60
         self.api_job_lock_wait_seconds = _env_int('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
@@ -291,6 +293,7 @@ class TradeDataScheduler:
                 open_count = self.db.save_open_positions(open_positions)
                 open_saved = open_count
                 logger.info(f"保存 {open_count} 条未平仓订单")
+                self.check_open_positions_profit_alert(threshold_pct=self.profit_alert_threshold_pct)
             else:
                 # 清空未平仓记录（如果没有未平仓订单）
                 self.db.save_open_positions([])
@@ -343,6 +346,129 @@ class TradeDataScheduler:
             logger.error(traceback.format_exc())
         finally:
             self._release_api_job_slot()
+
+    def _get_mark_price_map(self, symbols: list[str]) -> dict[str, float]:
+        """批量获取标记价格（优先 premiumIndex，其次 ticker/price）。"""
+        if not symbols:
+            return {}
+
+        unique_symbols = sorted(set(symbols))
+
+        try:
+            data = self.processor.client.public_get("/fapi/v1/premiumIndex")
+            if isinstance(data, dict):
+                data = [data]
+            price_map = {
+                str(item.get("symbol", "")).upper(): float(item.get("markPrice"))
+                for item in data or []
+                if isinstance(item, dict) and item.get("symbol") and item.get("markPrice") is not None
+            }
+            if price_map:
+                return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
+        except Exception as exc:
+            logger.warning(f"获取标记价格(premiumIndex)失败: {exc}")
+
+        try:
+            data = self.processor.client.public_get("/fapi/v1/ticker/price")
+            if isinstance(data, dict):
+                data = [data]
+            price_map = {
+                str(item.get("symbol", "")).upper(): float(item.get("price"))
+                for item in data or []
+                if isinstance(item, dict) and item.get("symbol") and item.get("price") is not None
+            }
+            return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
+        except Exception as exc:
+            logger.warning(f"获取标记价格(ticker/price)失败: {exc}")
+
+        return {}
+
+    def check_open_positions_profit_alert(self, threshold_pct: float):
+        """检查未平仓订单浮盈阈值提醒（单档，单笔只提醒一次）。"""
+        if not self.enable_profit_alert:
+            return
+
+        try:
+            positions = self.db.get_open_positions()
+            if not positions:
+                return
+
+            candidates = [p for p in positions if int(p.get("profit_alerted", 0) or 0) == 0]
+            if not candidates:
+                return
+
+            symbols_full = [self._normalize_futures_symbol(p.get("symbol")) for p in candidates if p.get("symbol")]
+            mark_prices = self._get_mark_price_map(symbols_full)
+            if not mark_prices:
+                logger.warning("盈利提醒检查跳过: 无法获取标记价格")
+                return
+
+            triggered = []
+            for pos in candidates:
+                symbol = str(pos.get("symbol", "")).upper()
+                side = str(pos.get("side", "")).upper()
+                qty = float(pos.get("qty", 0.0) or 0.0)
+                entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+                entry_amount = float(pos.get("entry_amount", 0.0) or 0.0)
+                order_id = int(pos.get("order_id", 0) or 0)
+                entry_time = str(pos.get("entry_time", ""))
+
+                if not symbol or qty <= 0 or entry_price <= 0 or entry_amount <= 0 or order_id <= 0:
+                    continue
+
+                symbol_full = self._normalize_futures_symbol(symbol)
+                mark_price = mark_prices.get(symbol_full)
+                if mark_price is None:
+                    continue
+
+                if side == "SHORT":
+                    unrealized_pnl = (entry_price - mark_price) * qty
+                else:
+                    unrealized_pnl = (mark_price - entry_price) * qty
+
+                unrealized_pct = (unrealized_pnl / entry_amount) * 100
+                if unrealized_pct >= threshold_pct:
+                    triggered.append({
+                        "symbol": symbol,
+                        "side": side,
+                        "order_id": order_id,
+                        "entry_time": entry_time,
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "unrealized_pct": unrealized_pct
+                    })
+
+            if not triggered:
+                return
+
+            triggered.sort(key=lambda item: item["unrealized_pct"], reverse=True)
+            title = f"🎯 浮盈提醒: {len(triggered)} 笔持仓超过 {threshold_pct:.0f}%"
+            content = (
+                f"以下未平仓订单浮盈已达到阈值 **{threshold_pct:.0f}%**（每笔仅提醒一次）:\n\n"
+                "--- \n"
+            )
+            for item in triggered:
+                content += (
+                    f"**{item['symbol']}** ({item['side']})\n"
+                    f"- 浮盈: {item['unrealized_pnl']:+.2f} U ({item['unrealized_pct']:.2f}%)\n"
+                    f"- 开仓: {item['entry_price']:.6g}\n"
+                    f"- 现价: {item['mark_price']:.6g}\n"
+                    f"- 时间: {item['entry_time']}\n\n"
+                )
+            send_server_chan_notification(title, content)
+
+            for item in triggered:
+                self.db.set_position_profit_alerted(item["symbol"], item["order_id"])
+
+            logger.info(
+                "浮盈提醒已发送: "
+                f"threshold={threshold_pct:.2f}%, "
+                f"count={len(triggered)}, "
+                f"symbols={[item['symbol'] for item in triggered]}"
+            )
+        except Exception as exc:
+            logger.error(f"浮盈提醒检查失败: {exc}")
 
     def check_long_held_positions(self):
         """检查持仓时间超过48小时的订单并发送合并通知 (每24小时复提)"""
