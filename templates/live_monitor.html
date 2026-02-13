@@ -794,6 +794,15 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="open-positions-mobile-toggle-wrap" class="md:hidden px-4 pb-4 hidden">
+                            <button
+                                id="open-positions-mobile-toggle"
+                                onclick="toggleOpenPositionsMobile()"
+                                class="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors"
+                            >
+                                展开全部
+                            </button>
+                        </div>
 
                         <div id="open-positions-empty" class="px-6 py-6 text-sm text-gray-500 hidden text-center">
                             <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
@@ -922,6 +931,7 @@
         // 1. Configuration & State
         // -------------------------------------
         const UPDATE_INTERVAL = 60000; // 60 seconds
+        const OPEN_POSITIONS_MOBILE_COLLAPSE_LIMIT = 6;
         const DD_LIMIT_PCT = 10;
         let balanceData = []; // Array of {time, value, cumulative_equity}
         let chart;
@@ -932,6 +942,8 @@
         let lastRequestedTimeRange = '';
         let maxDDWindow = null;
         let showMarkers = true;
+        let latestOpenPositionsData = null;
+        let openPositionsMobileExpanded = false;
         const EQUITY_DAILY_TARGET_KEY = 'monitorEquityDailyTarget';
 
         const timeRangeButtons = document.querySelectorAll('.time-range-btn');
@@ -2010,6 +2022,7 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
+                latestOpenPositionsData = data;
                 renderOpenPositions(data);
             } catch (error) {
                 console.error("Open positions fetch error:", error);
@@ -2017,6 +2030,11 @@
                 // Only toast on manual actions or critical failures, avoiding spam on auto-refresh
                 // showToast(`持仓数据更新失败`, 'warn');
             }
+        }
+
+        function toggleOpenPositionsMobile() {
+            openPositionsMobileExpanded = !openPositionsMobileExpanded;
+            renderOpenPositions(latestOpenPositionsData || { positions: [], summary: {} });
         }
 
         async function toggleLongTerm(symbol, orderId, isLongTerm) {
@@ -2043,7 +2061,10 @@
         function renderOpenPositions(openData) {
             const tbody = document.getElementById('open-positions-body');
             const mobileContainer = document.getElementById('open-positions-mobile');
+            const mobileToggleWrap = document.getElementById('open-positions-mobile-toggle-wrap');
+            const mobileToggleBtn = document.getElementById('open-positions-mobile-toggle');
             const emptyEl = document.getElementById('open-positions-empty');
+            const isMobile = window.matchMedia('(max-width: 767px)').matches;
             const summary = openData && openData.summary ? openData.summary : {};
             const positions = openData && openData.positions ? openData.positions : [];
 
@@ -2061,6 +2082,10 @@
                 const bTime = Date.parse(String(b.entry_time || '').replace(' ', 'T')) || 0;
                 return bTime - aTime;
             });
+            const hasMoreOnMobile = sortedPositions.length > OPEN_POSITIONS_MOBILE_COLLAPSE_LIMIT;
+            const mobileVisiblePositions = (isMobile && !openPositionsMobileExpanded)
+                ? sortedPositions.slice(0, OPEN_POSITIONS_MOBILE_COLLAPSE_LIMIT)
+                : sortedPositions;
 
             sortedPositions.forEach(pos => {
                 const sideClass = pos.side === 'LONG'
@@ -2110,7 +2135,7 @@
                 }
 
                 // Mobile Card View
-                if (mobileContainer) {
+                if (mobileContainer && mobileVisiblePositions.includes(pos)) {
                     const card = `
                         <div class="p-4 bg-gray-800/30 border border-gray-700 rounded-lg ${rowOpacity}">
                             <div class="flex justify-between items-start mb-3">
@@ -2157,6 +2182,17 @@
                     mobileContainer.innerHTML += card;
                 }
             });
+
+            if (mobileToggleWrap && mobileToggleBtn) {
+                if (isMobile && hasMoreOnMobile && positions.length > 0) {
+                    mobileToggleWrap.classList.remove('hidden');
+                    mobileToggleBtn.innerText = openPositionsMobileExpanded
+                        ? '收起'
+                        : `展开全部 (${sortedPositions.length})`;
+                } else {
+                    mobileToggleWrap.classList.add('hidden');
+                }
+            }
 
             // 重新渲染图标（因为是动态插入的 HTML）
             lucide.createIcons();

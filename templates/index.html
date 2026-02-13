@@ -690,6 +690,15 @@
                         </div>
                     </div>
                 </div>
+                <div id="trade-list-mobile-toggle-wrap" class="md:hidden px-4 pb-4 hidden">
+                    <button
+                        id="trade-list-mobile-toggle"
+                        onclick="toggleTradeLogMobile()"
+                        class="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors"
+                    >
+                        展开全部
+                    </button>
+                </div>
             </div>
         </div>
         <div class="lg:col-span-4">
@@ -742,7 +751,15 @@
         // ============================================
 
         const DASHBOARD_UPDATE_INTERVAL = 60000;
+        const TRADE_LOG_MOBILE_COLLAPSE_LIMIT = 6;
         let warnedConfig = false;
+        let latestTrades = [];
+        let tradeLogMobileExpanded = false;
+
+        function toggleTradeLogMobile() {
+            tradeLogMobileExpanded = !tradeLogMobileExpanded;
+            renderTable(latestTrades);
+        }
 
         async function fetchDashboardData() {
             try {
@@ -783,6 +800,7 @@
         // 2. UI 更新逻辑
         // ============================================
         function updateUI(stats, trades, dailyStats) {
+            latestTrades = Array.isArray(trades) ? trades : [];
             applyMood(stats);
 
             // 资金与盈亏
@@ -855,7 +873,7 @@
             renderDurationChart(trades);
             renderHourlyChart(trades);
             renderDailyTradesChart(dailyStats);
-            renderTable(trades);
+            renderTable(latestTrades);
             renderSymbolLeaderboard(trades);
             initKpiFocus();
         }
@@ -1234,6 +1252,9 @@
         function renderTable(tradeData) {
             const tbody = document.getElementById('trade-table-body');
             const mobileContainer = document.getElementById('trade-list-mobile');
+            const mobileToggleWrap = document.getElementById('trade-list-mobile-toggle-wrap');
+            const mobileToggleBtn = document.getElementById('trade-list-mobile-toggle');
+            const isMobile = window.matchMedia('(max-width: 767px)').matches;
 
             if (tbody) tbody.innerHTML = '';
             if (mobileContainer) mobileContainer.innerHTML = '';
@@ -1244,8 +1265,14 @@
             if (reversedData.length === 0) {
                  if(tbody) tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">暂无交易记录</td></tr>';
                  if(mobileContainer) mobileContainer.innerHTML = '<div class="text-center text-gray-500 py-8">暂无交易记录</div>';
+                 if (mobileToggleWrap) mobileToggleWrap.classList.add('hidden');
                  return;
             }
+
+            const hasMoreOnMobile = reversedData.length > TRADE_LOG_MOBILE_COLLAPSE_LIMIT;
+            const mobileVisibleData = (isMobile && !tradeLogMobileExpanded)
+                ? reversedData.slice(0, TRADE_LOG_MOBILE_COLLAPSE_LIMIT)
+                : reversedData;
 
             reversedData.forEach(t => {
                 const isWin = t.pnl_net > 0;
@@ -1283,8 +1310,14 @@
                     </tr>
                 `;
                 if(tbody) tbody.innerHTML += row;
+            });
 
-                // Mobile Card View
+            mobileVisibleData.forEach(t => {
+                const isWin = t.pnl_net > 0;
+                const dateParts = t.entry_time.split(' ');
+                const dateStr = dateParts[0].substring(5);
+                const timeStr = dateParts[1].substring(0, 5);
+
                 const card = `
                     <div class="p-4 bg-gray-800/30 border border-gray-700/50 rounded-lg hover:border-gray-600 transition-colors">
                         <div class="flex justify-between items-start mb-3 border-b border-gray-700/50 pb-2">
@@ -1333,6 +1366,16 @@
                 if(mobileContainer) mobileContainer.innerHTML += card;
             });
 
+            if (mobileToggleWrap && mobileToggleBtn) {
+                if (isMobile && hasMoreOnMobile) {
+                    mobileToggleWrap.classList.remove('hidden');
+                    mobileToggleBtn.innerText = tradeLogMobileExpanded
+                        ? '收起'
+                        : `展开全部 (${reversedData.length})`;
+                } else {
+                    mobileToggleWrap.classList.add('hidden');
+                }
+            }
         }
 
         function renderSymbolLeaderboard(tradeData) {
