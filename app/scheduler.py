@@ -948,10 +948,10 @@ class TradeDataScheduler:
         )
 
     def _build_rebound_7d_snapshot(self):
-        """构建7D反弹幅度榜快照（不处理锁与冷却）。"""
+        """构建14D反弹幅度榜快照（不处理锁与冷却）。"""
         stage_started_at = time.perf_counter()
         now_utc = datetime.now(timezone.utc)
-        window_start_utc = now_utc - timedelta(days=7)
+        window_start_utc = now_utc - timedelta(days=14)
 
         exchange_info = self.processor.get_exchange_info(client=self.processor.client)
         if not exchange_info or 'symbols' not in exchange_info:
@@ -990,7 +990,7 @@ class TradeDataScheduler:
         # 稳定排序，确保同等条件下输出一致
         candidates.sort(key=lambda x: x['symbol'])
         logger.info(
-            "7D反弹榜候选统计: "
+            "14D反弹榜候选统计: "
             f"candidates={len(candidates)}, "
             f"top_n={self.rebound_7d_top_n}"
         )
@@ -1006,7 +1006,7 @@ class TradeDataScheduler:
             estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
             estimated_total_weight = 1 + 1 + total_candidates  # exchangeInfo + ticker/price + per-symbol klines
             logger.info(
-                "7D反弹榜并发计划: "
+                "14D反弹榜并发计划: "
                 f"workers={worker_count}, "
                 f"min_interval={min_interval:.2f}s, "
                 f"budget={self.rebound_7d_weight_budget_per_minute}/min, "
@@ -1017,7 +1017,7 @@ class TradeDataScheduler:
             thread_local = threading.local()
 
             def _kline_task(item: dict):
-                if self._is_api_cooldown_active(source='7D反弹榜-逐币种计算'):
+                if self._is_api_cooldown_active(source='14D反弹榜-逐币种计算'):
                     return item, None
 
                 worker_client = getattr(thread_local, "client", None)
@@ -1029,7 +1029,7 @@ class TradeDataScheduler:
                     klines = worker_client.public_get('/fapi/v1/klines', {
                         'symbol': item['symbol'],
                         'interval': '1d',
-                        'limit': 7
+                        'limit': 14
                     }) or []
                 except Exception:
                     return item, None
@@ -1069,7 +1069,7 @@ class TradeDataScheduler:
                     try:
                         item, payload = future.result()
                     except Exception as exc:
-                        logger.warning(f"7D反弹榜逐币种计算异常: {exc}")
+                        logger.warning(f"14D反弹榜逐币种计算异常: {exc}")
                         payload = None
                         item = None
 
@@ -1084,7 +1084,7 @@ class TradeDataScheduler:
 
                     if processed % progress_step == 0 or processed == total_candidates:
                         logger.info(
-                            "7D反弹榜进度: "
+                            "14D反弹榜进度: "
                             f"{processed}/{total_candidates}, "
                             f"effective={len(rebound_rows)}, "
                             f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
@@ -1104,7 +1104,7 @@ class TradeDataScheduler:
             "all_rows": rebound_rows,
         }
         logger.info(
-            "7D反弹榜快照构建完成: "
+            "14D反弹榜快照构建完成: "
             f"candidates={snapshot['candidates']}, "
             f"effective={snapshot['effective']}, "
             f"top={snapshot['top']}, "
@@ -1112,8 +1112,8 @@ class TradeDataScheduler:
         )
         return snapshot
 
-    def get_rebound_7d_snapshot(self, source: str = "7D反弹榜接口"):
-        """获取7D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
+    def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
+        """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
         if not self.processor:
             return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
         if self._is_api_cooldown_active(source=source):
@@ -1133,15 +1133,15 @@ class TradeDataScheduler:
             self._release_api_job_slot()
 
     def snapshot_morning_rebound_7d(self):
-        """每天早上07:30生成7D反弹幅度Top榜快照并入库。"""
+        """每天早上07:30生成14D反弹幅度Top榜快照并入库。"""
         started_at = time.perf_counter()
         logger.info(
-            "晨间7D反弹榜任务开始执行: "
+            "晨间14D反弹榜任务开始执行: "
             f"schedule={self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d}"
         )
-        result = self.get_rebound_7d_snapshot(source="晨间7D反弹榜")
+        result = self.get_rebound_7d_snapshot(source="晨间14D反弹榜")
         logger.info(
-            "晨间7D反弹榜快照结果: "
+            "晨间14D反弹榜快照结果: "
             f"ok={result.get('ok')}, "
             f"reason={result.get('reason', '')}, "
             f"candidates={result.get('candidates', 0)}, "
@@ -1150,20 +1150,20 @@ class TradeDataScheduler:
         )
         if not result.get("ok"):
             logger.warning(
-                f"晨间7D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
+                f"晨间14D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
             )
             return
 
         try:
             self.db.save_rebound_7d_snapshot(result)
             logger.info(
-                f"7D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
+                f"14D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
             )
         except Exception as e:
-            logger.error(f"保存7D反弹榜快照失败: {e}")
+            logger.error(f"保存14D反弹榜快照失败: {e}")
 
         logger.info(
-            "晨间7D反弹榜任务完成: "
+            "晨间14D反弹榜任务完成: "
             f"elapsed={time.perf_counter() - started_at:.2f}s"
         )
 
@@ -1346,18 +1346,18 @@ class TradeDataScheduler:
                     timezone=UTC8
                 ),
                 id='snapshot_morning_rebound_7d',
-                name='晨间7D反弹榜',
+                name='晨间14D反弹榜',
                 max_instances=1,
                 coalesce=True,
                 misfire_grace_time=300,
                 replace_existing=True
             )
             logger.info(
-                "晨间7D反弹榜任务已启动: "
+                "晨间14D反弹榜任务已启动: "
                 f"每天 {self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d} 执行"
             )
         else:
-            logger.info("晨间7D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
+            logger.info("晨间14D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
 
         self.scheduler.start()
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")

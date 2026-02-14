@@ -346,7 +346,7 @@ async def get_rebound_7d_snapshot(
     date: Optional[str] = Query(None, description="Snapshot date in YYYY-MM-DD"),
     db: Database = Depends(get_db)
 ):
-    """获取7D反弹幅度榜历史快照（默认返回最新一条，不进行实时计算）"""
+    """获取14D反弹幅度榜历史快照（默认返回最新一条，不进行实时计算）"""
     loop = asyncio.get_event_loop()
     if date:
         try:
@@ -372,7 +372,7 @@ async def get_rebound_7d_snapshot(
         return {
             "ok": False,
             "reason": "no_snapshot",
-            "message": "暂无快照数据，请等待下一次07:30定时任务生成"
+            "message": "暂无快照数据，请等待下一次07:30定时任务生成（14D）"
         }
 
     open_positions = await loop.run_in_executor(None, db.get_open_positions)
@@ -404,7 +404,7 @@ async def get_rebound_7d_snapshot_dates(
     limit: int = Query(90, ge=1, le=365),
     db: Database = Depends(get_db)
 ):
-    """获取7D反弹幅度榜快照日期列表（倒序）"""
+    """获取14D反弹幅度榜快照日期列表（倒序）"""
     loop = asyncio.get_event_loop()
     dates = await loop.run_in_executor(None, db.list_rebound_7d_snapshot_dates, limit)
     return {"dates": dates}
