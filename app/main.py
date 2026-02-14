@@ -574,7 +574,13 @@ async def get_open_positions(
     profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
 
     # 数据库查询放入 executor
-    raw_positions = await loop.run_in_executor(None, db.get_open_positions)
+    raw_positions, latest_balance_history = await asyncio.gather(
+        loop.run_in_executor(None, db.get_open_positions),
+        loop.run_in_executor(None, partial(db.get_balance_history, limit=1))
+    )
+    latest_balance = 0.0
+    if latest_balance_history:
+        latest_balance = float(latest_balance_history[-1].get("balance") or 0.0)
 
     now = datetime.now(UTC8)
 
@@ -596,6 +602,9 @@ async def get_open_positions(
                 "concentration_top1": 0.0,
                 "concentration_top3": 0.0,
                 "concentration_hhi": 0.0,
+                "recent_loss_count": 0,
+                "recent_loss_total_if_stop_now": 0.0,
+                "recent_loss_pct_of_balance": 0.0,
                 "profit_alert_threshold_pct": profit_alert_threshold_pct
             }
         }
@@ -618,6 +627,7 @@ async def get_open_positions(
     total_unrealized_pnl = 0.0
     total_holding_minutes = 0
     recent_loss_count = 0
+    recent_loss_total_if_stop_now = 0.0
 
     for pos in raw_positions:
         symbol = str(pos.get("symbol", "")).upper()
@@ -655,6 +665,7 @@ async def get_open_positions(
         if not is_long_term and holding_minutes <= 24 * 60:
             if unrealized_pnl is not None and unrealized_pnl < 0:
                 recent_loss_count += 1
+                recent_loss_total_if_stop_now += abs(unrealized_pnl)
 
         total_notional += notional
         total_holding_minutes += holding_minutes
@@ -722,6 +733,12 @@ async def get_open_positions(
         "concentration_top3": concentration_top3,
         "concentration_hhi": concentration_hhi,
         "recent_loss_count": recent_loss_count,
+        "recent_loss_total_if_stop_now": recent_loss_total_if_stop_now,
+        "recent_loss_pct_of_balance": (
+            (recent_loss_total_if_stop_now / latest_balance) * 100
+            if latest_balance > 0
+            else 0.0
+        ),
         "profit_alert_threshold_pct": profit_alert_threshold_pct
     }
 

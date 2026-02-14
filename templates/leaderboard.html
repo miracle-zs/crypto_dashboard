@@ -432,6 +432,30 @@
         .metric-tab-panel { display: none; }
         .metric-tab-panel.active { display: block; }
 
+        .core-board-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 430px;
+        }
+
+        .core-board-head {
+            min-height: 64px;
+        }
+
+        .core-board-subhead {
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+        }
+
+        .core-board-table-wrap {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
         .snap-select {
             border: 2px solid var(--border);
             border-radius: 999px;
@@ -732,26 +756,30 @@
             <button id="btn-mobile-losers" class="board-switch-btn">Losers</button>
         </div>
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div id="panel-gainers" class="panel-reveal">
-                <div class="glass-panel panel-tier-main overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+            <div id="panel-gainers" class="panel-reveal h-full">
+                <div class="glass-panel panel-tier-main overflow-hidden core-board-panel h-full">
+                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center core-board-head">
                         <h3 class="text-sm font-bold text-slate-500 flex items-center">
                             <i data-lucide="list-ordered" class="mr-2 w-4 h-4 text-cyan-500"></i>
                             <span id="gainers-title">GAINERS TOP N</span>
                         </h3>
-                        <span class="text-[11px] text-slate-500">Daily snapshot @ 07:40</span>
+                        <div class="text-right">
+                            <div class="text-[11px] font-mono text-slate-600">Top movers by change</div>
+                            <div class="text-[11px] text-slate-500">Daily snapshot @ 07:40</div>
+                        </div>
+                    </div>
+                    <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20 core-board-subhead">
+                        当日涨幅排序（Top N）
                     </div>
 
-                    <div class="hidden md:block overflow-x-auto">
-                        <table class="leader-table w-full text-left text-sm min-w-[980px]">
+                    <div class="hidden md:block overflow-x-auto core-board-table-wrap">
+                        <table class="leader-table w-full text-left text-sm min-w-[760px]">
                             <thead>
                             <tr>
                                 <th class="px-4 py-3">Rank</th>
                                 <th class="px-4 py-3">Symbol</th>
                                 <th class="px-4 py-3 text-right">Price</th>
                                 <th class="px-4 py-3 text-right">Change</th>
-                                <th class="px-4 py-3 text-right">Vs Yesterday</th>
-                                <th class="px-4 py-3 text-right">Appear 7D</th>
                                 <th class="px-4 py-3 text-right">24h Quote Volume</th>
                             </tr>
                             </thead>
@@ -763,9 +791,9 @@
                 </div>
             </div>
 
-            <div id="panel-losers" class="panel-reveal">
-                <div class="glass-panel panel-tier-main overflow-hidden">
-                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+            <div id="panel-losers" class="panel-reveal h-full">
+                <div class="glass-panel panel-tier-main overflow-hidden core-board-panel h-full">
+                    <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center core-board-head">
                         <h3 class="text-sm font-bold text-slate-500 flex items-center">
                             <i data-lucide="trending-down" class="mr-2 w-4 h-4 text-red-500"></i>
                             <span id="losers-title">LOSERS TOP N</span>
@@ -775,20 +803,18 @@
                             <div class="text-[11px] text-slate-500">Daily snapshot @ 07:40</div>
                         </div>
                     </div>
-                    <div id="losers-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                    <div id="losers-hit-symbols" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20 core-board-subhead">
                         命中 symbols: --
                     </div>
 
-                    <div class="hidden md:block overflow-x-auto">
-                        <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <div class="hidden md:block overflow-x-auto core-board-table-wrap">
+                        <table class="leader-table w-full text-left text-sm min-w-[860px]">
                             <thead>
                             <tr>
                                 <th class="px-4 py-3">Rank</th>
                                 <th class="px-4 py-3">Symbol</th>
                                 <th class="px-4 py-3 text-right">Price</th>
                                 <th class="px-4 py-3 text-right">Change</th>
-                                <th class="px-4 py-3 text-right">Vs Yesterday</th>
-                                <th class="px-4 py-3 text-right">Appear 7D</th>
                                 <th class="px-4 py-3 text-right">24h Quote Volume</th>
                                 <th class="px-4 py-3">Prev Gainer</th>
                             </tr>
@@ -1327,7 +1353,6 @@
         cards.innerHTML = '';
 
         rows.forEach((row, idx) => {
-            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
             const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
 
             const tr = document.createElement('tr');
@@ -1336,8 +1361,6 @@
                 <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
                 <td class="px-4 py-3 text-right rank-up font-bold">${formatChange(row.change)}</td>
-                <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
-                <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
             `;
             tableBody.appendChild(tr);
@@ -1364,11 +1387,6 @@
                         <div class="v">${formatVolume(row.volume)}</div>
                     </div>
                 </div>
-                <details class="mobile-more">
-                    <summary>展开详情</summary>
-                    <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
-                    <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
-                </details>
             `;
             cards.appendChild(card);
         });
@@ -1379,7 +1397,6 @@
         losersCards.innerHTML = '';
 
         rows.forEach((row, idx) => {
-            const delta = getDeltaMeta(row.rank_delta_vs_yesterday);
             const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
             const reversal = row.was_prev_gainer_top
                 ? `<span class="reversal-badge">昨涨#${row.prev_gainer_rank}</span>`
@@ -1394,8 +1411,6 @@
                 <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
                 <td class="px-4 py-3 text-right rank-down font-bold">${formatChange(row.change)}</td>
-                <td class="px-4 py-3 text-right ${delta.cls} font-bold">${delta.text}</td>
-                <td class="px-4 py-3 text-right font-mono">${row.appearances_7d || 0}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
                 <td class="px-4 py-3">${reversal}</td>
             `;
@@ -1426,8 +1441,6 @@
                 <details class="mobile-more">
                     <summary>展开详情</summary>
                     <div class="mt-1 text-xs text-slate-500">昨涨幅榜Top10: ${reversalText}</div>
-                    <div class="mt-2 text-xs ${delta.cls}">昨排变化: ${delta.text}</div>
-                    <div class="mt-1 text-xs text-slate-500">7日出现: ${row.appearances_7d || 0}</div>
                 </details>
             `;
             losersCards.appendChild(card);

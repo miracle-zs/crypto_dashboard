@@ -665,6 +665,15 @@ class TradeDataScheduler:
 
             if loss_positions:
                 count = len(loss_positions)
+                total_stop_loss = sum(
+                    abs(float(pos.get('current_pnl', 0.0)))
+                    for pos in loss_positions
+                )
+                latest_balance = 0.0
+                balance_history = self.db.get_balance_history(limit=1)
+                if balance_history:
+                    latest_balance = float(balance_history[-1].get('balance') or 0.0)
+                stop_loss_pct_of_balance = (total_stop_loss / latest_balance * 100) if latest_balance > 0 else 0.0
                 title = f"⚠️ 午间浮亏警报: {count}个新订单"
                 content = f"北京时间 11:50 监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
                 content += "--- \n"
@@ -684,9 +693,18 @@ class TradeDataScheduler:
                         f"- 时间: {pos['entry_time']}\n\n"
                     )
 
-                content += "请及时关注风险。"
+                content += (
+                    f"**若全部执行止损，预计总计亏损: {total_stop_loss:.2f} U "
+                    f"(占账户余额 {stop_loss_pct_of_balance:.2f}%)**\n\n"
+                    f"建议：考虑全部止损，预计亏损 {total_stop_loss:.2f} U "
+                    f"(占余额 {stop_loss_pct_of_balance:.2f}%)。"
+                )
                 send_server_chan_notification(title, content)
-                logger.info(f"已发送午间浮亏提醒: {count} 个订单")
+                logger.info(
+                    f"已发送午间浮亏提醒: {count} 个订单，"
+                    f"总止损亏损 {total_stop_loss:.2f} U，"
+                    f"占账户余额 {stop_loss_pct_of_balance:.2f}%"
+                )
 
         except Exception as e:
             logger.error(f"午间风控检查失败: {e}")
