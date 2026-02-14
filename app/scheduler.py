@@ -101,12 +101,16 @@ class TradeDataScheduler:
         self.rebound_7d_weight_budget_per_minute = _env_int('REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.rebound_7d_hour = _env_int('REBOUND_7D_HOUR', 7, minimum=0)
         self.rebound_7d_minute = _env_int('REBOUND_7D_MINUTE', 30, minimum=0)
+        self.noon_review_hour = _env_int('NOON_REVIEW_HOUR', 23, minimum=0)
+        self.noon_review_minute = _env_int('NOON_REVIEW_MINUTE', 2, minimum=0)
         self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
         self.profit_alert_threshold_pct = _env_float('PROFIT_ALERT_THRESHOLD_PCT', 20.0, minimum=0.0)
         self.leaderboard_alert_hour %= 24
         self.leaderboard_alert_minute %= 60
         self.rebound_7d_hour %= 24
         self.rebound_7d_minute %= 60
+        self.noon_review_hour %= 24
+        self.noon_review_minute %= 60
         self.api_job_lock_wait_seconds = _env_int('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
         self._api_job_lock = threading.Lock()
 
@@ -681,7 +685,9 @@ class TradeDataScheduler:
                 current_price = pos.get('current_price')
                 snapshot_rows.append({
                     'symbol': pos.get('symbol'),
+                    'order_id': pos.get('order_id'),
                     'side': pos.get('side'),
+                    'qty': float(pos.get('qty', 0.0)),
                     'entry_time': pos.get('entry_time'),
                     'entry_price': float(pos.get('entry_price', 0.0)),
                     'current_price': (float(current_price) if current_price is not None else None),
@@ -735,6 +741,190 @@ class TradeDataScheduler:
 
         except Exception as e:
             logger.error(f"午间风控检查失败: {e}")
+
+    def review_noon_loss_at_night(self):
+        """每晚复盘午间止损建议：若未砍仓，23:00后亏损是多少。"""
+        try:
+            now = datetime.now(UTC8)
+            snapshot_date = now.strftime("%Y-%m-%d")
+            noon_snapshot = self.db.get_noon_loss_snapshot_by_date(snapshot_date)
+
+            if not noon_snapshot:
+                self.db.save_noon_loss_review_snapshot({
+                    "snapshot_date": snapshot_date,
+                    "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "noon_loss_count": 0,
+                    "not_cut_count": 0,
+                    "noon_cut_loss_total": 0.0,
+                    "hold_loss_total": 0.0,
+                    "delta_loss_total": 0.0,
+                    "pct_of_balance": 0.0,
+                    "balance": 0.0,
+                    "rows": [],
+                })
+                logger.info(f"午间止损复盘已记录空快照: date={snapshot_date}, reason=no_noon_snapshot")
+                return
+
+            noon_rows = noon_snapshot.get("rows", []) or []
+            open_positions = self.db.get_open_positions()
+
+            open_key_map = {}
+            open_symbol_map = {}
+            for pos in open_positions:
+                symbol = str(pos.get("symbol", "")).upper().strip()
+                order_id = pos.get("order_id")
+                key = f"{symbol}_{'' if order_id is None else str(order_id)}"
+                open_key_map[key] = pos
+                open_symbol_map.setdefault(symbol, []).append(pos)
+
+            review_rows = []
+            not_cut_count = 0
+            noon_cut_loss_total = 0.0
+            hold_loss_total = 0.0
+
+            for item in noon_rows:
+                symbol = str(item.get("symbol", "")).upper().strip()
+                if not symbol:
+                    continue
+
+                row_order_id = item.get("order_id")
+                order_key = "" if row_order_id is None else str(row_order_id)
+                open_pos = open_key_map.get(f"{symbol}_{order_key}") if order_key else None
+
+                # 兼容历史快照（无 order_id）或交易所返回格式变化
+                if open_pos is None:
+                    matches = open_symbol_map.get(symbol, [])
+                    if len(matches) == 1:
+                        open_pos = matches[0]
+
+                noon_pnl = float(item.get("current_pnl", 0.0) or 0.0)
+                noon_loss = abs(min(noon_pnl, 0.0))
+
+                if open_pos is None:
+                    review_rows.append({
+                        "symbol": symbol,
+                        "order_id": row_order_id,
+                        "status": "closed",
+                        "side": item.get("side"),
+                        "qty": float(item.get("qty", 0.0) or 0.0),
+                        "entry_price": float(item.get("entry_price", 0.0) or 0.0),
+                        "current_price": None,
+                        "noon_pnl": noon_pnl,
+                        "night_pnl": None,
+                        "noon_loss": noon_loss,
+                        "night_loss": 0.0,
+                        "delta_loss": -noon_loss,
+                    })
+                    continue
+
+                not_cut_count += 1
+
+                side = str(open_pos.get("side", item.get("side", ""))).upper()
+                entry_price = float(open_pos.get("entry_price", item.get("entry_price", 0.0)) or 0.0)
+                qty = float(open_pos.get("qty", item.get("qty", 0.0)) or 0.0)
+
+                current_price = None
+                try:
+                    symbol_for_quote = self._normalize_futures_symbol(symbol)
+                    ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': symbol_for_quote})
+                    if ticker and ticker.get('price') is not None:
+                        current_price = float(ticker['price'])
+                except Exception as e:
+                    logger.warning(f"夜间复盘获取价格失败: {symbol} - {e}")
+
+                if current_price is None:
+                    fallback_price = item.get("current_price")
+                    if fallback_price is not None:
+                        current_price = float(fallback_price)
+                    else:
+                        current_price = entry_price
+
+                if side == "SHORT":
+                    night_pnl = (entry_price - current_price) * qty
+                else:
+                    night_pnl = (current_price - entry_price) * qty
+
+                night_loss = abs(min(night_pnl, 0.0))
+                delta_loss = night_loss - noon_loss
+
+                noon_cut_loss_total += noon_loss
+                hold_loss_total += night_loss
+
+                review_rows.append({
+                    "symbol": symbol,
+                    "order_id": open_pos.get("order_id", row_order_id),
+                    "status": "not_cut",
+                    "side": side,
+                    "qty": qty,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "noon_pnl": noon_pnl,
+                    "night_pnl": night_pnl,
+                    "noon_loss": noon_loss,
+                    "night_loss": night_loss,
+                    "delta_loss": delta_loss,
+                })
+
+            delta_loss_total = hold_loss_total - noon_cut_loss_total
+            latest_balance = 0.0
+            balance_history = self.db.get_balance_history(limit=1)
+            if balance_history:
+                latest_balance = float(balance_history[-1].get("balance") or 0.0)
+            pct_of_balance = (hold_loss_total / latest_balance * 100) if latest_balance > 0 else 0.0
+
+            self.db.save_noon_loss_review_snapshot({
+                "snapshot_date": snapshot_date,
+                "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "noon_loss_count": len(noon_rows),
+                "not_cut_count": not_cut_count,
+                "noon_cut_loss_total": noon_cut_loss_total,
+                "hold_loss_total": hold_loss_total,
+                "delta_loss_total": delta_loss_total,
+                "pct_of_balance": pct_of_balance,
+                "balance": latest_balance,
+                "rows": review_rows,
+            })
+            logger.info(
+                f"午间止损复盘完成: date={snapshot_date}, "
+                f"noon_loss_count={len(noon_rows)}, not_cut_count={not_cut_count}, "
+                f"noon_cut_loss_total={noon_cut_loss_total:.2f} U, "
+                f"hold_loss_total={hold_loss_total:.2f} U, "
+                f"delta_loss_total={delta_loss_total:.2f} U"
+            )
+
+            if not_cut_count <= 0:
+                return
+
+            review_not_cut_rows = [row for row in review_rows if row.get("status") == "not_cut"]
+            review_not_cut_rows.sort(key=lambda x: x.get("night_loss", 0.0), reverse=True)
+
+            title = f"🌙 午间止损复盘: {not_cut_count}个未砍仓"
+            content = (
+                f"北京时间 {now.strftime('%H:%M')} 复盘结果（{snapshot_date}）\n\n"
+                f"- 午间若止损总亏损: {noon_cut_loss_total:.2f} U\n"
+                f"- 持有到夜间总亏损: {hold_loss_total:.2f} U\n"
+                f"- 差值(夜间-午间): {delta_loss_total:+.2f} U\n"
+                f"- 当前亏损占账户余额: {pct_of_balance:.2f}%\n\n"
+                "---\n"
+            )
+            for row in review_not_cut_rows[:10]:
+                content += (
+                    f"**{row['symbol']}** ({row['side']})\n"
+                    f"- 夜间亏损: {row['night_loss']:.2f} U\n"
+                    f"- 午间若砍: {row['noon_loss']:.2f} U\n"
+                    f"- 差值: {row['delta_loss']:+.2f} U\n\n"
+                )
+
+            if delta_loss_total > 0:
+                content += "结论：今晚看，不砍仓更差，午间止损更优。"
+            elif delta_loss_total < 0:
+                content += "结论：今晚看，不砍仓更优，但需结合纪律避免幸存者偏差。"
+            else:
+                content += "结论：两种处理结果接近。"
+
+            send_server_chan_notification(title, content)
+        except Exception as e:
+            logger.error(f"午间止损夜间复盘失败: {e}")
 
     def _build_top_gainers_snapshot(self):
         """构建涨跌幅榜快照（不处理锁与冷却）。"""
@@ -1348,6 +1538,22 @@ class TradeDataScheduler:
             replace_existing=True
         )
 
+        # 添加午间止损复盘任务 - 每天 23:02 (UTC+8) 执行（默认）
+        self.scheduler.add_job(
+            func=self.review_noon_loss_at_night,
+            trigger=CronTrigger(
+                hour=self.noon_review_hour,
+                minute=self.noon_review_minute,
+                timezone=UTC8
+            ),
+            id='review_noon_loss_night',
+            name='午间止损夜间复盘',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+            replace_existing=True
+        )
+
         # 添加午间浮亏检查任务 - 每天 11:50 (UTC+8) 执行
         self.scheduler.add_job(
             func=self.check_recent_losses_at_noon,
@@ -1408,6 +1614,10 @@ class TradeDataScheduler:
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
         logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
         logger.info("睡前风控检查已启动: 每天 23:00 执行")
+        logger.info(
+            "午间止损夜间复盘已启动: "
+            f"每天 {self.noon_review_hour:02d}:{self.noon_review_minute:02d} 执行"
+        )
 
     def stop(self):
         """停止定时任务"""

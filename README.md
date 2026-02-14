@@ -35,12 +35,15 @@
 - **僵尸仓位预警**: 自动标记持仓超过 **48小时** 的短线订单 (Stale Position)。
 - **过夜风险提示**: 监控每日 23:00 后的持仓符号数量，防止过度分散。
 - **连败保护**: 监控近期连续亏损笔数，触发“熔断”建议。
+- **午间浮亏快照**: 每天 **11:50 (UTC+8)** 记录“若全部止损”的预计亏损、占余额比例及逐币种快照。
+- **夜间止损复盘**: 每天 **23:02 (UTC+8, 可配)** 复盘午间建议币种，统计“若不砍仓”到夜间的实际亏损与差值，支持按天对比。
 
 ### 🏆 4. 每日涨幅榜快照与复盘 (Leaderboard Snapshot)
 - **每日固定快照**: 默认每天 **07:40 (UTC+8)** 生成涨幅榜快照并入库（`leaderboard_snapshots`）。
 - **历史回看**: 支持按日期查看历史快照（今天、昨天、近7天等），便于盘前/盘后复盘。
 - **持仓联动**: 榜单会标记“已持仓”币种，帮助快速识别“榜上标的 vs 当前仓位”的重叠。
 - **非实时设计**: 榜单页默认读取数据库快照，不依赖实时计算，稳定且可追溯。
+- **14D反弹榜**: 默认每天 **07:30 (UTC+8)** 生成“当前价相对近14天最低价涨幅”TopN 快照并入库（接口路径保留 `rebound-7d` 兼容名）。
 
 ### ⚡ 5. 极致性能与体验
 - **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
@@ -136,18 +139,27 @@ LEADERBOARD_MAX_SYMBOLS=120
 
 # 晨间14D反弹榜任务 (可选，默认开启，每天 07:30 UTC+8)
 # 规则：计算 current_price 相对 14天最低价 的涨幅，按涨幅降序取TopN
+# 说明：变量名保留 REBOUND_7D_* 为兼容历史配置，实际窗口已是14D
 ENABLE_REBOUND_7D_SNAPSHOT=1
 REBOUND_7D_HOUR=7
 REBOUND_7D_MINUTE=30
 REBOUND_7D_TOP_N=10
 # 14D反弹榜逐币种K线并发（默认6）
 REBOUND_7D_KLINE_WORKERS=6
+# 14D反弹榜每分钟API权重预算（默认900，建议 < 1200）
+REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE=900
+
+# 午间止损夜间复盘任务 (可选，默认每天 23:02 UTC+8)
+NOON_REVIEW_HOUR=23
+NOON_REVIEW_MINUTE=2
+
 # API任务互斥锁等待秒数（默认8；0=关闭互斥锁）
 API_JOB_LOCK_WAIT_SECONDS=8
 ```
 
 说明：
 - `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
+- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**，建议继续沿用，避免旧环境变量失效。
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
 - 如果你只关心每天 07:40 的快照，可适当调大 `UPDATE_INTERVAL_MINUTES`，减少高频同步压力。
 
@@ -165,6 +177,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/leaderboard`：涨幅榜快照（LEADERBOARD）
   - `/metrics`：指标文档（METRICS）
   - `/logs`：系统日志（LOGS）
+- `MONITOR` 页面复盘入口：
+  - 左侧新增 `Daily Stop-Loss Review Comparison` 对比表（近7天默认）。
+  - 点击某一日期行可展开当日逐币种明细（`Symbol / Noon Loss / Night Loss / Delta`）。
+  - 右侧 `Daily Stats` 保留当日摘要提示，详细复盘以左侧表格为准。
 - 涨幅榜相关接口：
   - `/api/leaderboard`：读取最新快照
   - `/api/leaderboard?date=YYYY-MM-DD`：读取指定日期快照
@@ -173,14 +189,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/api/rebound-7d`：读取最新快照
   - `/api/rebound-7d?date=YYYY-MM-DD`：读取指定日期快照
   - `/api/rebound-7d/dates`：读取可选快照日期列表（倒序）
+- 午间浮亏与复盘接口：
+  - `/api/open-positions`：返回午间快照与夜间复盘摘要（`summary.recent_loss_*`、`summary.noon_review_*`）
+  - `/api/noon-loss-review-history?limit=7`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
 
 ### 5. 内置调度任务（默认）
 - `sync_trades`：每 `UPDATE_INTERVAL_MINUTES` 分钟同步交易
 - `sync_balance`：每 1 分钟同步余额（启用用户数据流时跳过）
 - `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
 - `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）
+- `review_noon_loss_night`：每天 23:02 执行午间止损夜间复盘（UTC+8，可通过 `NOON_REVIEW_HOUR/MINUTE` 调整）
 - `send_morning_top_gainers`：每天 07:40 生成晨间涨幅榜快照（UTC+8，可关闭）
 - `snapshot_morning_rebound_7d`：每天 07:30 生成晨间14D反弹榜快照（UTC+8，可关闭）
+
+### 6. 风控复盘数据落库
+- `noon_loss_snapshots`：保存每天 11:50 午间浮亏快照（汇总 + 逐币种 rows）。
+- `noon_loss_review_snapshots`：保存每天夜间复盘结果（汇总 + 逐币种 rows）。
+- 两张表均以 `snapshot_date` 唯一键，支持按天覆盖更新，便于稳定复盘与回溯。
 
 ---
 

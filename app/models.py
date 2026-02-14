@@ -98,6 +98,14 @@ class OpenPositionsSummary(BaseModel):
     recent_loss_snapshot_date: Optional[str] = None
     recent_loss_snapshot_time: Optional[str] = None
     recent_loss_snapshot_ready: bool = False
+    noon_review_snapshot_date: Optional[str] = None
+    noon_review_snapshot_time: Optional[str] = None
+    noon_review_snapshot_ready: bool = False
+    noon_review_not_cut_count: int = 0
+    noon_review_noon_cut_loss_total: float = 0.0
+    noon_review_hold_loss_total: float = 0.0
+    noon_review_delta_loss_total: float = 0.0
+    noon_review_pct_of_balance: float = 0.0
     profit_alert_threshold_pct: float = 20.0
 
 
