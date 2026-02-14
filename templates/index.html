@@ -867,7 +867,10 @@
                 }
             }
 
-            document.getElementById('metric-mdd').innerText = `-$${stats.max_drawdown}`;
+            const maxSingleLoss = Number(
+                stats.max_single_loss !== undefined ? stats.max_single_loss : stats.max_drawdown
+            ) || 0;
+            document.getElementById('metric-mdd').innerText = `-$${Math.abs(maxSingleLoss)}`;
 
             renderChart(stats.equity_curve, trades);
             renderDurationChart(trades);

@@ -632,6 +632,8 @@ class Database:
                 data['equity_curve'] = []
         else:
             data['equity_curve'] = []
+        # Backward-compatible alias: this field historically stored max single-trade loss.
+        data['max_single_loss'] = float(data.get('max_drawdown', 0.0) or 0.0)
         return data
 
     def save_trade_summary(self, summary: Dict):
@@ -680,7 +682,7 @@ class Database:
             int(summary.get('current_streak', 0)),
             int(summary.get('best_win_streak', 0)),
             int(summary.get('worst_loss_streak', 0)),
-            float(summary.get('max_drawdown', 0.0)),
+            float(summary.get('max_single_loss', summary.get('max_drawdown', 0.0))),
             float(summary.get('profit_factor', 0.0)),
             float(summary.get('kelly_criterion', 0.0)),
             float(summary.get('sqn', 0.0)),
@@ -707,6 +709,7 @@ class Database:
                 'current_streak': 0,
                 'best_win_streak': 0,
                 'worst_loss_streak': 0,
+                'max_single_loss': 0.0,
                 'max_drawdown': 0.0,
                 'profit_factor': 0.0,
                 'kelly_criterion': 0.0,
@@ -764,7 +767,7 @@ class Database:
             if streak < worst_loss_streak:
                 worst_loss_streak = streak
 
-        max_drawdown = float(df['PNL_Net'].min()) if not df.empty else 0.0
+        max_single_loss = float(df['PNL_Net'].min()) if not df.empty else 0.0
         total_wins = float(df[df['PNL_Net'] > 0]['PNL_Net'].sum())
         total_losses = abs(float(df[df['PNL_Net'] < 0]['PNL_Net'].sum()))
         profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
@@ -800,7 +803,8 @@ class Database:
             'current_streak': current_streak,
             'best_win_streak': best_win_streak,
             'worst_loss_streak': worst_loss_streak,
-            'max_drawdown': max_drawdown,
+            'max_single_loss': max_single_loss,
+            'max_drawdown': max_single_loss,  # legacy field name
             'profit_factor': profit_factor,
             'kelly_criterion': kelly_criterion,
             'sqn': float(sqn),

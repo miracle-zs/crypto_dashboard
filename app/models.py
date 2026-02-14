@@ -35,6 +35,7 @@ class TradeSummary(BaseModel):
     current_streak: int
     best_win_streak: int
     worst_loss_streak: int
+    max_single_loss: Optional[float] = None
     max_drawdown: float
     profit_factor: float
     kelly_criterion: float

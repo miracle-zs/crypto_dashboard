@@ -1005,10 +1005,10 @@ class TradeDataScheduler:
                             # 3. 计算"无法解释的差额" (疑似出入金)
                             transfer_est = wallet_diff - trading_flow
 
-                            # 4. 阈值判断 (> 1000 USDT)
-                            if abs(transfer_est) > 1000:
+                            # 4. 阈值判断 (> 500 USDT)
+                            if abs(transfer_est) > 500:
                                 logger.warning(f"监测到资金异动: 钱包变动 {wallet_diff:.2f}, 交易流 {trading_flow:.2f}, 差额 {transfer_est:.2f}")
-                                self.db.save_transfer(amount=transfer_est, type='auto', description="Auto-detected > 1000U")
+                                self.db.save_transfer(amount=transfer_est, type='auto', description="Auto-detected > 500U")
                             else:
                                 logger.info(f"未发现明显出入金: 差额 {transfer_est:.2f}")
 
