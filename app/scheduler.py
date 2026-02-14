@@ -95,10 +95,18 @@ class TradeDataScheduler:
         self.leaderboard_weight_budget_per_minute = _env_int('LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.leaderboard_alert_hour = _env_int('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
         self.leaderboard_alert_minute = _env_int('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
+        self.enable_rebound_7d_snapshot = os.getenv('ENABLE_REBOUND_7D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
+        self.rebound_7d_top_n = _env_int('REBOUND_7D_TOP_N', 10, minimum=1)
+        self.rebound_7d_kline_workers = _env_int('REBOUND_7D_KLINE_WORKERS', 6, minimum=1)
+        self.rebound_7d_weight_budget_per_minute = _env_int('REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
+        self.rebound_7d_hour = _env_int('REBOUND_7D_HOUR', 7, minimum=0)
+        self.rebound_7d_minute = _env_int('REBOUND_7D_MINUTE', 30, minimum=0)
         self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
         self.profit_alert_threshold_pct = _env_float('PROFIT_ALERT_THRESHOLD_PCT', 20.0, minimum=0.0)
         self.leaderboard_alert_hour %= 24
         self.leaderboard_alert_minute %= 60
+        self.rebound_7d_hour %= 24
+        self.rebound_7d_minute %= 60
         self.api_job_lock_wait_seconds = _env_int('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
         self._api_job_lock = threading.Lock()
 
@@ -939,6 +947,226 @@ class TradeDataScheduler:
             f"elapsed={time.perf_counter() - started_at:.2f}s"
         )
 
+    def _build_rebound_7d_snapshot(self):
+        """构建7D反弹幅度榜快照（不处理锁与冷却）。"""
+        stage_started_at = time.perf_counter()
+        now_utc = datetime.now(timezone.utc)
+        window_start_utc = now_utc - timedelta(days=7)
+
+        exchange_info = self.processor.get_exchange_info(client=self.processor.client)
+        if not exchange_info or 'symbols' not in exchange_info:
+            raise RuntimeError("无法获取 exchangeInfo")
+
+        usdt_perpetual_symbols = {
+            item.get('symbol')
+            for item in exchange_info.get('symbols', [])
+            if item.get('contractType') == 'PERPETUAL' and item.get('quoteAsset') == 'USDT'
+        }
+        if not usdt_perpetual_symbols:
+            raise RuntimeError("无可用USDT永续交易对")
+
+        ticker_data = self.processor.client.public_get('/fapi/v1/ticker/price')
+        if not ticker_data:
+            raise RuntimeError("无法获取 ticker/price")
+        if isinstance(ticker_data, dict):
+            ticker_data = [ticker_data]
+
+        candidates = []
+        for item in ticker_data:
+            symbol = item.get('symbol')
+            if not symbol or symbol not in usdt_perpetual_symbols:
+                continue
+            try:
+                current_price = float(item.get('price', 0.0))
+            except (TypeError, ValueError):
+                continue
+            if current_price <= 0:
+                continue
+            candidates.append({
+                'symbol': symbol,
+                'current_price': current_price,
+            })
+
+        # 稳定排序，确保同等条件下输出一致
+        candidates.sort(key=lambda x: x['symbol'])
+        logger.info(
+            "7D反弹榜候选统计: "
+            f"candidates={len(candidates)}, "
+            f"top_n={self.rebound_7d_top_n}"
+        )
+
+        rebound_rows = []
+        progress_step = 20
+        total_candidates = len(candidates)
+        if total_candidates > 0:
+            min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
+            per_worker_rpm = max(1.0, 60.0 / min_interval)
+            workers_by_budget = max(1, int(self.rebound_7d_weight_budget_per_minute // per_worker_rpm))
+            worker_count = min(total_candidates, self.rebound_7d_kline_workers, workers_by_budget)
+            estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
+            estimated_total_weight = 1 + 1 + total_candidates  # exchangeInfo + ticker/price + per-symbol klines
+            logger.info(
+                "7D反弹榜并发计划: "
+                f"workers={worker_count}, "
+                f"min_interval={min_interval:.2f}s, "
+                f"budget={self.rebound_7d_weight_budget_per_minute}/min, "
+                f"est_peak={estimated_peak_weight_per_min}/min, "
+                f"est_total_weight={estimated_total_weight}"
+            )
+
+            thread_local = threading.local()
+
+            def _kline_task(item: dict):
+                if self._is_api_cooldown_active(source='7D反弹榜-逐币种计算'):
+                    return item, None
+
+                worker_client = getattr(thread_local, "client", None)
+                if worker_client is None:
+                    worker_client = self.processor._create_worker_client()
+                    thread_local.client = worker_client
+
+                try:
+                    klines = worker_client.public_get('/fapi/v1/klines', {
+                        'symbol': item['symbol'],
+                        'interval': '1d',
+                        'limit': 7
+                    }) or []
+                except Exception:
+                    return item, None
+
+                lows = []
+                for kline in klines:
+                    if not isinstance(kline, list) or len(kline) < 4:
+                        continue
+                    try:
+                        low_price = float(kline[3])
+                        open_time = int(kline[0])
+                    except (TypeError, ValueError):
+                        continue
+                    if low_price <= 0:
+                        continue
+                    lows.append((low_price, open_time))
+
+                if not lows:
+                    return item, None
+
+                low_7d_price, low_7d_ts = min(lows, key=lambda entry: entry[0])
+                rebound_7d_pct = (item['current_price'] / low_7d_price - 1.0) * 100.0
+                low_7d_at_utc = datetime.fromtimestamp(
+                    low_7d_ts / 1000, tz=timezone.utc
+                ).strftime('%Y-%m-%d %H:%M:%S')
+                return item, {
+                    'low_7d': low_7d_price,
+                    'low_7d_at_utc': low_7d_at_utc,
+                    'rebound_7d_pct': rebound_7d_pct,
+                }
+
+            processed = 0
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(_kline_task, item) for item in candidates]
+                for future in as_completed(futures):
+                    processed += 1
+                    try:
+                        item, payload = future.result()
+                    except Exception as exc:
+                        logger.warning(f"7D反弹榜逐币种计算异常: {exc}")
+                        payload = None
+                        item = None
+
+                    if item and payload:
+                        rebound_rows.append({
+                            'symbol': item['symbol'],
+                            'current_price': item['current_price'],
+                            'low_7d': payload['low_7d'],
+                            'low_7d_at_utc': payload['low_7d_at_utc'],
+                            'rebound_7d_pct': payload['rebound_7d_pct'],
+                        })
+
+                    if processed % progress_step == 0 or processed == total_candidates:
+                        logger.info(
+                            "7D反弹榜进度: "
+                            f"{processed}/{total_candidates}, "
+                            f"effective={len(rebound_rows)}, "
+                            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+                        )
+
+        rebound_rows.sort(key=lambda x: x['rebound_7d_pct'], reverse=True)
+        top_list = rebound_rows[:self.rebound_7d_top_n]
+
+        snapshot = {
+            "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
+            "snapshot_time": datetime.now(UTC8).strftime('%Y-%m-%d %H:%M:%S'),
+            "window_start_utc": window_start_utc.strftime('%Y-%m-%d %H:%M:%S'),
+            "candidates": len(candidates),
+            "effective": len(rebound_rows),
+            "top": len(top_list),
+            "rows": top_list,
+            "all_rows": rebound_rows,
+        }
+        logger.info(
+            "7D反弹榜快照构建完成: "
+            f"candidates={snapshot['candidates']}, "
+            f"effective={snapshot['effective']}, "
+            f"top={snapshot['top']}, "
+            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+        )
+        return snapshot
+
+    def get_rebound_7d_snapshot(self, source: str = "7D反弹榜接口"):
+        """获取7D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
+        if not self.processor:
+            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
+        if self._is_api_cooldown_active(source=source):
+            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
+        if not self._try_enter_api_job_slot(source=source):
+            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
+
+        try:
+            snapshot = self._build_rebound_7d_snapshot()
+            if snapshot["top"] <= 0:
+                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
+            return {"ok": True, **snapshot}
+        except Exception as e:
+            logger.error(f"{source}失败: {e}")
+            return {"ok": False, "reason": "exception", "message": str(e)}
+        finally:
+            self._release_api_job_slot()
+
+    def snapshot_morning_rebound_7d(self):
+        """每天早上07:30生成7D反弹幅度Top榜快照并入库。"""
+        started_at = time.perf_counter()
+        logger.info(
+            "晨间7D反弹榜任务开始执行: "
+            f"schedule={self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d}"
+        )
+        result = self.get_rebound_7d_snapshot(source="晨间7D反弹榜")
+        logger.info(
+            "晨间7D反弹榜快照结果: "
+            f"ok={result.get('ok')}, "
+            f"reason={result.get('reason', '')}, "
+            f"candidates={result.get('candidates', 0)}, "
+            f"effective={result.get('effective', 0)}, "
+            f"top={result.get('top', 0)}"
+        )
+        if not result.get("ok"):
+            logger.warning(
+                f"晨间7D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
+            )
+            return
+
+        try:
+            self.db.save_rebound_7d_snapshot(result)
+            logger.info(
+                f"7D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
+            )
+        except Exception as e:
+            logger.error(f"保存7D反弹榜快照失败: {e}")
+
+        logger.info(
+            "晨间7D反弹榜任务完成: "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        )
+
     @staticmethod
     def _normalize_futures_symbol(symbol: str) -> str:
         """将库内symbol规范化为Binance USDT交易对symbol"""
@@ -1108,6 +1336,28 @@ class TradeDataScheduler:
             )
         else:
             logger.info("晨间涨幅榜任务未启用: ENABLE_LEADERBOARD_ALERT=0")
+
+        if self.enable_rebound_7d_snapshot:
+            self.scheduler.add_job(
+                func=self.snapshot_morning_rebound_7d,
+                trigger=CronTrigger(
+                    hour=self.rebound_7d_hour,
+                    minute=self.rebound_7d_minute,
+                    timezone=UTC8
+                ),
+                id='snapshot_morning_rebound_7d',
+                name='晨间7D反弹榜',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+                replace_existing=True
+            )
+            logger.info(
+                "晨间7D反弹榜任务已启动: "
+                f"每天 {self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d} 执行"
+            )
+        else:
+            logger.info("晨间7D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
 
         self.scheduler.start()
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")

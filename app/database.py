@@ -347,6 +347,26 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_leaderboard_daily_metrics_date ON leaderboard_daily_metrics(snapshot_date DESC)
         """)
 
+        # 7D反弹幅度榜快照（每天07:30记录一次）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rebound_7d_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL,
+                snapshot_time TEXT NOT NULL,
+                window_start_utc TEXT,
+                candidates INTEGER DEFAULT 0,
+                effective INTEGER DEFAULT 0,
+                top_count INTEGER DEFAULT 0,
+                rows_json TEXT,
+                all_rows_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(snapshot_date)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rebound_7d_snapshot_time ON rebound_7d_snapshots(snapshot_time DESC)
+        """)
+
         conn.commit()
         conn.close()
 
@@ -1640,3 +1660,103 @@ class Database:
             if snapshot_date:
                 result[snapshot_date] = item
         return result
+
+    def save_rebound_7d_snapshot(self, snapshot: Dict) -> None:
+        """保存/覆盖某天的7D反弹幅度榜快照（按 snapshot_date 唯一）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
+        all_rows_json = json.dumps(snapshot.get("all_rows", []), ensure_ascii=False)
+        cursor.execute("""
+            INSERT INTO rebound_7d_snapshots (
+                snapshot_date, snapshot_time, window_start_utc,
+                candidates, effective, top_count, rows_json, all_rows_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(snapshot_date) DO UPDATE SET
+                snapshot_time = excluded.snapshot_time,
+                window_start_utc = excluded.window_start_utc,
+                candidates = excluded.candidates,
+                effective = excluded.effective,
+                top_count = excluded.top_count,
+                rows_json = excluded.rows_json,
+                all_rows_json = excluded.all_rows_json,
+                created_at = CURRENT_TIMESTAMP
+        """, (
+            str(snapshot.get("snapshot_date")),
+            str(snapshot.get("snapshot_time")),
+            str(snapshot.get("window_start_utc", "")),
+            int(snapshot.get("candidates", 0)),
+            int(snapshot.get("effective", 0)),
+            int(snapshot.get("top", 0)),
+            rows_json,
+            all_rows_json
+        ))
+        conn.commit()
+        conn.close()
+
+    def _row_to_rebound_7d_snapshot(self, row: sqlite3.Row) -> Dict:
+        data = dict(row)
+        rows_json = data.get("rows_json")
+        all_rows_json = data.get("all_rows_json")
+        try:
+            data["rows"] = json.loads(rows_json) if rows_json else []
+        except Exception:
+            data["rows"] = []
+        try:
+            data["all_rows"] = json.loads(all_rows_json) if all_rows_json else []
+        except Exception:
+            data["all_rows"] = []
+        data.pop("rows_json", None)
+        data.pop("all_rows_json", None)
+        data["top"] = data.pop("top_count", 0)
+        return data
+
+    def get_latest_rebound_7d_snapshot(self) -> Optional[Dict]:
+        """获取最近一条7D反弹幅度榜快照。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        today = self._today_snapshot_date_utc8()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, all_rows_json
+            FROM rebound_7d_snapshots
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC, snapshot_time DESC
+            LIMIT 1
+        """, (today,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_rebound_7d_snapshot(row)
+
+    def get_rebound_7d_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
+        """按日期获取7D反弹幅度榜快照，snapshot_date 格式 YYYY-MM-DD。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, all_rows_json
+            FROM rebound_7d_snapshots
+            WHERE snapshot_date = ?
+            LIMIT 1
+        """, (snapshot_date,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_rebound_7d_snapshot(row)
+
+    def list_rebound_7d_snapshot_dates(self, limit: int = 90) -> List[str]:
+        """按时间倒序列出已存7D反弹幅度榜快照日期。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        today = self._today_snapshot_date_utc8()
+        cursor.execute("""
+            SELECT snapshot_date
+            FROM rebound_7d_snapshots
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC, snapshot_time DESC
+            LIMIT ?
+        """, (today, int(limit)))
+        rows = cursor.fetchall()
+        conn.close()
+        return [str(row["snapshot_date"]) for row in rows]

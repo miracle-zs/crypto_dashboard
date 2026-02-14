@@ -803,6 +803,40 @@
         </div>
     </div>
 
+    <div class="section-label">7D REBOUND SNAPSHOT</div>
+    <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
+        <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+            <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 7D REBOUND TOP 10
+            </h3>
+            <div class="text-right">
+                <div id="rebound-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
+                <div class="text-[11px] text-slate-500">Daily snapshot @ 07:30</div>
+            </div>
+        </div>
+        <div id="rebound-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+            Window -- UTC → snapshot
+        </div>
+
+        <div class="hidden md:block overflow-x-auto">
+            <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                <thead>
+                <tr>
+                    <th class="px-4 py-3">Rank</th>
+                    <th class="px-4 py-3">Symbol</th>
+                    <th class="px-4 py-3 text-right">7D Low</th>
+                    <th class="px-4 py-3 text-right">Current</th>
+                    <th class="px-4 py-3 text-right">Rebound</th>
+                    <th class="px-4 py-3 text-right">Low At (UTC)</th>
+                </tr>
+                </thead>
+                <tbody id="rebound-body"></tbody>
+            </table>
+        </div>
+
+        <div id="rebound-cards" class="md:hidden p-3 space-y-3"></div>
+    </div>
+
     <div class="section-label">METRIC ANALYSIS</div>
     <div class="space-y-3">
         <div class="glass-panel panel-tier-subtle p-2 panel-reveal">
@@ -952,6 +986,10 @@
     const cards = document.getElementById('leaderboard-cards');
     const losersTableBody = document.getElementById('losers-body');
     const losersCards = document.getElementById('losers-cards');
+    const reboundSummary = document.getElementById('rebound-summary');
+    const reboundWindow = document.getElementById('rebound-window');
+    const reboundBody = document.getElementById('rebound-body');
+    const reboundCards = document.getElementById('rebound-cards');
     const losersHitSummary = document.getElementById('losers-hit-summary');
     const losersHitSymbols = document.getElementById('losers-hit-symbols');
     const metric2Summary = document.getElementById('metric2-summary');
@@ -1396,6 +1434,91 @@
         });
     }
 
+    function renderReboundRows(rows) {
+        if (!reboundBody || !reboundCards) return;
+
+        reboundBody.innerHTML = '';
+        reboundCards.innerHTML = '';
+
+        rows.forEach((row, idx) => {
+            const reboundPct = Number(row.rebound_7d_pct);
+            const reboundClass = Number.isFinite(reboundPct)
+                ? (reboundPct >= 0 ? 'rank-up' : 'rank-down')
+                : 'rank-flat';
+            const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono">${row.rank || idx + 1}</td>
+                <td class="px-4 py-3 font-semibold">${row.symbol || '--'} ${held}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(row.low_7d)}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(row.current_price)}</td>
+                <td class="px-4 py-3 text-right ${reboundClass} font-bold">${formatChangeOrDash(row.rebound_7d_pct)}</td>
+                <td class="px-4 py-3 text-right font-mono">${row.low_7d_at_utc || '--'}</td>
+            `;
+            reboundBody.appendChild(tr);
+
+            const card = document.createElement('div');
+            card.className = 'mobile-row';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-mono text-xs">#${row.rank || idx + 1}</span>
+                    <span class="${reboundClass} font-bold">${formatChangeOrDash(row.rebound_7d_pct)}</span>
+                </div>
+                <div class="font-bold">${row.symbol || '--'} ${held}</div>
+                <div class="mobile-core">
+                    <div>
+                        <div class="k">7D Low</div>
+                        <div class="v">${formatPrice(row.low_7d)}</div>
+                    </div>
+                    <div>
+                        <div class="k">Current</div>
+                        <div class="v">${formatPrice(row.current_price)}</div>
+                    </div>
+                    <div>
+                        <div class="k">Rebound</div>
+                        <div class="v ${reboundClass}">${formatChangeOrDash(row.rebound_7d_pct)}</div>
+                    </div>
+                </div>
+                <details class="mobile-more">
+                    <summary>展开详情</summary>
+                    <div class="mt-2 text-xs text-slate-500">低点时间(UTC): ${row.low_7d_at_utc || '--'}</div>
+                </details>
+            `;
+            reboundCards.appendChild(card);
+        });
+    }
+
+    async function loadReboundSnapshot(selectedDate) {
+        if (!reboundSummary || !reboundWindow || !reboundBody || !reboundCards) return;
+
+        const endpoint = selectedDate
+            ? `/api/rebound-7d?date=${encodeURIComponent(selectedDate)}`
+            : '/api/rebound-7d';
+
+        try {
+            const response = await fetch(endpoint);
+            const data = await response.json();
+            if (!data.ok) {
+                reboundSummary.textContent = 'Top -- · --';
+                reboundWindow.textContent = data.message || '暂无7D反弹快照';
+                reboundBody.innerHTML = '';
+                reboundCards.innerHTML = '';
+                return;
+            }
+
+            const topCount = Number(data.top_count ?? data.top ?? (data.rows || []).length || 0);
+            reboundSummary.textContent = `Top ${topCount} · ${data.snapshot_date || '--'} ${(data.snapshot_time || '').split(' ').slice(1).join(' ') || '--'}`;
+            reboundWindow.textContent = `Window ${data.window_start_utc || '--'} UTC → snapshot`;
+            renderReboundRows(Array.isArray(data.rows) ? data.rows : []);
+        } catch (err) {
+            reboundSummary.textContent = 'Top -- · --';
+            reboundWindow.textContent = `加载失败: ${err.message || err}`;
+            reboundBody.innerHTML = '';
+            reboundCards.innerHTML = '';
+        }
+    }
+
     async function loadSnapshotDates() {
         try {
             const response = await fetch('/api/leaderboard/dates?limit=120');
@@ -1416,8 +1539,8 @@
     async function loadLeaderboard() {
         btnRefresh.disabled = true;
         statusText.textContent = '正在读取快照...';
+        const selectedDate = snapshotDateSelect.value;
         try {
-            const selectedDate = snapshotDateSelect.value;
             const endpoint = selectedDate
                 ? `/api/leaderboard?date=${encodeURIComponent(selectedDate)}`
                 : '/api/leaderboard';
@@ -1441,6 +1564,7 @@
                 renderMetric2(null);
                 renderMetric3(null);
                 renderMetricsHistory([]);
+                await loadReboundSnapshot(selectedDate);
                 return;
             }
 
@@ -1468,12 +1592,14 @@
             renderMetric2(data.next_day_drop_metric || null);
             renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
             await loadMetricsHistory();
+            await loadReboundSnapshot(selectedDate);
         } catch (err) {
             statusText.textContent = `请求异常: ${err.message || err}`;
             renderLosersReversal(null);
             renderMetric2(null);
             renderMetric3(null);
             renderMetricsHistory([]);
+            await loadReboundSnapshot(selectedDate);
         } finally {
             btnRefresh.disabled = false;
             lucide.createIcons();

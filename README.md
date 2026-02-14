@@ -133,6 +133,15 @@ LEADERBOARD_TOP_N=10
 LEADERBOARD_MIN_QUOTE_VOLUME=50000000
 # 候选币种上限（0=不设上限，默认120）
 LEADERBOARD_MAX_SYMBOLS=120
+
+# 晨间7D反弹榜任务 (可选，默认开启，每天 07:30 UTC+8)
+# 规则：计算 current_price 相对 7天最低价 的涨幅，按涨幅降序取TopN
+ENABLE_REBOUND_7D_SNAPSHOT=1
+REBOUND_7D_HOUR=7
+REBOUND_7D_MINUTE=30
+REBOUND_7D_TOP_N=10
+# 7D反弹榜逐币种K线并发（默认6）
+REBOUND_7D_KLINE_WORKERS=6
 # API任务互斥锁等待秒数（默认8；0=关闭互斥锁）
 API_JOB_LOCK_WAIT_SECONDS=8
 ```
@@ -160,6 +169,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/api/leaderboard`：读取最新快照
   - `/api/leaderboard?date=YYYY-MM-DD`：读取指定日期快照
   - `/api/leaderboard/dates`：读取可选快照日期列表（倒序）
+- 7D反弹榜相关接口：
+  - `/api/rebound-7d`：读取最新快照
+  - `/api/rebound-7d?date=YYYY-MM-DD`：读取指定日期快照
+  - `/api/rebound-7d/dates`：读取可选快照日期列表（倒序）
 
 ### 5. 内置调度任务（默认）
 - `sync_trades`：每 `UPDATE_INTERVAL_MINUTES` 分钟同步交易
@@ -167,6 +180,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
 - `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）
 - `send_morning_top_gainers`：每天 07:40 生成晨间涨幅榜快照（UTC+8，可关闭）
+- `snapshot_morning_rebound_7d`：每天 07:30 生成晨间7D反弹榜快照（UTC+8，可关闭）
 
 ---
 

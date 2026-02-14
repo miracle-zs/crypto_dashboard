@@ -28,9 +28,14 @@
 - `event_time`：事件时间（毫秒）
 - `payload`：原始事件 JSON
 
+### rebound_7d_snapshots
+- `snapshot_date` / `snapshot_time`：快照日期与时间（UTC+8）
+- `window_start_utc`：回看窗口起点（UTC）
+- `rows_json`：TopN 行（`symbol/current_price/low_7d/rebound_7d_pct/low_7d_at_utc`）
+- `all_rows_json`：全量候选行（用于后续扩展复盘）
+
 ### sync_status
 - `last_sync_time`
 - `last_entry_time`
 - `total_trades`
 - `status` / `error_message`
-

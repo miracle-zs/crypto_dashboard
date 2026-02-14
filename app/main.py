@@ -341,6 +341,75 @@ async def get_leaderboard_snapshot_dates(
     return {"dates": dates}
 
 
+@app.get("/api/rebound-7d")
+async def get_rebound_7d_snapshot(
+    date: Optional[str] = Query(None, description="Snapshot date in YYYY-MM-DD"),
+    db: Database = Depends(get_db)
+):
+    """获取7D反弹幅度榜历史快照（默认返回最新一条，不进行实时计算）"""
+    loop = asyncio.get_event_loop()
+    if date:
+        try:
+            requested_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            return {
+                "ok": False,
+                "reason": "invalid_date",
+                "message": f"日期格式错误: {date}，请使用 YYYY-MM-DD"
+            }
+        today_utc8 = datetime.now(UTC8).date()
+        if requested_date > today_utc8:
+            return {
+                "ok": False,
+                "reason": "future_date",
+                "message": f"请求日期 {date} 超过今天 {today_utc8.strftime('%Y-%m-%d')}"
+            }
+        snapshot = await loop.run_in_executor(None, db.get_rebound_7d_snapshot_by_date, date)
+    else:
+        snapshot = await loop.run_in_executor(None, db.get_latest_rebound_7d_snapshot)
+
+    if not snapshot:
+        return {
+            "ok": False,
+            "reason": "no_snapshot",
+            "message": "暂无快照数据，请等待下一次07:30定时任务生成"
+        }
+
+    open_positions = await loop.run_in_executor(None, db.get_open_positions)
+    held_symbols = set()
+    for pos in open_positions:
+        sym = str(pos.get("symbol", "")).upper().strip()
+        if not sym:
+            continue
+        held_symbols.add(sym)
+        held_symbols.add(_normalize_symbol(sym))
+
+    enriched_rows = []
+    for idx, row in enumerate(snapshot.get("rows", []), start=1):
+        symbol = str(row.get("symbol", "")).upper()
+        enriched_rows.append({
+            **row,
+            "rank": idx,
+            "is_held": symbol in held_symbols,
+        })
+
+    snapshot["rows"] = enriched_rows
+    snapshot["top_count"] = len(enriched_rows)
+    snapshot.pop("all_rows", None)
+    return {"ok": True, **snapshot}
+
+
+@app.get("/api/rebound-7d/dates")
+async def get_rebound_7d_snapshot_dates(
+    limit: int = Query(90, ge=1, le=365),
+    db: Database = Depends(get_db)
+):
+    """获取7D反弹幅度榜快照日期列表（倒序）"""
+    loop = asyncio.get_event_loop()
+    dates = await loop.run_in_executor(None, db.list_rebound_7d_snapshot_dates, limit)
+    return {"dates": dates}
+
+
 @app.get("/api/leaderboard/metrics-history")
 async def get_leaderboard_metrics_history(
     limit: int = Query(60, ge=1, le=365),
