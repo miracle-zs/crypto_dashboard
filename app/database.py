@@ -367,6 +367,25 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_rebound_7d_snapshot_time ON rebound_7d_snapshots(snapshot_time DESC)
         """)
 
+        # 午间浮亏快照（每天11:50记录一次）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS noon_loss_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date TEXT NOT NULL UNIQUE,
+                snapshot_time TEXT NOT NULL,
+                loss_count INTEGER DEFAULT 0,
+                total_stop_loss REAL DEFAULT 0.0,
+                pct_of_balance REAL DEFAULT 0.0,
+                balance REAL DEFAULT 0.0,
+                rows_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_noon_loss_snapshot_time ON noon_loss_snapshots(snapshot_time DESC)
+        """)
+
         conn.commit()
         conn.close()
 
@@ -1219,6 +1238,80 @@ class Database:
         conn.close()
         # 返回按时间升序排列
         return [dict(row) for row in reversed(rows)]
+
+    def save_noon_loss_snapshot(self, snapshot: Dict) -> None:
+        """保存/覆盖某天午间浮亏快照（按 snapshot_date 唯一）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
+        cursor.execute("""
+            INSERT INTO noon_loss_snapshots (
+                snapshot_date, snapshot_time, loss_count, total_stop_loss,
+                pct_of_balance, balance, rows_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(snapshot_date) DO UPDATE SET
+                snapshot_time = excluded.snapshot_time,
+                loss_count = excluded.loss_count,
+                total_stop_loss = excluded.total_stop_loss,
+                pct_of_balance = excluded.pct_of_balance,
+                balance = excluded.balance,
+                rows_json = excluded.rows_json,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            str(snapshot.get("snapshot_date")),
+            str(snapshot.get("snapshot_time")),
+            int(snapshot.get("loss_count", 0)),
+            float(snapshot.get("total_stop_loss", 0.0)),
+            float(snapshot.get("pct_of_balance", 0.0)),
+            float(snapshot.get("balance", 0.0)),
+            rows_json
+        ))
+        conn.commit()
+        conn.close()
+
+    def _row_to_noon_loss_snapshot(self, row: sqlite3.Row) -> Dict:
+        data = dict(row)
+        rows_json = data.get("rows_json")
+        try:
+            data["rows"] = json.loads(rows_json) if rows_json else []
+        except Exception:
+            data["rows"] = []
+        data.pop("rows_json", None)
+        return data
+
+    def get_noon_loss_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
+        """按日期读取午间浮亏快照，snapshot_date 格式 YYYY-MM-DD。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, loss_count, total_stop_loss, pct_of_balance, balance, rows_json
+            FROM noon_loss_snapshots
+            WHERE snapshot_date = ?
+            LIMIT 1
+        """, (snapshot_date,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_noon_loss_snapshot(row)
+
+    def get_latest_noon_loss_snapshot(self) -> Optional[Dict]:
+        """读取最新一条午间浮亏快照（不晚于今天UTC+8）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        today = self._today_snapshot_date_utc8()
+        cursor.execute("""
+            SELECT snapshot_date, snapshot_time, loss_count, total_stop_loss, pct_of_balance, balance, rows_json
+            FROM noon_loss_snapshots
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC, snapshot_time DESC
+            LIMIT 1
+        """, (today,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_noon_loss_snapshot(row)
 
     def save_leaderboard_snapshot(self, snapshot: Dict) -> None:
         """保存/覆盖某天的涨幅榜快照（按 snapshot_date 唯一）。"""

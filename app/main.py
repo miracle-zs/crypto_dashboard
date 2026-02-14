@@ -572,17 +572,18 @@ async def get_open_positions(
     """Get open positions with unrealized PnL and concentration metrics"""
     loop = asyncio.get_event_loop()
     profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
+    now = datetime.now(UTC8)
+    today_snapshot_date = now.strftime("%Y-%m-%d")
 
     # 数据库查询放入 executor
-    raw_positions, latest_balance_history = await asyncio.gather(
+    raw_positions, noon_loss_snapshot = await asyncio.gather(
         loop.run_in_executor(None, db.get_open_positions),
-        loop.run_in_executor(None, partial(db.get_balance_history, limit=1))
+        loop.run_in_executor(None, partial(db.get_noon_loss_snapshot_by_date, today_snapshot_date))
     )
-    latest_balance = 0.0
-    if latest_balance_history:
-        latest_balance = float(latest_balance_history[-1].get("balance") or 0.0)
-
-    now = datetime.now(UTC8)
+    noon_loss_count = int(noon_loss_snapshot.get("loss_count", 0)) if noon_loss_snapshot else 0
+    noon_stop_loss_total = float(noon_loss_snapshot.get("total_stop_loss", 0.0)) if noon_loss_snapshot else 0.0
+    noon_stop_loss_pct = float(noon_loss_snapshot.get("pct_of_balance", 0.0)) if noon_loss_snapshot else 0.0
+    noon_snapshot_time = str(noon_loss_snapshot.get("snapshot_time")) if noon_loss_snapshot else None
 
     if not raw_positions:
         return {
@@ -602,9 +603,12 @@ async def get_open_positions(
                 "concentration_top1": 0.0,
                 "concentration_top3": 0.0,
                 "concentration_hhi": 0.0,
-                "recent_loss_count": 0,
-                "recent_loss_total_if_stop_now": 0.0,
-                "recent_loss_pct_of_balance": 0.0,
+                "recent_loss_count": noon_loss_count,
+                "recent_loss_total_if_stop_now": noon_stop_loss_total,
+                "recent_loss_pct_of_balance": noon_stop_loss_pct,
+                "recent_loss_snapshot_date": today_snapshot_date if noon_loss_snapshot else None,
+                "recent_loss_snapshot_time": noon_snapshot_time,
+                "recent_loss_snapshot_ready": noon_loss_snapshot is not None,
                 "profit_alert_threshold_pct": profit_alert_threshold_pct
             }
         }
@@ -626,8 +630,6 @@ async def get_open_positions(
     short_notional = 0.0
     total_unrealized_pnl = 0.0
     total_holding_minutes = 0
-    recent_loss_count = 0
-    recent_loss_total_if_stop_now = 0.0
 
     for pos in raw_positions:
         symbol = str(pos.get("symbol", "")).upper()
@@ -660,12 +662,6 @@ async def get_open_positions(
 
         holding_minutes = max(0, int((now - entry_dt).total_seconds() // 60))
         holding_time = _format_holding_time(holding_minutes)
-
-        # 检查是否为24h内浮亏
-        if not is_long_term and holding_minutes <= 24 * 60:
-            if unrealized_pnl is not None and unrealized_pnl < 0:
-                recent_loss_count += 1
-                recent_loss_total_if_stop_now += abs(unrealized_pnl)
 
         total_notional += notional
         total_holding_minutes += holding_minutes
@@ -732,13 +728,12 @@ async def get_open_positions(
         "concentration_top1": concentration_top1,
         "concentration_top3": concentration_top3,
         "concentration_hhi": concentration_hhi,
-        "recent_loss_count": recent_loss_count,
-        "recent_loss_total_if_stop_now": recent_loss_total_if_stop_now,
-        "recent_loss_pct_of_balance": (
-            (recent_loss_total_if_stop_now / latest_balance) * 100
-            if latest_balance > 0
-            else 0.0
-        ),
+        "recent_loss_count": noon_loss_count,
+        "recent_loss_total_if_stop_now": noon_stop_loss_total,
+        "recent_loss_pct_of_balance": noon_stop_loss_pct,
+        "recent_loss_snapshot_date": today_snapshot_date if noon_loss_snapshot else None,
+        "recent_loss_snapshot_time": noon_snapshot_time,
+        "recent_loss_snapshot_ready": noon_loss_snapshot is not None,
         "profit_alert_threshold_pct": profit_alert_threshold_pct
     }
 

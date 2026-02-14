@@ -95,6 +95,9 @@ class OpenPositionsSummary(BaseModel):
     recent_loss_count: int = 0  # New field for risk protocol
     recent_loss_total_if_stop_now: float = 0.0
     recent_loss_pct_of_balance: float = 0.0
+    recent_loss_snapshot_date: Optional[str] = None
+    recent_loss_snapshot_time: Optional[str] = None
+    recent_loss_snapshot_ready: bool = False
     profit_alert_threshold_pct: float = 20.0
 
 

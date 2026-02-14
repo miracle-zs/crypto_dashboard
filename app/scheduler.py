@@ -663,23 +663,50 @@ class TradeDataScheduler:
                     except Exception as e:
                         logger.warning(f"获取实时价格失败: {e}")
 
+            count = len(loss_positions)
+            total_stop_loss = sum(
+                abs(float(pos.get('current_pnl', 0.0)))
+                for pos in loss_positions
+            )
+            latest_balance = 0.0
+            balance_history = self.db.get_balance_history(limit=1)
+            if balance_history:
+                latest_balance = float(balance_history[-1].get('balance') or 0.0)
+            stop_loss_pct_of_balance = (total_stop_loss / latest_balance * 100) if latest_balance > 0 else 0.0
+
+            # 按亏损金额排序 (从小到大，即亏损最多的在前)
+            loss_positions.sort(key=lambda x: x.get('current_pnl', 0.0))
+            snapshot_rows = []
+            for pos in loss_positions:
+                current_price = pos.get('current_price')
+                snapshot_rows.append({
+                    'symbol': pos.get('symbol'),
+                    'side': pos.get('side'),
+                    'entry_time': pos.get('entry_time'),
+                    'entry_price': float(pos.get('entry_price', 0.0)),
+                    'current_price': (float(current_price) if current_price is not None else None),
+                    'current_pnl': float(pos.get('current_pnl', 0.0)),
+                })
+
+            self.db.save_noon_loss_snapshot({
+                "snapshot_date": now.strftime("%Y-%m-%d"),
+                "snapshot_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "loss_count": count,
+                "total_stop_loss": total_stop_loss,
+                "pct_of_balance": stop_loss_pct_of_balance,
+                "balance": latest_balance,
+                "rows": snapshot_rows,
+            })
+            logger.info(
+                f"午间浮亏快照已保存: date={now.strftime('%Y-%m-%d')}, "
+                f"count={count}, total_stop_loss={total_stop_loss:.2f} U, "
+                f"pct_of_balance={stop_loss_pct_of_balance:.2f}%"
+            )
+
             if loss_positions:
-                count = len(loss_positions)
-                total_stop_loss = sum(
-                    abs(float(pos.get('current_pnl', 0.0)))
-                    for pos in loss_positions
-                )
-                latest_balance = 0.0
-                balance_history = self.db.get_balance_history(limit=1)
-                if balance_history:
-                    latest_balance = float(balance_history[-1].get('balance') or 0.0)
-                stop_loss_pct_of_balance = (total_stop_loss / latest_balance * 100) if latest_balance > 0 else 0.0
                 title = f"⚠️ 午间浮亏警报: {count}个新订单"
                 content = f"北京时间 11:50 监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
                 content += "--- \n"
-
-                # 按亏损金额排序 (从小到大，即亏损最多的在前)
-                loss_positions.sort(key=lambda x: x['current_pnl'])
 
                 for pos in loss_positions:
                     pnl_val = pos['current_pnl']
