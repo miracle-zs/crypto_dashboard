@@ -180,6 +180,8 @@ class Database:
                 last_alert_time TIMESTAMP,
                 profit_alerted INTEGER DEFAULT 0,
                 profit_alert_time TIMESTAMP,
+                reentry_alerted INTEGER DEFAULT 0,
+                reentry_alert_time TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(symbol, order_id)
             )
@@ -235,6 +237,26 @@ class Database:
             logger.info("正在迁移数据库: 添加 profit_alert_time 列...")
             try:
                 cursor.execute("ALTER TABLE open_positions ADD COLUMN profit_alert_time TIMESTAMP")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
+        # 检查是否需要迁移 reentry_alerted 列
+        try:
+            cursor.execute("SELECT reentry_alerted FROM open_positions LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 reentry_alerted 列...")
+            try:
+                cursor.execute("ALTER TABLE open_positions ADD COLUMN reentry_alerted INTEGER DEFAULT 0")
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
+        # 检查是否需要迁移 reentry_alert_time 列
+        try:
+            cursor.execute("SELECT reentry_alert_time FROM open_positions LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 reentry_alert_time 列...")
+            try:
+                cursor.execute("ALTER TABLE open_positions ADD COLUMN reentry_alert_time TIMESTAMP")
             except Exception as e:
                 logger.warning(f"列添加失败(可能已存在): {e}")
 
@@ -1017,6 +1039,10 @@ class Database:
                 query_cols.append("profit_alerted")
             if 'profit_alert_time' in columns:
                 query_cols.append("profit_alert_time")
+            if 'reentry_alerted' in columns:
+                query_cols.append("reentry_alerted")
+            if 'reentry_alert_time' in columns:
+                query_cols.append("reentry_alert_time")
             if 'is_long_term' in columns:
                 query_cols.append("is_long_term")
 
@@ -1032,6 +1058,10 @@ class Database:
                     state_data['profit_alerted'] = row['profit_alerted']
                 if 'profit_alert_time' in columns:
                     state_data['profit_alert_time'] = row['profit_alert_time']
+                if 'reentry_alerted' in columns:
+                    state_data['reentry_alerted'] = row['reentry_alerted']
+                if 'reentry_alert_time' in columns:
+                    state_data['reentry_alert_time'] = row['reentry_alert_time']
                 if 'is_long_term' in columns:
                     state_data['is_long_term'] = row['is_long_term']
                 state_map[key] = state_data
@@ -1049,13 +1079,16 @@ class Database:
             last_alert_time = saved_state.get('last_alert_time', None)
             profit_alerted = saved_state.get('profit_alerted', 0)
             profit_alert_time = saved_state.get('profit_alert_time', None)
+            reentry_alerted = saved_state.get('reentry_alerted', 0)
+            reentry_alert_time = saved_state.get('reentry_alert_time', None)
             is_long_term = saved_state.get('is_long_term', 0)
 
             cursor.execute("""
                 INSERT INTO open_positions (
                     date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id,
-                    alerted, last_alert_time, profit_alerted, profit_alert_time, is_long_term
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    alerted, last_alert_time, profit_alerted, profit_alert_time,
+                    reentry_alerted, reentry_alert_time, is_long_term
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 pos['date'],
                 pos['symbol'],
@@ -1069,6 +1102,8 @@ class Database:
                 last_alert_time,
                 profit_alerted,
                 profit_alert_time,
+                reentry_alerted,
+                reentry_alert_time,
                 is_long_term
             ))
 
@@ -1096,6 +1131,18 @@ class Database:
         cursor.execute("""
             UPDATE open_positions
             SET profit_alerted = 1, profit_alert_time = CURRENT_TIMESTAMP
+            WHERE symbol = ? AND order_id = ?
+        """, (symbol, order_id))
+        conn.commit()
+        conn.close()
+
+    def set_position_reentry_alerted(self, symbol: str, order_id: int):
+        """标记订单为同币重复开仓提醒已发送，并更新提醒时间。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE open_positions
+            SET reentry_alerted = 1, reentry_alert_time = CURRENT_TIMESTAMP
             WHERE symbol = ? AND order_id = ?
         """, (symbol, order_id))
         conn.commit()

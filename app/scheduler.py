@@ -104,6 +104,7 @@ class TradeDataScheduler:
         self.noon_review_hour = _env_int('NOON_REVIEW_HOUR', 23, minimum=0)
         self.noon_review_minute = _env_int('NOON_REVIEW_MINUTE', 2, minimum=0)
         self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
+        self.enable_reentry_alert = os.getenv('ENABLE_REENTRY_ALERT', '1').lower() in ('1', 'true', 'yes')
         self.profit_alert_threshold_pct = _env_float('PROFIT_ALERT_THRESHOLD_PCT', 20.0, minimum=0.0)
         self.leaderboard_alert_hour %= 24
         self.leaderboard_alert_minute %= 60
@@ -308,6 +309,7 @@ class TradeDataScheduler:
                 open_count = self.db.save_open_positions(open_positions)
                 open_saved = open_count
                 logger.info(f"保存 {open_count} 条未平仓订单")
+                self.check_same_symbol_reentry_alert()
                 self.check_open_positions_profit_alert(threshold_pct=self.profit_alert_threshold_pct)
             else:
                 # 清空未平仓记录（如果没有未平仓订单）
@@ -397,6 +399,112 @@ class TradeDataScheduler:
             logger.warning(f"获取标记价格(ticker/price)失败: {exc}")
 
         return {}
+
+    @staticmethod
+    def _parse_entry_time_utc8(entry_time_value) -> datetime | None:
+        """解析数据库中的 entry_time（当前按 UTC+8 存储）为 timezone-aware datetime。"""
+        if not entry_time_value:
+            return None
+        try:
+            return datetime.strptime(str(entry_time_value), '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
+        except ValueError:
+            return None
+
+    def check_same_symbol_reentry_alert(self):
+        """同币在 UTC 当天内重复开仓提醒（每笔重复开仓仅提醒一次）。"""
+        if not self.enable_reentry_alert:
+            return
+
+        try:
+            positions = self.db.get_open_positions()
+            if len(positions) < 2:
+                return
+
+            by_symbol: dict[str, list[dict]] = {}
+            for pos in positions:
+                symbol = str(pos.get("symbol", "")).upper().strip()
+                if not symbol:
+                    continue
+
+                entry_dt_utc8 = self._parse_entry_time_utc8(pos.get("entry_time"))
+                if entry_dt_utc8 is None:
+                    continue
+
+                order_id_raw = pos.get("order_id")
+                try:
+                    order_id = int(order_id_raw or 0)
+                except (TypeError, ValueError):
+                    order_id = 0
+
+                by_symbol.setdefault(symbol, []).append({
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "side": str(pos.get("side", "")).upper(),
+                    "entry_time": str(pos.get("entry_time", "")),
+                    "entry_dt_utc8": entry_dt_utc8,
+                    "entry_dt_utc": entry_dt_utc8.astimezone(timezone.utc),
+                    "reentry_alerted": int(pos.get("reentry_alerted", 0) or 0),
+                })
+
+            triggered = []
+            for symbol, rows in by_symbol.items():
+                if len(rows) < 2:
+                    continue
+
+                rows.sort(key=lambda item: (item["entry_dt_utc8"], item["order_id"]))
+                for idx in range(1, len(rows)):
+                    current = rows[idx]
+                    previous = rows[idx - 1]
+
+                    if current["order_id"] <= 0:
+                        continue
+                    if current["reentry_alerted"] == 1:
+                        continue
+
+                    if current["entry_dt_utc"].date() == previous["entry_dt_utc"].date():
+                        triggered.append({
+                            "symbol": symbol,
+                            "side": current["side"],
+                            "order_id": current["order_id"],
+                            "entry_time": current["entry_time"],
+                            "previous_order_id": previous["order_id"],
+                            "previous_entry_time": previous["entry_time"],
+                            "utc_day": current["entry_dt_utc"].strftime("%Y-%m-%d"),
+                        })
+
+            if not triggered:
+                return
+
+            triggered.sort(key=lambda item: (item["symbol"], item["entry_time"], item["order_id"]))
+            title = f"⚠️ 同币重复开仓提醒: {len(triggered)} 笔"
+            content = (
+                "检测到以下订单在同一 UTC 日期内重复开仓：\n"
+                "（规则：首次开仓后，UTC+0 次日 00:00 前再次开同币）\n\n"
+                "---\n"
+            )
+
+            preview_count = min(20, len(triggered))
+            for item in triggered[:preview_count]:
+                content += (
+                    f"**{item['symbol']}** ({item['side']})\n"
+                    f"- 重复开仓: #{item['order_id']} @ {item['entry_time']}\n"
+                    f"- 上一笔: #{item['previous_order_id']} @ {item['previous_entry_time']}\n"
+                    f"- UTC日期: {item['utc_day']}\n\n"
+                )
+            if len(triggered) > preview_count:
+                content += f"... 其余 {len(triggered) - preview_count} 笔未展示。\n"
+
+            send_server_chan_notification(title, content)
+
+            for item in triggered:
+                self.db.set_position_reentry_alerted(item["symbol"], item["order_id"])
+
+            logger.info(
+                "同币重复开仓提醒已发送: "
+                f"count={len(triggered)}, symbols={sorted(set(item['symbol'] for item in triggered))}"
+            )
+        except Exception as exc:
+            logger.error(f"同币重复开仓提醒检查失败: {exc}")
 
     def check_open_positions_profit_alert(self, threshold_pct: float):
         """检查未平仓订单浮盈阈值提醒（单档，单笔只提醒一次）。"""
