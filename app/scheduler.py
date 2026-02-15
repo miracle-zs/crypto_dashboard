@@ -1048,7 +1048,11 @@ class TradeDataScheduler:
         usdt_perpetual_symbols = {
             item.get('symbol')
             for item in exchange_info.get('symbols', [])
-            if item.get('contractType') == 'PERPETUAL' and item.get('quoteAsset') == 'USDT'
+            if (
+                item.get('contractType') == 'PERPETUAL'
+                and item.get('quoteAsset') == 'USDT'
+                and str(item.get('status', '')).upper() == 'TRADING'
+            )
         }
         if not usdt_perpetual_symbols:
             raise RuntimeError("无可用USDT永续交易对")
@@ -1303,7 +1307,11 @@ class TradeDataScheduler:
         usdt_perpetual_symbols = {
             item.get('symbol')
             for item in exchange_info.get('symbols', [])
-            if item.get('contractType') == 'PERPETUAL' and item.get('quoteAsset') == 'USDT'
+            if (
+                item.get('contractType') == 'PERPETUAL'
+                and item.get('quoteAsset') == 'USDT'
+                and str(item.get('status', '')).upper() == 'TRADING'
+            )
         }
         if not usdt_perpetual_symbols:
             raise RuntimeError("无可用USDT永续交易对")
