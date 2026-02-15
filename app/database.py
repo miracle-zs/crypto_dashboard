@@ -1484,7 +1484,7 @@ class Database:
                 d.snapshot_date,
                 n.snapshot_time AS noon_snapshot_time,
                 COALESCE(n.loss_count, 0) AS noon_loss_count,
-                COALESCE(n.total_stop_loss, 0.0) AS noon_cut_loss_total,
+                COALESCE(r.noon_cut_loss_total, -COALESCE(n.total_stop_loss, 0.0)) AS noon_cut_loss_total,
                 COALESCE(n.pct_of_balance, 0.0) AS noon_pct_of_balance,
                 r.review_time,
                 COALESCE(r.not_cut_count, 0) AS not_cut_count,

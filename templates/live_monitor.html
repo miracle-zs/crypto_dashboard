@@ -820,10 +820,10 @@
                                     <tr>
                                         <th class="px-2 py-2 text-left">Date</th>
                                         <th class="px-2 py-2 text-right">Noon Cnt</th>
-                                        <th class="px-2 py-2 text-right">Noon Cut</th>
-                                        <th class="px-2 py-2 text-right">Hold 23:00</th>
-                                        <th class="px-2 py-2 text-right">Delta</th>
-                                        <th class="px-2 py-2 text-right">Hold %</th>
+                                        <th class="px-2 py-2 text-right">Noon Cut PnL</th>
+                                        <th class="px-2 py-2 text-right">Hold 23:00 PnL</th>
+                                        <th class="px-2 py-2 text-right">Delta PnL</th>
+                                        <th class="px-2 py-2 text-right">Hold PnL %</th>
                                         <th class="px-2 py-2 text-right">Not Cut</th>
                                         <th class="px-2 py-2 text-left">Conclusion</th>
                                     </tr>
@@ -2148,11 +2148,11 @@
                         conclusion = '已处理/离场';
                         conclusionClass = 'text-emerald-300';
                     } else if (delta > 0) {
-                        conclusion = '不砍更差';
-                        conclusionClass = 'text-rose-300';
-                    } else if (delta < 0) {
                         conclusion = '不砍更好';
                         conclusionClass = 'text-emerald-300';
+                    } else if (delta < 0) {
+                        conclusion = '不砍更差';
+                        conclusionClass = 'text-rose-300';
                     } else {
                         conclusion = '结果接近';
                         conclusionClass = 'text-gray-300';
@@ -2161,10 +2161,10 @@
 
                 const deltaClass = !reviewReady
                     ? 'text-gray-500'
-                    : (delta > 0 ? 'text-rose-400 font-bold' : (delta < 0 ? 'text-emerald-400 font-bold' : 'text-gray-300'));
+                    : (delta > 0 ? 'text-emerald-400 font-bold' : (delta < 0 ? 'text-rose-400 font-bold' : 'text-gray-300'));
                 const holdClass = !reviewReady
                     ? 'text-gray-500'
-                    : (holdLoss > 0 ? 'text-rose-400' : 'text-emerald-400');
+                    : (holdLoss < 0 ? 'text-rose-400' : 'text-emerald-400');
                 const sortedDetails = [...details].sort((a, b) => {
                     const bAbs = Math.abs(Number(b.delta_loss || 0));
                     const aAbs = Math.abs(Number(a.delta_loss || 0));
@@ -2179,9 +2179,9 @@
                                     <tr>
                                         <th class="px-2 py-1 text-left">Symbol</th>
                                         <th class="px-2 py-1 text-left">Status</th>
-                                        <th class="px-2 py-1 text-right">Noon Loss</th>
-                                        <th class="px-2 py-1 text-right">Night Loss</th>
-                                        <th class="px-2 py-1 text-right">Delta</th>
+                                        <th class="px-2 py-1 text-right">Noon Cut PnL</th>
+                                        <th class="px-2 py-1 text-right">Hold PnL</th>
+                                        <th class="px-2 py-1 text-right">Delta PnL</th>
                                         <th class="px-2 py-1 text-left">Side</th>
                                     </tr>
                                 </thead>
@@ -2194,8 +2194,8 @@
                                         const nightLossVal = Number(d.night_loss || 0);
                                         const deltaVal = Number(d.delta_loss || 0);
                                         const deltaColor = deltaVal > 0
-                                            ? 'text-rose-300 font-bold'
-                                            : (deltaVal < 0 ? 'text-emerald-300 font-bold' : 'text-gray-300');
+                                            ? 'text-emerald-300 font-bold'
+                                            : (deltaVal < 0 ? 'text-rose-300 font-bold' : 'text-gray-300');
                                         const statusLabel = status === 'not_cut'
                                             ? '<span class="text-amber-300">NOT_CUT</span>'
                                             : '<span class="text-gray-500">CLOSED</span>';
@@ -2204,8 +2204,8 @@
                                             <tr>
                                                 <td class="px-2 py-1 font-mono text-gray-300">${symbol}</td>
                                                 <td class="px-2 py-1">${statusLabel}</td>
-                                                <td class="px-2 py-1 text-right font-mono ${noonLossVal > 0 ? 'text-rose-300' : 'text-emerald-300'}">${noonLossVal.toFixed(2)} U</td>
-                                                <td class="px-2 py-1 text-right font-mono ${nightLossVal > 0 ? 'text-rose-300' : 'text-emerald-300'}">${nightLossVal.toFixed(2)} U</td>
+                                                <td class="px-2 py-1 text-right font-mono ${noonLossVal < 0 ? 'text-rose-300' : 'text-emerald-300'}">${noonLossVal >= 0 ? '+' : ''}${noonLossVal.toFixed(2)} U</td>
+                                                <td class="px-2 py-1 text-right font-mono ${nightLossVal < 0 ? 'text-rose-300' : 'text-emerald-300'}">${nightLossVal >= 0 ? '+' : ''}${nightLossVal.toFixed(2)} U</td>
                                                 <td class="px-2 py-1 text-right font-mono ${deltaColor}">${deltaVal >= 0 ? '+' : ''}${deltaVal.toFixed(2)} U</td>
                                                 <td class="px-2 py-1 text-gray-400 font-mono">${side}</td>
                                             </tr>
@@ -2220,10 +2220,10 @@
                     <tr class="hover:bg-white/5 transition-colors ${hasDetails ? 'cursor-pointer' : ''}" ${hasDetails ? `onclick="toggleNoonReviewDetail('${rawDate}')"` : ''}>
                         <td class="px-2 py-2 font-mono text-gray-300">${hasDetails ? `<span class="mr-1 text-gray-500">${caret}</span>` : ''}${snapshotDate}</td>
                         <td class="px-2 py-2 text-right font-mono ${noonLossCount > 0 ? 'text-amber-300' : 'text-emerald-400'}">${noonLossCount}</td>
-                        <td class="px-2 py-2 text-right font-mono ${noonCut > 0 ? 'text-rose-300' : 'text-emerald-400'}">${noonCut.toFixed(2)} U</td>
-                        <td class="px-2 py-2 text-right font-mono ${holdClass}">${reviewReady ? `${holdLoss.toFixed(2)} U` : '--'}</td>
+                        <td class="px-2 py-2 text-right font-mono ${noonCut < 0 ? 'text-rose-300' : 'text-emerald-400'}">${noonCut >= 0 ? '+' : ''}${noonCut.toFixed(2)} U</td>
+                        <td class="px-2 py-2 text-right font-mono ${holdClass}">${reviewReady ? `${holdLoss >= 0 ? '+' : ''}${holdLoss.toFixed(2)} U` : '--'}</td>
                         <td class="px-2 py-2 text-right font-mono ${deltaClass}">${reviewReady ? `${delta >= 0 ? '+' : ''}${delta.toFixed(2)} U` : '--'}</td>
-                        <td class="px-2 py-2 text-right font-mono ${reviewReady ? (holdPct > 0 ? 'text-rose-300' : 'text-emerald-300') : 'text-gray-500'}">${reviewReady ? `${holdPct.toFixed(2)}%` : '--'}</td>
+                        <td class="px-2 py-2 text-right font-mono ${reviewReady ? (holdPct < 0 ? 'text-rose-300' : 'text-emerald-300') : 'text-gray-500'}">${reviewReady ? `${holdPct >= 0 ? '+' : ''}${holdPct.toFixed(2)}%` : '--'}</td>
                         <td class="px-2 py-2 text-right font-mono ${reviewReady ? (notCutCount > 0 ? 'text-amber-300' : 'text-emerald-400') : 'text-gray-500'}">${reviewReady ? notCutCount : '--'}</td>
                         <td class="px-2 py-2 ${conclusionClass}">${conclusion}</td>
                     </tr>
@@ -2562,7 +2562,7 @@
             const noonSnapshotTime = summary.recent_loss_snapshot_time || '--';
             const noonReviewReady = summary.noon_review_snapshot_ready === true;
             const noonReviewNotCutCount = Number(summary.noon_review_not_cut_count || 0);
-            const noonReviewDeltaLoss = Number(summary.noon_review_delta_loss_total || 0);
+            const noonReviewDeltaPnl = Number(summary.noon_review_delta_loss_total || 0);
 
             if (dailyLossCountEl) {
                 dailyLossCountEl.innerText = String(recentLossCount);
@@ -2605,7 +2605,7 @@
 
             if (dailyReviewNoteEl) {
                 if (!noonReviewReady) {
-                    dailyReviewNoteEl.innerText = "夜间复盘未生成（23:02 自动记录），请看左侧对比表。";
+                    dailyReviewNoteEl.innerText = "夜间复盘未生成（23:00 自动记录），请看左侧对比表。";
                     dailyReviewNoteEl.className = "text-[11px] text-gray-500 mt-1";
                 } else if (!noonSnapshotReady) {
                     dailyReviewNoteEl.innerText = "今日无午间快照，左侧对比表仅供历史参考。";
@@ -2613,12 +2613,12 @@
                 } else if (noonReviewNotCutCount <= 0) {
                     dailyReviewNoteEl.innerText = "今日复盘：午间风险币已处理或离场，详见左侧对比表。";
                     dailyReviewNoteEl.className = "text-[11px] text-emerald-300 mt-1";
-                } else if (noonReviewDeltaLoss > 0) {
-                    dailyReviewNoteEl.innerText = `今日复盘：不砍更差，多亏 ${noonReviewDeltaLoss.toFixed(2)} U（看左侧明细）。`;
-                    dailyReviewNoteEl.className = "text-[11px] text-rose-300 mt-1";
-                } else if (noonReviewDeltaLoss < 0) {
-                    dailyReviewNoteEl.innerText = `今日复盘：不砍更好，少亏 ${Math.abs(noonReviewDeltaLoss).toFixed(2)} U（看左侧明细）。`;
+                } else if (noonReviewDeltaPnl > 0) {
+                    dailyReviewNoteEl.innerText = `今日复盘：不砍更好，PnL 高出 ${noonReviewDeltaPnl.toFixed(2)} U（看左侧明细）。`;
                     dailyReviewNoteEl.className = "text-[11px] text-emerald-300 mt-1";
+                } else if (noonReviewDeltaPnl < 0) {
+                    dailyReviewNoteEl.innerText = `今日复盘：不砍更差，PnL 低了 ${Math.abs(noonReviewDeltaPnl).toFixed(2)} U（看左侧明细）。`;
+                    dailyReviewNoteEl.className = "text-[11px] text-rose-300 mt-1";
                 } else {
                     dailyReviewNoteEl.innerText = "今日复盘：两种处理结果接近，详见左侧对比表。";
                     dailyReviewNoteEl.className = "text-[11px] text-gray-300 mt-1";
