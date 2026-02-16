@@ -112,6 +112,7 @@ class TradeDataProcessor:
         since: int,
         until: int,
         client: Optional[BinanceFuturesRestClient] = None,
+        income_type: Optional[str] = None,
     ) -> List[Dict]:
         """
         Fetch income history once in a paginated way for a time window.
@@ -127,6 +128,8 @@ class TradeDataProcessor:
                 'endTime': until,
                 'limit': 1000
             }
+            if income_type:
+                params['incomeType'] = income_type
             batch = client.signed_get(endpoint, params)
             if not batch:
                 break
@@ -140,6 +143,68 @@ class TradeDataProcessor:
             time.sleep(0.2)
 
         return records
+
+    def get_transfer_income_records(self, start_time: int, end_time: Optional[int] = None) -> List[Dict]:
+        """
+        直接从 Binance income 接口拉取 TRANSFER 出入金记录。
+
+        Returns:
+            List[Dict]: 每条包含 amount/event_time_ms/asset/income_type/source_uid/description
+        """
+        if start_time is None:
+            return []
+
+        now_ms = int(time.time() * 1000)
+        until = int(end_time if end_time is not None else now_ms)
+        if start_time > until:
+            return []
+
+        records = self._fetch_income_history(
+            since=int(start_time),
+            until=until,
+            income_type='TRANSFER'
+        )
+        if not records:
+            return []
+
+        normalized = []
+        seen = set()
+
+        for record in records:
+            income_type = str(record.get('incomeType') or '').upper()
+            if income_type != 'TRANSFER':
+                continue
+
+            try:
+                event_time_ms = int(record.get('time'))
+                amount = float(record.get('income', 0.0))
+            except (TypeError, ValueError):
+                continue
+
+            asset = str(record.get('asset') or 'USDT').upper()
+            tran_id = str(record.get('tranId') or '').strip()
+            info = str(record.get('info') or '').strip()
+            symbol = str(record.get('symbol') or '').strip().upper()
+            source_uid = (
+                f"TRANSFER:{tran_id}"
+                if tran_id
+                else f"TRANSFER:{event_time_ms}:{asset}:{amount:.8f}:{symbol}:{info}"
+            )
+            if source_uid in seen:
+                continue
+            seen.add(source_uid)
+
+            normalized.append({
+                "amount": amount,
+                "event_time_ms": event_time_ms,
+                "asset": asset,
+                "income_type": income_type,
+                "source_uid": source_uid,
+                "description": f"Binance income {income_type}{f' ({info})' if info else ''}".strip()
+            })
+
+        normalized.sort(key=lambda x: x["event_time_ms"])
+        return normalized
 
     def get_account_balance(self) -> Dict[str, float]:
         """Get USD-M Futures account balance (Margin & Wallet)."""

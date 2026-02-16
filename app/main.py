@@ -490,6 +490,8 @@ async def get_balance_history(
         None,
         partial(db.get_balance_history, start_time=start_time, end_time=end_time)
     )
+    if not history_data:
+        return []
 
     transfers = await loop.run_in_executor(None, db.get_transfers)
 
@@ -498,8 +500,8 @@ async def get_balance_history(
     for t in transfers:
         try:
             t_dt = datetime.fromisoformat(t['timestamp']).replace(tzinfo=timezone.utc)
-            sorted_transfers.append((t_dt, t['amount']))
-        except ValueError:
+            sorted_transfers.append((t_dt, float(t['amount'])))
+        except (TypeError, ValueError):
             continue
     sorted_transfers.sort(key=lambda x: x[0])
 
@@ -510,6 +512,13 @@ async def get_balance_history(
     transfer_idx = 0
     current_net_deposits = 0.0
     total_transfers = len(sorted_transfers)
+
+    # 以当前时间区间首点为基准，仅剔除区间内出入金影响，避免历史入金导致净值整体偏移
+    first_utc_dt = datetime.fromisoformat(history_data[0]['timestamp']).replace(tzinfo=timezone.utc)
+    while transfer_idx < total_transfers and sorted_transfers[transfer_idx][0] <= first_utc_dt:
+        current_net_deposits += sorted_transfers[transfer_idx][1]
+        transfer_idx += 1
+    baseline_net_deposits = current_net_deposits
 
     # 降采样准备 (简单的间隔采样)
     total_points = len(history_data)
@@ -527,20 +536,28 @@ async def get_balance_history(
         utc_dt_aware = utc_dt_naive.replace(tzinfo=timezone.utc)
         utc8_dt = utc_dt_aware.astimezone(UTC8)
         current_ts = int(utc8_dt.timestamp() * 1000)
+        point_transfer_amount = 0.0
+        point_transfer_count = 0
 
-        # 计算累计净值 (Cumulative Equity) - 优化后的O(N)算法
+        # 计算区间累计净值 (Cumulative Equity) - 优化后的 O(N) 算法
         # 推进 transfer 指针，直到超过当前余额记录的时间
         while transfer_idx < total_transfers and sorted_transfers[transfer_idx][0] <= utc_dt_aware:
-            current_net_deposits += sorted_transfers[transfer_idx][1]
+            transfer_amount = sorted_transfers[transfer_idx][1]
+            current_net_deposits += transfer_amount
+            point_transfer_amount += transfer_amount
+            point_transfer_count += 1
             transfer_idx += 1
 
-        cumulative_val = item['balance'] - current_net_deposits
+        net_transfer_in_range = current_net_deposits - baseline_net_deposits
+        cumulative_val = item['balance'] - net_transfer_in_range
 
         # 5. 生成前端需要的时间戳（毫秒）
         transformed_data.append({
             "time": current_ts,
             "value": item['balance'],
-            "cumulative_equity": cumulative_val
+            "cumulative_equity": cumulative_val,
+            "transfer_amount": point_transfer_amount if point_transfer_count > 0 else None,
+            "transfer_count": point_transfer_count if point_transfer_count > 0 else None
         })
 
     return transformed_data

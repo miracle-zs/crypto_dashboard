@@ -47,6 +47,8 @@ class BalanceHistoryItem(BaseModel):
     time: int
     value: float
     cumulative_equity: Optional[float] = None
+    transfer_amount: Optional[float] = None
+    transfer_count: Optional[int] = None
 
 
 class DailyStats(BaseModel):

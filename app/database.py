@@ -146,6 +146,37 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_transfers_timestamp ON transfers(timestamp)
         """)
+        # 迁移 transfers 扩展字段（用于基于 Binance income 直接同步）
+        cursor.execute("PRAGMA table_info(transfers)")
+        transfer_columns = {row[1] for row in cursor.fetchall()}
+        if 'event_time' not in transfer_columns:
+            try:
+                cursor.execute("ALTER TABLE transfers ADD COLUMN event_time INTEGER")
+            except Exception as e:
+                logger.warning(f"transfers 添加 event_time 失败(可能已存在): {e}")
+        if 'asset' not in transfer_columns:
+            try:
+                cursor.execute("ALTER TABLE transfers ADD COLUMN asset TEXT")
+            except Exception as e:
+                logger.warning(f"transfers 添加 asset 失败(可能已存在): {e}")
+        if 'income_type' not in transfer_columns:
+            try:
+                cursor.execute("ALTER TABLE transfers ADD COLUMN income_type TEXT")
+            except Exception as e:
+                logger.warning(f"transfers 添加 income_type 失败(可能已存在): {e}")
+        if 'source_uid' not in transfer_columns:
+            try:
+                cursor.execute("ALTER TABLE transfers ADD COLUMN source_uid TEXT")
+            except Exception as e:
+                logger.warning(f"transfers 添加 source_uid 失败(可能已存在): {e}")
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_transfers_event_time ON transfers(event_time)
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_transfers_source_uid
+            ON transfers(source_uid)
+            WHERE source_uid IS NOT NULL
+        """)
 
         # Websocket 事件记录表
         cursor.execute("""
@@ -921,6 +952,63 @@ class Database:
         conn.close()
         logger.info(f"已记录出入金: {amount} ({type})")
 
+    def save_transfer_income(
+        self,
+        *,
+        amount: float,
+        event_time: int,
+        asset: str = "USDT",
+        income_type: str = "TRANSFER",
+        source_uid: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> bool:
+        """
+        保存 Binance income 出入金记录（按 source_uid 去重）。
+
+        Returns:
+            bool: True=新增写入，False=已存在(被忽略)
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # transfers.timestamp 统一使用事件发生时间（UTC）以便和余额曲线准确对齐
+        ts_str = datetime.utcfromtimestamp(event_time / 1000).strftime('%Y-%m-%d %H:%M:%S.%f')
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO transfers (
+                timestamp, amount, type, description, event_time, asset, income_type, source_uid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ts_str,
+            float(amount),
+            'binance_income',
+            description,
+            int(event_time),
+            str(asset or "USDT"),
+            str(income_type or "TRANSFER"),
+            source_uid
+        ))
+
+        inserted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return inserted
+
+    def get_latest_transfer_event_time(self) -> Optional[int]:
+        """获取 transfers 表中最新的 Binance 事件时间（毫秒）。"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT MAX(event_time) AS latest_event_time
+            FROM transfers
+            WHERE event_time IS NOT NULL
+        """)
+        row = cursor.fetchone()
+        conn.close()
+        if not row or row['latest_event_time'] is None:
+            return None
+        return int(row['latest_event_time'])
+
     def save_ws_event(self, event_type: str, event_time: int, payload: Dict):
         """保存 websocket 事件记录"""
         conn = self._get_connection()
@@ -933,10 +1021,21 @@ class Database:
         conn.close()
 
     def get_transfers(self) -> List[Dict]:
-        """获取所有出入金记录"""
+        """
+        获取用于净值计算的出入金记录。
+
+        说明：
+        - 排除旧版估算逻辑写入的 type='auto' 且无 source_uid 的记录，避免与 Binance 直连流水双计。
+        - 保留 binance_income 与手工记录（type != 'auto'）。
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM transfers ORDER BY timestamp ASC")
+        cursor.execute("""
+            SELECT *
+            FROM transfers
+            WHERE (type != 'auto') OR (source_uid IS NOT NULL)
+            ORDER BY timestamp ASC
+        """)
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]

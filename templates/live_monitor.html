@@ -1590,6 +1590,26 @@
             });
 
             const numericSeries = seriesData.map(p => ({ x: p.x, y: Number(p.y) })).filter(p => Number.isFinite(p.y));
+            const transferMarkersRaw = balanceData.map((d, idx) => {
+                const amount = Number(d.transfer_amount);
+                if (!Number.isFinite(amount) || Math.abs(amount) < 1e-9) return null;
+                const point = seriesData[idx];
+                if (!point || !Number.isFinite(point.y)) return null;
+                const count = Number(d.transfer_count || 0);
+                return {
+                    x: point.x,
+                    y: point.y,
+                    amount,
+                    count: Number.isFinite(count) && count > 0 ? Math.floor(count) : 1
+                };
+            }).filter(Boolean);
+            const maxTransferMarkers = 14;
+            const transferMarkers = transferMarkersRaw.length > maxTransferMarkers
+                ? transferMarkersRaw.filter((_, idx) => (
+                    idx % Math.ceil(transferMarkersRaw.length / maxTransferMarkers) === 0
+                    || idx === transferMarkersRaw.length - 1
+                ))
+                : transferMarkersRaw;
             const dailyTarget = getDailyTargetValue();
             const firstX = numericSeries.length > 0 ? numericSeries[0].x : null;
             const firstY = numericSeries.length > 0 ? numericSeries[0].y : null;
@@ -1637,6 +1657,9 @@
                 }
                 return `$${Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
             };
+            const formatTransferMoney = (val) => (
+                `$${Math.abs(Number(val)).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+            );
 
             const lastPoint = numericSeries.length ? numericSeries[numericSeries.length - 1] : null;
             const peakPoint = numericSeries.reduce((max, p) => (max === null || p.y > max.y ? p : max), null);
@@ -1752,6 +1775,32 @@
                         },
                         offsetY: peakOffsetY,
                         offsetX: peakOffsetX
+                    }
+                });
+            }
+
+            for (const transfer of transferMarkers) {
+                const isDeposit = transfer.amount > 0;
+                const sign = isDeposit ? '+' : '-';
+                const label = `${isDeposit ? 'IN' : 'OUT'} ${sign}${formatTransferMoney(transfer.amount)}${transfer.count > 1 ? ` x${transfer.count}` : ''}`;
+                annotations.points.push({
+                    x: transfer.x,
+                    y: transfer.y,
+                    marker: {
+                        size: 3,
+                        fillColor: isDeposit ? '#22c55e' : '#ef4444',
+                        strokeColor: isDeposit ? '#22c55e' : '#ef4444'
+                    },
+                    label: {
+                        text: label,
+                        borderColor: isDeposit ? '#16a34a' : '#dc2626',
+                        style: {
+                            color: '#0f172a',
+                            background: isDeposit ? '#bbf7d0' : '#fecaca',
+                            fontSize: '10px',
+                            fontWeight: 700
+                        },
+                        offsetY: isDeposit ? 14 : -14
                     }
                 });
             }

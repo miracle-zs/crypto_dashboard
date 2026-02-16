@@ -1608,53 +1608,51 @@ class TradeDataScheduler:
                 current_margin = balance_info['margin_balance']
                 current_wallet = balance_info['wallet_balance']
 
-                # --- 自动检测出入金逻辑 ---
+                # --- 通过 Binance income API 直接同步出入金 ---
                 try:
-                    logger.info("开始检测出入金...")
-                    # 获取最近一条记录进行对比
-                    history = self.db.get_balance_history(limit=1)
-                    if history:
-                        last_record = history[0]
-                        # 只有当上一条记录也有wallet_balance时才进行对比
-                        # 注意：数据库中新加的列默认为0，需排除0的情况(除非真的破产)或根据逻辑判断
-                        last_wallet = last_record.get('wallet_balance', 0)
-                        last_ts_str = last_record.get('timestamp')
+                    latest_event_time_ms = self.db.get_latest_transfer_event_time()
+                    if latest_event_time_ms is None:
+                        lookback_days_raw = os.getenv('TRANSFER_SYNC_LOOKBACK_DAYS', '90')
+                        try:
+                            lookback_days = max(1, int(lookback_days_raw))
+                        except ValueError:
+                            logger.warning(
+                                f"TRANSFER_SYNC_LOOKBACK_DAYS={lookback_days_raw} 非法，回退为 90"
+                            )
+                            lookback_days = 90
+                        start_time_ms = int(
+                            (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp() * 1000
+                        )
+                    else:
+                        # 往前回看1分钟做边界保护，落库侧会按 source_uid 去重
+                        start_time_ms = max(0, latest_event_time_ms - 60_000)
 
-                        if last_wallet > 0:
-                            # 解析时间 (兼容带微秒和不带微秒的格式)
-                            try:
-                                last_ts = datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S')
-                            except ValueError:
-                                # 尝试解析带微秒的格式
-                                try:
-                                    last_ts = datetime.strptime(last_ts_str, '%Y-%m-%d %H:%M:%S.%f')
-                                except ValueError:
-                                    logger.warning(f"无法解析时间戳格式: {last_ts_str}")
-                                    raise ValueError("Invalid timestamp format")
+                    end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    transfer_rows = self.processor.get_transfer_income_records(
+                        start_time=start_time_ms,
+                        end_time=end_time_ms
+                    )
 
-                            # 转为毫秒时间戳 (视为UTC)
-                            last_ts = last_ts.replace(tzinfo=timezone.utc)
-                            last_ts_ms = int(last_ts.timestamp() * 1000)
+                    inserted_count = 0
+                    for row in transfer_rows:
+                        inserted = self.db.save_transfer_income(
+                            amount=row['amount'],
+                            event_time=row['event_time_ms'],
+                            asset=row.get('asset') or 'USDT',
+                            income_type=row.get('income_type') or 'TRANSFER',
+                            source_uid=row.get('source_uid'),
+                            description=row.get('description')
+                        )
+                        if inserted:
+                            inserted_count += 1
 
-                            # 1. 计算钱包余额变化
-                            wallet_diff = current_wallet - last_wallet
-
-                            # 2. 获取该时间段内的交易资金流 (PnL + Fees)
-                            # 额外往前多取1秒，防止边界遗漏
-                            trading_flow = self.processor.get_recent_financial_flow(start_time=last_ts_ms - 1000)
-
-                            # 3. 计算"无法解释的差额" (疑似出入金)
-                            transfer_est = wallet_diff - trading_flow
-
-                            # 4. 阈值判断 (> 500 USDT)
-                            if abs(transfer_est) > 500:
-                                logger.warning(f"监测到资金异动: 钱包变动 {wallet_diff:.2f}, 交易流 {trading_flow:.2f}, 差额 {transfer_est:.2f}")
-                                self.db.save_transfer(amount=transfer_est, type='auto', description="Auto-detected > 500U")
-                            else:
-                                logger.info(f"未发现明显出入金: 差额 {transfer_est:.2f}")
-
+                    logger.info(
+                        "出入金同步完成: "
+                        f"fetched={len(transfer_rows)}, inserted={inserted_count}, "
+                        f"window=[{start_time_ms}, {end_time_ms}]"
+                    )
                 except Exception as e:
-                    logger.warning(f"出入金检测出错: {e}")
+                    logger.warning(f"出入金同步出错: {e}")
 
                 # 保存当前状态
                 self.db.save_balance_history(current_margin, current_wallet)
