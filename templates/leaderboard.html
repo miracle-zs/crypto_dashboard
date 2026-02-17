@@ -830,38 +830,100 @@
         </div>
     </div>
 
-    <div class="section-label">14D REBOUND SNAPSHOT</div>
-    <div class="glass-panel panel-tier-main overflow-hidden panel-reveal">
-        <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
-            <h3 class="text-sm font-bold text-slate-500 flex items-center">
-                <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 14D REBOUND TOP 10
-            </h3>
-            <div class="text-right">
-                <div id="rebound-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
-                <div class="text-[11px] text-slate-500">Daily snapshot @ 07:30</div>
+    <div class="section-label">REBOUND SNAPSHOT</div>
+    <div class="space-y-3">
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal rebound-panel" data-rebound-window="14">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 14D REBOUND TOP 10
+                </h3>
+                <div class="text-right">
+                    <div id="rebound-14-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
+                    <div class="text-[11px] text-slate-500">Daily snapshot @ 07:30</div>
+                </div>
             </div>
-        </div>
-        <div id="rebound-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
-            Window -- UTC → snapshot
+            <div id="rebound-14-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                Window -- UTC → snapshot
+            </div>
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">14D Low</th>
+                        <th class="px-4 py-3 text-right">Current</th>
+                        <th class="px-4 py-3 text-right">Rebound</th>
+                        <th class="px-4 py-3 text-right">Low Day (UTC)</th>
+                    </tr>
+                    </thead>
+                    <tbody id="rebound-14-body"></tbody>
+                </table>
+            </div>
+            <div id="rebound-14-cards" class="md:hidden p-3 space-y-3"></div>
         </div>
 
-        <div class="hidden md:block overflow-x-auto">
-            <table class="leader-table w-full text-left text-sm min-w-[1080px]">
-                <thead>
-                <tr>
-                    <th class="px-4 py-3">Rank</th>
-                    <th class="px-4 py-3">Symbol</th>
-                    <th class="px-4 py-3 text-right">14D Low</th>
-                    <th class="px-4 py-3 text-right">Current</th>
-                    <th class="px-4 py-3 text-right">Rebound</th>
-                    <th class="px-4 py-3 text-right">Low Day (UTC)</th>
-                </tr>
-                </thead>
-                <tbody id="rebound-body"></tbody>
-            </table>
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal rebound-panel" data-rebound-window="30">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 30D REBOUND TOP 10
+                </h3>
+                <div class="text-right">
+                    <div id="rebound-30-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
+                    <div class="text-[11px] text-slate-500">Daily snapshot @ 07:30</div>
+                </div>
+            </div>
+            <div id="rebound-30-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                Window -- UTC → snapshot
+            </div>
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">30D Low</th>
+                        <th class="px-4 py-3 text-right">Current</th>
+                        <th class="px-4 py-3 text-right">Rebound</th>
+                        <th class="px-4 py-3 text-right">Low Day (UTC)</th>
+                    </tr>
+                    </thead>
+                    <tbody id="rebound-30-body"></tbody>
+                </table>
+            </div>
+            <div id="rebound-30-cards" class="md:hidden p-3 space-y-3"></div>
         </div>
 
-        <div id="rebound-cards" class="md:hidden p-3 space-y-3"></div>
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal rebound-panel" data-rebound-window="60">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 60D REBOUND TOP 10
+                </h3>
+                <div class="text-right">
+                    <div id="rebound-60-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
+                    <div class="text-[11px] text-slate-500">Daily snapshot @ 07:30</div>
+                </div>
+            </div>
+            <div id="rebound-60-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                Window -- UTC → snapshot
+            </div>
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">60D Low</th>
+                        <th class="px-4 py-3 text-right">Current</th>
+                        <th class="px-4 py-3 text-right">Rebound</th>
+                        <th class="px-4 py-3 text-right">Low Day (UTC)</th>
+                    </tr>
+                    </thead>
+                    <tbody id="rebound-60-body"></tbody>
+                </table>
+            </div>
+            <div id="rebound-60-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
     </div>
 
     <div class="section-label">METRIC ANALYSIS</div>
@@ -1013,10 +1075,26 @@
     const cards = document.getElementById('leaderboard-cards');
     const losersTableBody = document.getElementById('losers-body');
     const losersCards = document.getElementById('losers-cards');
-    const reboundSummary = document.getElementById('rebound-summary');
-    const reboundWindow = document.getElementById('rebound-window');
-    const reboundBody = document.getElementById('rebound-body');
-    const reboundCards = document.getElementById('rebound-cards');
+    const reboundPanels = {
+        14: {
+            summary: document.getElementById('rebound-14-summary'),
+            window: document.getElementById('rebound-14-window'),
+            body: document.getElementById('rebound-14-body'),
+            cards: document.getElementById('rebound-14-cards'),
+        },
+        30: {
+            summary: document.getElementById('rebound-30-summary'),
+            window: document.getElementById('rebound-30-window'),
+            body: document.getElementById('rebound-30-body'),
+            cards: document.getElementById('rebound-30-cards'),
+        },
+        60: {
+            summary: document.getElementById('rebound-60-summary'),
+            window: document.getElementById('rebound-60-window'),
+            body: document.getElementById('rebound-60-body'),
+            cards: document.getElementById('rebound-60-cards'),
+        },
+    };
     const losersHitSummary = document.getElementById('losers-hit-summary');
     const losersHitSymbols = document.getElementById('losers-hit-symbols');
     const metric2Summary = document.getElementById('metric2-summary');
@@ -1448,14 +1526,21 @@
         });
     }
 
-    function renderReboundRows(rows) {
-        if (!reboundBody || !reboundCards) return;
+    function renderReboundRows(windowDays, rows) {
+        const panel = reboundPanels[windowDays];
+        if (!panel?.body || !panel?.cards) return;
+
+        const reboundBody = panel.body;
+        const reboundCards = panel.cards;
+        const lowField = `low_${windowDays}d`;
+        const lowAtField = `low_${windowDays}d_at_utc`;
+        const reboundField = `rebound_${windowDays}d_pct`;
 
         reboundBody.innerHTML = '';
         reboundCards.innerHTML = '';
 
         rows.forEach((row, idx) => {
-            const reboundPct = Number(row.rebound_7d_pct);
+            const reboundPct = Number(row[reboundField]);
             const reboundClass = Number.isFinite(reboundPct)
                 ? (reboundPct >= 0 ? 'rank-up' : 'rank-down')
                 : 'rank-flat';
@@ -1465,10 +1550,10 @@
             tr.innerHTML = `
                 <td class="px-4 py-3 font-mono">${row.rank || idx + 1}</td>
                 <td class="px-4 py-3 font-semibold">${row.symbol || '--'} ${held}</td>
-                <td class="px-4 py-3 text-right font-mono">${formatPrice(row.low_7d)}</td>
+                <td class="px-4 py-3 text-right font-mono">${formatPrice(row[lowField])}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.current_price)}</td>
-                <td class="px-4 py-3 text-right ${reboundClass} font-bold">${formatChangeOrDash(row.rebound_7d_pct)}</td>
-                <td class="px-4 py-3 text-right font-mono">${row.low_7d_at_utc || '--'}</td>
+                <td class="px-4 py-3 text-right ${reboundClass} font-bold">${formatChangeOrDash(row[reboundField])}</td>
+                <td class="px-4 py-3 text-right font-mono">${row[lowAtField] || '--'}</td>
             `;
             reboundBody.appendChild(tr);
 
@@ -1477,13 +1562,13 @@
             card.innerHTML = `
                 <div class="flex justify-between items-center mb-2">
                     <span class="font-mono text-xs">#${row.rank || idx + 1}</span>
-                    <span class="${reboundClass} font-bold">${formatChangeOrDash(row.rebound_7d_pct)}</span>
+                    <span class="${reboundClass} font-bold">${formatChangeOrDash(row[reboundField])}</span>
                 </div>
                 <div class="font-bold">${row.symbol || '--'} ${held}</div>
                 <div class="mobile-core">
                     <div>
-                        <div class="k">14D Low</div>
-                        <div class="v">${formatPrice(row.low_7d)}</div>
+                        <div class="k">${windowDays}D Low</div>
+                        <div class="v">${formatPrice(row[lowField])}</div>
                     </div>
                     <div>
                         <div class="k">Current</div>
@@ -1491,31 +1576,37 @@
                     </div>
                     <div>
                         <div class="k">Rebound</div>
-                        <div class="v ${reboundClass}">${formatChangeOrDash(row.rebound_7d_pct)}</div>
+                        <div class="v ${reboundClass}">${formatChangeOrDash(row[reboundField])}</div>
                     </div>
                 </div>
                 <details class="mobile-more">
                     <summary>展开详情</summary>
-                    <div class="mt-2 text-xs text-slate-500">低点日期(UTC): ${row.low_7d_at_utc || '--'}</div>
+                    <div class="mt-2 text-xs text-slate-500">低点日期(UTC): ${row[lowAtField] || '--'}</div>
                 </details>
             `;
             reboundCards.appendChild(card);
         });
     }
 
-    async function loadReboundSnapshot(selectedDate) {
-        if (!reboundSummary || !reboundWindow || !reboundBody || !reboundCards) return;
+    async function loadReboundSnapshot(windowDays, selectedDate) {
+        const panel = reboundPanels[windowDays];
+        if (!panel?.summary || !panel?.window || !panel?.body || !panel?.cards) return;
+
+        const reboundSummary = panel.summary;
+        const reboundWindow = panel.window;
+        const reboundBody = panel.body;
+        const reboundCards = panel.cards;
 
         const endpoint = selectedDate
-            ? `/api/rebound-7d?date=${encodeURIComponent(selectedDate)}`
-            : '/api/rebound-7d';
+            ? `/api/rebound-${windowDays}d?date=${encodeURIComponent(selectedDate)}`
+            : `/api/rebound-${windowDays}d`;
 
         try {
             const response = await fetch(endpoint);
             const data = await response.json();
             if (!data.ok) {
                 reboundSummary.textContent = 'Top -- · --';
-                reboundWindow.textContent = data.message || '暂无14D反弹快照';
+                reboundWindow.textContent = data.message || `暂无${windowDays}D反弹快照`;
                 reboundBody.innerHTML = '';
                 reboundCards.innerHTML = '';
                 return;
@@ -1525,7 +1616,7 @@
             const topCount = Number(topCountRaw || 0);
             reboundSummary.textContent = `Top ${topCount} · ${data.snapshot_date || '--'} ${(data.snapshot_time || '').split(' ').slice(1).join(' ') || '--'}`;
             reboundWindow.textContent = `Window ${data.window_start_utc || '--'} UTC → snapshot`;
-            renderReboundRows(Array.isArray(data.rows) ? data.rows : []);
+            renderReboundRows(windowDays, Array.isArray(data.rows) ? data.rows : []);
         } catch (err) {
             reboundSummary.textContent = 'Top -- · --';
             reboundWindow.textContent = `加载失败: ${err.message || err}`;
@@ -1579,7 +1670,7 @@
                 renderMetric2(null);
                 renderMetric3(null);
                 renderMetricsHistory([]);
-                await loadReboundSnapshot(selectedDate);
+                await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
                 return;
             }
 
@@ -1607,14 +1698,14 @@
             renderMetric2(data.next_day_drop_metric || null);
             renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
             await loadMetricsHistory();
-            await loadReboundSnapshot(selectedDate);
+            await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
         } catch (err) {
             statusText.textContent = `请求异常: ${err.message || err}`;
             renderLosersReversal(null);
             renderMetric2(null);
             renderMetric3(null);
             renderMetricsHistory([]);
-            await loadReboundSnapshot(selectedDate);
+            await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
         } finally {
             btnRefresh.disabled = false;
             lucide.createIcons();

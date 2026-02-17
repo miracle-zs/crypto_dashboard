@@ -103,6 +103,22 @@ class TradeDataScheduler:
         self.rebound_7d_weight_budget_per_minute = _env_int('REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.rebound_7d_hour = _env_int('REBOUND_7D_HOUR', 7, minimum=0)
         self.rebound_7d_minute = _env_int('REBOUND_7D_MINUTE', 30, minimum=0)
+        self.enable_rebound_30d_snapshot = os.getenv('ENABLE_REBOUND_30D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
+        self.rebound_30d_top_n = _env_int('REBOUND_30D_TOP_N', 10, minimum=1)
+        self.rebound_30d_kline_workers = _env_int('REBOUND_30D_KLINE_WORKERS', self.rebound_7d_kline_workers, minimum=1)
+        self.rebound_30d_weight_budget_per_minute = _env_int(
+            'REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE', self.rebound_7d_weight_budget_per_minute, minimum=60
+        )
+        self.rebound_30d_hour = _env_int('REBOUND_30D_HOUR', self.rebound_7d_hour, minimum=0)
+        self.rebound_30d_minute = _env_int('REBOUND_30D_MINUTE', self.rebound_7d_minute + 2, minimum=0)
+        self.enable_rebound_60d_snapshot = os.getenv('ENABLE_REBOUND_60D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
+        self.rebound_60d_top_n = _env_int('REBOUND_60D_TOP_N', 10, minimum=1)
+        self.rebound_60d_kline_workers = _env_int('REBOUND_60D_KLINE_WORKERS', self.rebound_7d_kline_workers, minimum=1)
+        self.rebound_60d_weight_budget_per_minute = _env_int(
+            'REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE', self.rebound_7d_weight_budget_per_minute, minimum=60
+        )
+        self.rebound_60d_hour = _env_int('REBOUND_60D_HOUR', self.rebound_7d_hour, minimum=0)
+        self.rebound_60d_minute = _env_int('REBOUND_60D_MINUTE', self.rebound_7d_minute + 4, minimum=0)
         self.noon_loss_check_hour = _env_int('NOON_LOSS_CHECK_HOUR', 11, minimum=0)
         self.noon_loss_check_minute = _env_int('NOON_LOSS_CHECK_MINUTE', 50, minimum=0)
         self.noon_review_hour = _env_int('NOON_REVIEW_HOUR', 23, minimum=0)
@@ -115,6 +131,10 @@ class TradeDataScheduler:
         self.leaderboard_alert_minute %= 60
         self.rebound_7d_hour %= 24
         self.rebound_7d_minute %= 60
+        self.rebound_30d_hour %= 24
+        self.rebound_30d_minute %= 60
+        self.rebound_60d_hour %= 24
+        self.rebound_60d_minute %= 60
         self.noon_loss_check_hour %= 24
         self.noon_loss_check_minute %= 60
         self.noon_review_hour %= 24
@@ -1366,11 +1386,19 @@ class TradeDataScheduler:
             f"elapsed={time.perf_counter() - started_at:.2f}s"
         )
 
-    def _build_rebound_7d_snapshot(self):
-        """构建14D反弹幅度榜快照（不处理锁与冷却）。"""
+    def _build_rebound_snapshot(
+        self,
+        *,
+        window_days: int,
+        top_n: int,
+        kline_workers: int,
+        weight_budget_per_minute: int,
+        label: str
+    ):
+        """构建反弹幅度榜快照（不处理锁与冷却）。"""
         stage_started_at = time.perf_counter()
         now_utc = datetime.now(timezone.utc)
-        window_start_utc = now_utc - timedelta(days=14)
+        window_start_utc = now_utc - timedelta(days=window_days)
 
         exchange_info = self.processor.get_exchange_info(client=self.processor.client)
         if not exchange_info or 'symbols' not in exchange_info:
@@ -1413,9 +1441,9 @@ class TradeDataScheduler:
         # 稳定排序，确保同等条件下输出一致
         candidates.sort(key=lambda x: x['symbol'])
         logger.info(
-            "14D反弹榜候选统计: "
+            f"{label}候选统计: "
             f"candidates={len(candidates)}, "
-            f"top_n={self.rebound_7d_top_n}"
+            f"top_n={top_n}"
         )
 
         rebound_rows = []
@@ -1424,23 +1452,27 @@ class TradeDataScheduler:
         if total_candidates > 0:
             min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
             per_worker_rpm = max(1.0, 60.0 / min_interval)
-            workers_by_budget = max(1, int(self.rebound_7d_weight_budget_per_minute // per_worker_rpm))
-            worker_count = min(total_candidates, self.rebound_7d_kline_workers, workers_by_budget)
+            workers_by_budget = max(1, int(weight_budget_per_minute // per_worker_rpm))
+            worker_count = min(total_candidates, kline_workers, workers_by_budget)
             estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
             estimated_total_weight = 1 + 1 + total_candidates  # exchangeInfo + ticker/price + per-symbol klines
             logger.info(
-                "14D反弹榜并发计划: "
+                f"{label}并发计划: "
                 f"workers={worker_count}, "
                 f"min_interval={min_interval:.2f}s, "
-                f"budget={self.rebound_7d_weight_budget_per_minute}/min, "
+                f"budget={weight_budget_per_minute}/min, "
                 f"est_peak={estimated_peak_weight_per_min}/min, "
                 f"est_total_weight={estimated_total_weight}"
             )
 
             thread_local = threading.local()
+            metric_field = f"rebound_{window_days}d_pct"
+            low_field = f"low_{window_days}d"
+            low_time_field = f"low_{window_days}d_at_utc"
+            kline_limit = max(14, int(window_days))
 
             def _kline_task(item: dict):
-                if self._is_api_cooldown_active(source='14D反弹榜-逐币种计算'):
+                if self._is_api_cooldown_active(source=f'{label}-逐币种计算'):
                     return item, None
 
                 worker_client = getattr(thread_local, "client", None)
@@ -1452,7 +1484,7 @@ class TradeDataScheduler:
                     klines = worker_client.public_get('/fapi/v1/klines', {
                         'symbol': item['symbol'],
                         'interval': '1d',
-                        'limit': 14
+                        'limit': kline_limit
                     }) or []
                 except Exception:
                     return item, None
@@ -1473,15 +1505,15 @@ class TradeDataScheduler:
                 if not lows:
                     return item, None
 
-                low_7d_price, low_7d_ts = min(lows, key=lambda entry: entry[0])
-                rebound_7d_pct = (item['current_price'] / low_7d_price - 1.0) * 100.0
-                low_7d_at_utc = datetime.fromtimestamp(
-                    low_7d_ts / 1000, tz=timezone.utc
+                low_price, low_ts = min(lows, key=lambda entry: entry[0])
+                rebound_pct = (item['current_price'] / low_price - 1.0) * 100.0
+                low_at_utc = datetime.fromtimestamp(
+                    low_ts / 1000, tz=timezone.utc
                 ).strftime('%Y-%m-%d %H:%M:%S')
                 return item, {
-                    'low_7d': low_7d_price,
-                    'low_7d_at_utc': low_7d_at_utc,
-                    'rebound_7d_pct': rebound_7d_pct,
+                    low_field: low_price,
+                    low_time_field: low_at_utc,
+                    metric_field: rebound_pct,
                 }
 
             processed = 0
@@ -1492,7 +1524,7 @@ class TradeDataScheduler:
                     try:
                         item, payload = future.result()
                     except Exception as exc:
-                        logger.warning(f"14D反弹榜逐币种计算异常: {exc}")
+                        logger.warning(f"{label}逐币种计算异常: {exc}")
                         payload = None
                         item = None
 
@@ -1500,21 +1532,22 @@ class TradeDataScheduler:
                         rebound_rows.append({
                             'symbol': item['symbol'],
                             'current_price': item['current_price'],
-                            'low_7d': payload['low_7d'],
-                            'low_7d_at_utc': payload['low_7d_at_utc'],
-                            'rebound_7d_pct': payload['rebound_7d_pct'],
+                            low_field: payload[low_field],
+                            low_time_field: payload[low_time_field],
+                            metric_field: payload[metric_field],
                         })
 
                     if processed % progress_step == 0 or processed == total_candidates:
                         logger.info(
-                            "14D反弹榜进度: "
+                            f"{label}进度: "
                             f"{processed}/{total_candidates}, "
                             f"effective={len(rebound_rows)}, "
                             f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
                         )
 
-        rebound_rows.sort(key=lambda x: x['rebound_7d_pct'], reverse=True)
-        top_list = rebound_rows[:self.rebound_7d_top_n]
+        metric_field = f"rebound_{window_days}d_pct"
+        rebound_rows.sort(key=lambda x: x[metric_field], reverse=True)
+        top_list = rebound_rows[:top_n]
 
         snapshot = {
             "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
@@ -1527,13 +1560,43 @@ class TradeDataScheduler:
             "all_rows": rebound_rows,
         }
         logger.info(
-            "14D反弹榜快照构建完成: "
+            f"{label}快照构建完成: "
             f"candidates={snapshot['candidates']}, "
             f"effective={snapshot['effective']}, "
             f"top={snapshot['top']}, "
             f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
         )
         return snapshot
+
+    def _build_rebound_7d_snapshot(self):
+        """构建14D反弹幅度榜快照（兼容历史函数名）。"""
+        return self._build_rebound_snapshot(
+            window_days=14,
+            top_n=self.rebound_7d_top_n,
+            kline_workers=self.rebound_7d_kline_workers,
+            weight_budget_per_minute=self.rebound_7d_weight_budget_per_minute,
+            label="14D反弹榜"
+        )
+
+    def _build_rebound_30d_snapshot(self):
+        """构建30D反弹幅度榜快照。"""
+        return self._build_rebound_snapshot(
+            window_days=30,
+            top_n=self.rebound_30d_top_n,
+            kline_workers=self.rebound_30d_kline_workers,
+            weight_budget_per_minute=self.rebound_30d_weight_budget_per_minute,
+            label="30D反弹榜"
+        )
+
+    def _build_rebound_60d_snapshot(self):
+        """构建60D反弹幅度榜快照。"""
+        return self._build_rebound_snapshot(
+            window_days=60,
+            top_n=self.rebound_60d_top_n,
+            kline_workers=self.rebound_60d_kline_workers,
+            weight_budget_per_minute=self.rebound_60d_weight_budget_per_minute,
+            label="60D反弹榜"
+        )
 
     def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
         """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
@@ -1587,6 +1650,116 @@ class TradeDataScheduler:
 
         logger.info(
             "晨间14D反弹榜任务完成: "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        )
+
+    def get_rebound_30d_snapshot(self, source: str = "30D反弹榜接口"):
+        """获取30D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
+        if not self.processor:
+            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
+        if self._is_api_cooldown_active(source=source):
+            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
+        if not self._try_enter_api_job_slot(source=source):
+            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
+
+        try:
+            snapshot = self._build_rebound_30d_snapshot()
+            if snapshot["top"] <= 0:
+                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
+            return {"ok": True, **snapshot}
+        except Exception as e:
+            logger.error(f"{source}失败: {e}")
+            return {"ok": False, "reason": "exception", "message": str(e)}
+        finally:
+            self._release_api_job_slot()
+
+    def snapshot_morning_rebound_30d(self):
+        """每天早上生成30D反弹幅度Top榜快照并入库。"""
+        started_at = time.perf_counter()
+        logger.info(
+            "晨间30D反弹榜任务开始执行: "
+            f"schedule={self.rebound_30d_hour:02d}:{self.rebound_30d_minute:02d}"
+        )
+        result = self.get_rebound_30d_snapshot(source="晨间30D反弹榜")
+        logger.info(
+            "晨间30D反弹榜快照结果: "
+            f"ok={result.get('ok')}, "
+            f"reason={result.get('reason', '')}, "
+            f"candidates={result.get('candidates', 0)}, "
+            f"effective={result.get('effective', 0)}, "
+            f"top={result.get('top', 0)}"
+        )
+        if not result.get("ok"):
+            logger.warning(
+                f"晨间30D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
+            )
+            return
+
+        try:
+            self.db.save_rebound_30d_snapshot(result)
+            logger.info(
+                f"30D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
+            )
+        except Exception as e:
+            logger.error(f"保存30D反弹榜快照失败: {e}")
+
+        logger.info(
+            "晨间30D反弹榜任务完成: "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        )
+
+    def get_rebound_60d_snapshot(self, source: str = "60D反弹榜接口"):
+        """获取60D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
+        if not self.processor:
+            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
+        if self._is_api_cooldown_active(source=source):
+            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
+        if not self._try_enter_api_job_slot(source=source):
+            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
+
+        try:
+            snapshot = self._build_rebound_60d_snapshot()
+            if snapshot["top"] <= 0:
+                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
+            return {"ok": True, **snapshot}
+        except Exception as e:
+            logger.error(f"{source}失败: {e}")
+            return {"ok": False, "reason": "exception", "message": str(e)}
+        finally:
+            self._release_api_job_slot()
+
+    def snapshot_morning_rebound_60d(self):
+        """每天早上生成60D反弹幅度Top榜快照并入库。"""
+        started_at = time.perf_counter()
+        logger.info(
+            "晨间60D反弹榜任务开始执行: "
+            f"schedule={self.rebound_60d_hour:02d}:{self.rebound_60d_minute:02d}"
+        )
+        result = self.get_rebound_60d_snapshot(source="晨间60D反弹榜")
+        logger.info(
+            "晨间60D反弹榜快照结果: "
+            f"ok={result.get('ok')}, "
+            f"reason={result.get('reason', '')}, "
+            f"candidates={result.get('candidates', 0)}, "
+            f"effective={result.get('effective', 0)}, "
+            f"top={result.get('top', 0)}"
+        )
+        if not result.get("ok"):
+            logger.warning(
+                f"晨间60D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
+            )
+            return
+
+        try:
+            self.db.save_rebound_60d_snapshot(result)
+            logger.info(
+                f"60D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
+            )
+        except Exception as e:
+            logger.error(f"保存60D反弹榜快照失败: {e}")
+
+        logger.info(
+            "晨间60D反弹榜任务完成: "
             f"elapsed={time.perf_counter() - started_at:.2f}s"
         )
 
@@ -1799,6 +1972,50 @@ class TradeDataScheduler:
             )
         else:
             logger.info("晨间14D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
+
+        if self.enable_rebound_30d_snapshot:
+            self.scheduler.add_job(
+                func=self.snapshot_morning_rebound_30d,
+                trigger=CronTrigger(
+                    hour=self.rebound_30d_hour,
+                    minute=self.rebound_30d_minute,
+                    timezone=UTC8
+                ),
+                id='snapshot_morning_rebound_30d',
+                name='晨间30D反弹榜',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+                replace_existing=True
+            )
+            logger.info(
+                "晨间30D反弹榜任务已启动: "
+                f"每天 {self.rebound_30d_hour:02d}:{self.rebound_30d_minute:02d} 执行"
+            )
+        else:
+            logger.info("晨间30D反弹榜任务未启用: ENABLE_REBOUND_30D_SNAPSHOT=0")
+
+        if self.enable_rebound_60d_snapshot:
+            self.scheduler.add_job(
+                func=self.snapshot_morning_rebound_60d,
+                trigger=CronTrigger(
+                    hour=self.rebound_60d_hour,
+                    minute=self.rebound_60d_minute,
+                    timezone=UTC8
+                ),
+                id='snapshot_morning_rebound_60d',
+                name='晨间60D反弹榜',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+                replace_existing=True
+            )
+            logger.info(
+                "晨间60D反弹榜任务已启动: "
+                f"每天 {self.rebound_60d_hour:02d}:{self.rebound_60d_minute:02d} 执行"
+            )
+        else:
+            logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
 
         self.scheduler.start()
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")

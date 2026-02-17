@@ -43,7 +43,7 @@
 - **历史回看**: 支持按日期查看历史快照（今天、昨天、近7天等），便于盘前/盘后复盘。
 - **持仓联动**: 榜单会标记“已持仓”币种，帮助快速识别“榜上标的 vs 当前仓位”的重叠。
 - **非实时设计**: 榜单页默认读取数据库快照，不依赖实时计算，稳定且可追溯。
-- **14D反弹榜**: 默认每天 **07:30 (UTC+8)** 生成“当前价相对近14天最低价涨幅”TopN 快照并入库（接口路径保留 `rebound-7d` 兼容名）。
+- **多周期反弹榜**: 默认每天 **07:30 (UTC+8)** 生成 14D / 30D / 60D 三套“当前价相对区间最低价涨幅”TopN 快照并入库（14D 保留 `rebound-7d` 兼容路径）。
 
 ### ⚡ 5. 极致性能与体验
 - **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
@@ -139,7 +139,7 @@ LEADERBOARD_MAX_SYMBOLS=120
 
 # 晨间14D反弹榜任务 (可选，默认开启，每天 07:30 UTC+8)
 # 规则：计算 current_price 相对 14天最低价 的涨幅，按涨幅降序取TopN
-# 说明：变量名保留 REBOUND_7D_* 为兼容历史配置，实际窗口已是14D
+# 说明：变量名保留 REBOUND_7D_* 为兼容历史配置，语义对应14D
 ENABLE_REBOUND_7D_SNAPSHOT=1
 REBOUND_7D_HOUR=7
 REBOUND_7D_MINUTE=30
@@ -148,6 +148,22 @@ REBOUND_7D_TOP_N=10
 REBOUND_7D_KLINE_WORKERS=6
 # 14D反弹榜每分钟API权重预算（默认900，建议 < 1200）
 REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE=900
+
+# 晨间30D反弹榜任务（默认开启，每天 07:32 UTC+8）
+ENABLE_REBOUND_30D_SNAPSHOT=1
+REBOUND_30D_HOUR=7
+REBOUND_30D_MINUTE=32
+REBOUND_30D_TOP_N=10
+REBOUND_30D_KLINE_WORKERS=6
+REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE=900
+
+# 晨间60D反弹榜任务（默认开启，每天 07:34 UTC+8）
+ENABLE_REBOUND_60D_SNAPSHOT=1
+REBOUND_60D_HOUR=7
+REBOUND_60D_MINUTE=34
+REBOUND_60D_TOP_N=10
+REBOUND_60D_KLINE_WORKERS=6
+REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE=900
 
 # 午间止损夜间复盘任务 (可选，默认每天 23:02 UTC+8)
 NOON_REVIEW_HOUR=23
@@ -159,7 +175,7 @@ API_JOB_LOCK_WAIT_SECONDS=8
 
 说明：
 - `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
-- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**，建议继续沿用，避免旧环境变量失效。
+- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；新增 `REBOUND_30D_*`、`REBOUND_60D_*` 用于多周期快照。
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
 - 如果你只关心每天 07:40 的快照，可适当调大 `UPDATE_INTERVAL_MINUTES`，减少高频同步压力。
 
@@ -189,6 +205,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/api/rebound-7d`：读取最新快照
   - `/api/rebound-7d?date=YYYY-MM-DD`：读取指定日期快照
   - `/api/rebound-7d/dates`：读取可选快照日期列表（倒序）
+- 30D反弹榜相关接口：
+  - `/api/rebound-30d`：读取最新快照
+  - `/api/rebound-30d?date=YYYY-MM-DD`：读取指定日期快照
+  - `/api/rebound-30d/dates`：读取可选快照日期列表（倒序）
+- 60D反弹榜相关接口：
+  - `/api/rebound-60d`：读取最新快照
+  - `/api/rebound-60d?date=YYYY-MM-DD`：读取指定日期快照
+  - `/api/rebound-60d/dates`：读取可选快照日期列表（倒序）
 - 午间浮亏与复盘接口：
   - `/api/open-positions`：返回午间快照与夜间复盘摘要（`summary.recent_loss_*`、`summary.noon_review_*`）
   - `/api/noon-loss-review-history?limit=7`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
@@ -201,6 +225,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `review_noon_loss_night`：每天 23:02 执行午间止损夜间复盘（UTC+8，可通过 `NOON_REVIEW_HOUR/MINUTE` 调整）
 - `send_morning_top_gainers`：每天 07:40 生成晨间涨幅榜快照（UTC+8，可关闭）
 - `snapshot_morning_rebound_7d`：每天 07:30 生成晨间14D反弹榜快照（UTC+8，可关闭）
+- `snapshot_morning_rebound_30d`：每天 07:32 生成晨间30D反弹榜快照（UTC+8，可关闭）
+- `snapshot_morning_rebound_60d`：每天 07:34 生成晨间60D反弹榜快照（UTC+8，可关闭）
 
 ### 6. 风控复盘数据落库
 - `noon_loss_snapshots`：保存每天 11:50 午间浮亏快照（汇总 + 逐币种 rows）。
