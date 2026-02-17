@@ -14,8 +14,8 @@
     </script>
     <style>
         html.dark-mode, html.dark-mode body {
-            background-color: #0f172a !important;
-            color: #f8fafc !important;
+            background-color: #050505 !important;
+            color: #eaeaea !important;
         }
     </style>
     <style>
@@ -48,14 +48,14 @@
         }
 
         body.dark-mode {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.65);
-            --panel-strong: #1e293b;
-            --border: #334155;
-            --text: #f8fafc;
-            --muted: #94a3b8;
+            --bg: #050505;
+            --panel: rgba(17, 17, 17, 0.9);
+            --panel-strong: #111111;
+            --border: #1e1e1e;
+            --text: #eaeaea;
+            --muted: #9ca3af;
             --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+            background-image: radial-gradient(circle at 50% -10%, #141414 0%, #0a0a0a 58%, #050505 100%);
         }
 
         body::before {
@@ -120,9 +120,9 @@
         }
 
         body.dark-mode .status-pill {
-            background: rgba(15, 23, 42, 0.8);
-            border-color: #334155;
-            color: #e2e8f0;
+            background: rgba(10, 10, 10, 0.85);
+            border-color: #1e1e1e;
+            color: #eaeaea;
         }
 
         .status-dot {
@@ -261,7 +261,7 @@
         }
 
         body.dark-mode .snapshot-context {
-            background: rgba(30, 41, 59, 0.86);
+            background: rgba(17, 17, 17, 0.86);
         }
 
         .metric-label {
@@ -595,7 +595,7 @@
         body.dark-mode .snapshot-stat,
         body.dark-mode .hero-card,
         body.dark-mode .mobile-row {
-            background: rgba(15, 23, 42, 0.7);
+            background: rgba(17, 17, 17, 0.9);
         }
 
         body.dark-mode .reversal-badge {
@@ -619,7 +619,7 @@
         body.dark-mode .snap-select,
         body.dark-mode .theme-toggle,
         body.dark-mode .nav-link {
-            background: rgba(15, 23, 42, 0.8);
+            background: rgba(10, 10, 10, 0.85);
             color: var(--text);
             border-color: var(--border);
         }
@@ -634,16 +634,16 @@
         body.dark-mode .refresh-btn { color: var(--text); background: var(--panel); }
 
         body.dark-mode .leader-table thead {
-            background: rgba(148, 163, 184, 0.12);
+            background: rgba(30, 30, 30, 0.85);
         }
 
         body.dark-mode .leader-table tbody tr {
-            border-bottom-color: rgba(148, 163, 184, 0.25);
+            border-bottom-color: rgba(156, 163, 175, 0.28);
         }
 
         body.dark-mode .heat-track {
-            border-color: rgba(148, 163, 184, 0.45);
-            background: rgba(148, 163, 184, 0.14);
+            border-color: rgba(156, 163, 175, 0.4);
+            background: rgba(28, 28, 28, 0.8);
         }
 
         .theme-brutal .text-white { color: var(--text) !important; }
@@ -680,6 +680,7 @@
             .mobile-board-hidden { display: none; }
         }
     </style>
+    <link rel="stylesheet" href="/static/dark-unified.css">
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 

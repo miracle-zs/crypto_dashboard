@@ -1,0 +1,67 @@
+/* Unified dark-mode palette across all pages */
+html.dark-mode,
+html.dark-mode body {
+    background-color: #050505 !important;
+    color: #eaeaea !important;
+}
+
+body.dark-mode {
+    --bg: #050505 !important;
+    --panel: rgba(17, 17, 17, 0.9) !important;
+    --panel-strong: #111111 !important;
+    --border: #1e1e1e !important;
+    --text: #eaeaea !important;
+    --muted: #9ca3af !important;
+    --primary: #eaeaea !important;
+}
+
+body.dark-mode {
+    background-image: radial-gradient(circle at 50% -10%, #141414 0%, #0a0a0a 58%, #050505 100%) !important;
+}
+
+body.dark-mode .status-pill {
+    background: rgba(10, 10, 10, 0.85) !important;
+    border-color: #1e1e1e !important;
+    color: #eaeaea !important;
+}
+
+body.dark-mode .metric-slab {
+    background: rgba(17, 17, 17, 0.88) !important;
+    border-color: #1e1e1e !important;
+}
+
+body.dark-mode .metric-slab .text-gray-500 {
+    color: #9ca3af !important;
+}
+
+body.dark-mode .toast {
+    background: #111111 !important;
+    border-color: #1e1e1e !important;
+}
+
+body.dark-mode .theme-brutal .bg-black\/40 {
+    background-color: rgba(5, 5, 5, 0.45) !important;
+}
+
+body.dark-mode .theme-brutal .bg-black\/70 {
+    background-color: rgba(5, 5, 5, 0.72) !important;
+}
+
+body.dark-mode .theme-brutal .hover\:bg-white\/5:hover {
+    background-color: rgba(234, 234, 234, 0.06) !important;
+}
+
+/* Stronger cross-page dark overrides */
+body.dark-mode .glass-panel,
+body.dark-mode .cyber-panel,
+body.dark-mode .hero-card,
+body.dark-mode .focus-kpi,
+body.dark-mode .snapshot-stat,
+body.dark-mode .mobile-row,
+body.dark-mode .formula-box,
+body.dark-mode .pattern-mini,
+body.dark-mode .cheat-card,
+body.dark-mode .log-box {
+    background: rgba(17, 17, 17, 0.9) !important;
+    border-color: #1e1e1e !important;
+}

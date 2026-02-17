@@ -18,8 +18,8 @@
     <style>
         /* 关键 CSS：强制 html 和 body 在深色模式下的背景色 */
         html.dark-mode, html.dark-mode body {
-            background-color: #0f172a !important;
-            color: #f8fafc !important;
+            background-color: #050505 !important;
+            color: #eaeaea !important;
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
@@ -42,13 +42,13 @@
 
         /* Dark Mode Variables */
         body.dark-mode {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.65);
-            --panel-strong: #1e293b;
-            --border: #334155;
-            --text: #f8fafc;
-            --muted: #94a3b8;
-            --primary: #f8fafc;
+            --bg: #050505;
+            --panel: rgba(17, 17, 17, 0.9);
+            --panel-strong: #111111;
+            --border: #1e1e1e;
+            --text: #eaeaea;
+            --muted: #9ca3af;
+            --primary: #eaeaea;
             --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
         }
 
@@ -62,7 +62,7 @@
             transition: background-color 0.5s ease, color 0.5s ease;
         }
         body.dark-mode {
-            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+            background-image: radial-gradient(circle at 50% -10%, #141414 0%, #0a0a0a 58%, #050505 100%);
         }
 
         .font-mono {
@@ -383,11 +383,11 @@
             border-radius: 14px;
         }
         body.dark-mode .metric-slab {
-            background: rgba(15, 23, 42, 0.6);
-            border-color: #334155;
+            background: rgba(17, 17, 17, 0.88);
+            border-color: #1e1e1e;
         }
         body.dark-mode .metric-slab .text-gray-500 {
-            color: #94a3b8 !important;
+            color: #9ca3af !important;
         }
 
         .status-pill {
@@ -404,12 +404,13 @@
             text-transform: uppercase;
         }
         body.dark-mode .status-pill {
-            background: rgba(15, 23, 42, 0.8);
-            border-color: #334155;
-            color: #e2e8f0;
+            background: rgba(10, 10, 10, 0.85);
+            border-color: #1e1e1e;
+            color: #eaeaea;
         }
 
     </style>
+    <link rel="stylesheet" href="/static/dark-unified.css">
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 

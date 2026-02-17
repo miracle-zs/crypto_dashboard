@@ -13,8 +13,8 @@
     </script>
     <style>
         html.dark-mode, html.dark-mode body {
-            background-color: #0f172a !important;
-            color: #f8fafc !important;
+            background-color: #050505 !important;
+            color: #eaeaea !important;
         }
     </style>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -37,13 +37,13 @@
 
         /* Dark Mode Variables */
         body.dark-mode {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.65);
-            --panel-strong: #1e293b;
-            --border: #334155;
-            --text: #f8fafc;
-            --muted: #94a3b8;
-            --primary: #f8fafc;
+            --bg: #050505;
+            --panel: rgba(17, 17, 17, 0.9);
+            --panel-strong: #111111;
+            --border: #1e1e1e;
+            --text: #eaeaea;
+            --muted: #9ca3af;
+            --primary: #eaeaea;
             --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
         }
 
@@ -57,7 +57,7 @@
             transition: background-color 0.5s ease, color 0.5s ease;
         }
         body.dark-mode {
-            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 60%, #020617 100%);
+            background-image: radial-gradient(circle at 50% -10%, #141414 0%, #0a0a0a 58%, #050505 100%);
         }
 
         .font-mono {
@@ -136,9 +136,9 @@
             text-transform: uppercase;
         }
         body.dark-mode .status-pill {
-            background: rgba(15, 23, 42, 0.8);
-            border-color: #334155;
-            color: #e2e8f0;
+            background: rgba(10, 10, 10, 0.85);
+            border-color: #1e1e1e;
+            color: #eaeaea;
         }
 
         .status-dot {
@@ -449,17 +449,17 @@
             letter-spacing: 0.2em;
         }
         body.dark-mode .section-title {
-            background: rgba(30, 41, 59, 0.8);
+            background: rgba(17, 17, 17, 0.9);
         }
         body.dark-mode .formula-box,
         body.dark-mode .pattern-mini {
-            background: rgba(15, 23, 42, 0.6);
-            border-color: #334155;
-            color: #e2e8f0;
+            background: rgba(17, 17, 17, 0.88);
+            border-color: #1e1e1e;
+            color: #eaeaea;
         }
-        body.dark-mode .pattern-line { stroke: #e2e8f0; }
+        body.dark-mode .pattern-line { stroke: #eaeaea; }
         body.dark-mode .pattern-axis { stroke: #64748b; }
-        body.dark-mode .pattern-grid { stroke: #334155; }
+        body.dark-mode .pattern-grid { stroke: #1e1e1e; }
         body.dark-mode .pattern-dash { stroke: #94a3b8; }
 
         /* Cheat Sheet Cards */
@@ -468,11 +468,12 @@
             border: 1px solid #e5e7eb;
         }
         body.dark-mode .cheat-card {
-            background: rgba(30, 41, 59, 0.4);
-            border-color: #334155;
+            background: rgba(17, 17, 17, 0.82);
+            border-color: #1e1e1e;
         }
 
     </style>
+    <link rel="stylesheet" href="/static/dark-unified.css">
 </head>
 <body class="min-h-screen p-3 sm:p-4 md:p-8 relative theme-brutal">
 
