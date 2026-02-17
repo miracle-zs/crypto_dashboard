@@ -951,6 +951,9 @@
                 <div id="metric2-sample-note" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
                     样本信息: --
                 </div>
+                <div id="metric2-continuation-pool" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                    延续上涨池: --
+                </div>
 
                 <div class="hidden md:block overflow-x-auto">
                     <table class="leader-table w-full text-left text-sm min-w-[980px]">
@@ -1100,6 +1103,7 @@
     const metric2Summary = document.getElementById('metric2-summary');
     const metric2HitSymbols = document.getElementById('metric2-hit-symbols');
     const metric2SampleNote = document.getElementById('metric2-sample-note');
+    const metric2ContinuationPool = document.getElementById('metric2-continuation-pool');
     const metric2Body = document.getElementById('metric2-body');
     const metric2Cards = document.getElementById('metric2-cards');
     const metric3Summary = document.getElementById('metric3-summary');
@@ -1220,7 +1224,10 @@
     }
 
     function renderMetric2(metric) {
-        if (!metric2Summary || !metric2HitSymbols || !metric2SampleNote || !metric2Body || !metric2Cards) return;
+        if (
+            !metric2Summary || !metric2HitSymbols || !metric2SampleNote
+            || !metric2ContinuationPool || !metric2Body || !metric2Cards
+        ) return;
 
         metric2Body.innerHTML = '';
         metric2Cards.innerHTML = '';
@@ -1239,6 +1246,7 @@
             metric2SampleNote.textContent = sampleSize > 0
                 ? `基于 ${baseDate} 涨幅榜Top${sampleSize} · 当前快照缺少有效次日涨跌幅`
                 : '样本信息: 缺少前一日涨幅榜快照';
+            metric2ContinuationPool.textContent = '延续上涨池: --';
             return;
         }
 
@@ -1249,6 +1257,20 @@
                 : '--'
         }`;
         metric2SampleNote.textContent = `基于 ${baseDate} 涨幅榜Top${sampleSize} · 有效样本 ${evaluatedCount} · 阈值 ${formatChangeOrDash(thresholdPct)}`;
+        const continuationRows = Array.isArray(metric?.continuation_pool?.rows)
+            ? metric.continuation_pool.rows
+            : [];
+        const continuationPreview = continuationRows.slice(0, 8).map((item) => {
+            const symbol = item?.symbol || '--';
+            const pct = formatChangeOrDash(item?.next_change_pct);
+            const rankTag = item?.today_gainer_rank ? `#${item.today_gainer_rank}` : '-';
+            return `${symbol}(${pct},今日榜位${rankTag})`;
+        });
+        const stillUpCount = Number(metric?.continuation_pool?.still_up_count || continuationRows.length || 0);
+        const stillInTopCount = Number(metric?.continuation_pool?.still_in_gainers_top_count || 0);
+        metric2ContinuationPool.textContent = continuationRows.length > 0
+            ? `延续上涨池: ${stillUpCount} 个（仍在今日涨幅榜 ${stillInTopCount} 个） · ${continuationPreview.join(', ')}`
+            : '延续上涨池: 0 个';
 
         details.forEach((item) => {
             const hitBadge = item.is_hit
@@ -1695,7 +1717,11 @@
             renderRows(rows);
             renderLosersRows(losersRows);
             renderLosersReversal(data.losers_reversal || null);
-            renderMetric2(data.next_day_drop_metric || null);
+            const metric2Data = data.next_day_drop_metric || null;
+            if (metric2Data && !metric2Data.continuation_pool) {
+                metric2Data.continuation_pool = data.continuation_pool || null;
+            }
+            renderMetric2(metric2Data);
             renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
             await loadMetricsHistory();
             await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));

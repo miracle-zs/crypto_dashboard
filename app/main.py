@@ -345,8 +345,52 @@ async def get_leaderboard_snapshot(
     metric1 = metric_payload.get("metric1", {}) if metric_payload else {}
     metric2 = metric_payload.get("metric2", {}) if metric_payload else {}
     metric3 = metric_payload.get("metric3", {}) if metric_payload else {}
+    gainers_rank_map = {
+        str(row.get("symbol", "")).upper(): idx
+        for idx, row in enumerate(enriched_rows, start=1)
+        if str(row.get("symbol", "")).upper()
+    }
+    continuation_rows = []
+    for item in (metric2.get("details") or []):
+        symbol = str(item.get("symbol", "")).upper()
+        if not symbol:
+            continue
+        next_change = item.get("next_change_pct")
+        if next_change is None:
+            continue
+        try:
+            next_change_val = float(next_change)
+        except (TypeError, ValueError):
+            continue
+        if next_change_val <= 0:
+            continue
+
+        today_rank = gainers_rank_map.get(symbol)
+        continuation_rows.append({
+            "symbol": symbol,
+            "prev_rank": item.get("prev_rank"),
+            "next_change_pct": round(next_change_val, 4),
+            "today_gainer_rank": today_rank,
+            "still_in_gainers_top": today_rank is not None,
+        })
+    continuation_rows.sort(
+        key=lambda x: (
+            0 if x.get("still_in_gainers_top") else 1,
+            -(x.get("next_change_pct") or 0.0),
+            x.get("prev_rank") or 9999
+        )
+    )
+    continuation_pool = {
+        "base_snapshot_date": metric2.get("base_snapshot_date"),
+        "target_snapshot_date": metric2.get("target_snapshot_date"),
+        "still_up_count": len(continuation_rows),
+        "still_in_gainers_top_count": sum(1 for x in continuation_rows if x.get("still_in_gainers_top")),
+        "rows": continuation_rows,
+    }
+    metric2_with_pool = {**metric2, "continuation_pool": continuation_pool}
     snapshot["losers_reversal"] = metric1
-    snapshot["next_day_drop_metric"] = metric2
+    snapshot["next_day_drop_metric"] = metric2_with_pool
+    snapshot["continuation_pool"] = continuation_pool
     snapshot["change_48h_metric"] = metric3
     # Backward-compatible keys retained for existing frontend readers.
     snapshot["short_48h_metric"] = metric3

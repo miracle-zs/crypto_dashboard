@@ -1177,10 +1177,52 @@
             </p>
         </div>
 
+        <!-- Trading SOP -->
+        <div class="doc-card panel-reveal rounded-xl p-4 sm:p-6 md:col-span-2" style="border-left-color: #22c55e;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-green-500/10 rounded text-green-400"><i data-lucide="workflow"></i></div>
+                <h2 class="text-l2 font-bold">Daily Trading SOP <span class="text-gray-500 text-sm">实盘执行时间轴</span></h2>
+            </div>
+
+            <p class="text-sm mb-4">
+                <span class="highlight">晨间开单 + 午间风控 + 夜间压仓 + 次日资金再分配</span> 的循环流程。
+            </p>
+
+            <div class="grid gap-3 text-xs md:text-sm">
+                <div class="formula-box p-3 rounded">
+                    <div class="font-mono text-teal-300 mb-1">05:00-08:00 (UTC+8) // Entry Window</div>
+                    <div>标的池：当日涨幅榜 Top10 + 14D 反弹榜 Top10 + 昨日Top10今日仍上涨延续池。</div>
+                    <div>每标的固定 3000U，2x 杠杆，逐仓做空。</div>
+                </div>
+
+                <div class="formula-box p-3 rounded">
+                    <div class="font-mono text-teal-300 mb-1">11:55 // Noon Risk Cut</div>
+                    <div>检查全部持仓，浮亏仓位全部平掉；其余持有。</div>
+                </div>
+
+                <div class="formula-box p-3 rounded">
+                    <div class="font-mono text-teal-300 mb-1">23:00 // Overnight Check</div>
+                    <div>除非整体行情显著偏弱，过夜持仓控制在不超过 5 个标的。</div>
+                </div>
+
+                <div class="formula-box p-3 rounded">
+                    <div class="font-mono text-teal-300 mb-1">Next 05:00-08:00 // Legacy Position Rebalance</div>
+                    <div>旧仓位调至最大杠杆，先设定保护性止盈/出场锚点，再尽量降低保证金占用，释放资金给新仓。</div>
+                </div>
+            </div>
+
+            <div class="text-xs space-y-2 bg-green-900/10 p-4 mt-4 rounded border border-green-500/20">
+                <div class="font-bold text-green-400 uppercase mb-1">Execution Notes</div>
+                <p>• 核心优势：节奏固定、执行清晰、资金利用率高。</p>
+                <p>• 主要风险：标的池同质化偏高，单边行情下做空逆风概率上升。</p>
+                <p>• 关键前提：升杠杆与减保证金动作，必须在保护单有效后执行。</p>
+            </div>
+        </div>
+
     </div>
 
     <div class="mt-12 pt-8 border-t border-gray-800 text-center text-xs text-gray-600 font-mono">
-        SOP 3.0 TRADING SYSTEM // DOCUMENTATION // AUTHORIZED PERSONNEL ONLY
+        SOP TRADING SYSTEM // DOCUMENTATION // AUTHORIZED PERSONNEL ONLY
     </div>
 
     <script>
