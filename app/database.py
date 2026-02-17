@@ -1604,14 +1604,40 @@ class Database:
         result = []
         for row in rows:
             item = dict(row)
+            snapshot_time_dt = self._parse_snapshot_dt(item.get("noon_snapshot_time"))
+            review_time_dt = self._parse_snapshot_dt(item.get("review_time"))
+            # 凌晨先跑出的“空复盘”会早于当天11:50午间快照，这类记录不应覆盖午间展示。
+            review_is_stale = (
+                snapshot_time_dt is not None
+                and review_time_dt is not None
+                and review_time_dt < snapshot_time_dt
+            )
+
+            if review_is_stale:
+                item["review_time"] = None
+                item["not_cut_count"] = 0
+                item["hold_loss_total"] = 0.0
+                item["delta_loss_total"] = 0.0
+                item["review_pct_of_balance"] = 0.0
+                item["noon_cut_loss_total"] = -abs(float(item.get("noon_cut_loss_total", 0.0)))
+
             rows_json = item.get("rows_json")
             try:
-                item["rows"] = json.loads(rows_json) if rows_json else []
+                item["rows"] = [] if review_is_stale else (json.loads(rows_json) if rows_json else [])
             except Exception:
                 item["rows"] = []
             item.pop("rows_json", None)
             result.append(item)
         return result
+
+    @staticmethod
+    def _parse_snapshot_dt(value: str | None) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
 
     def save_leaderboard_snapshot(self, snapshot: Dict) -> None:
         """保存/覆盖某天的涨幅榜快照（按 snapshot_date 唯一）。"""

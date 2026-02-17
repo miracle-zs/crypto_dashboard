@@ -69,6 +69,31 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
 
 
+def _parse_local_snapshot_time(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
+    except Exception:
+        return None
+
+
+def _is_noon_review_ready(
+    noon_snapshot: Optional[Dict],
+    noon_review_snapshot: Optional[Dict]
+) -> bool:
+    if not noon_review_snapshot:
+        return False
+    review_dt = _parse_local_snapshot_time(str(noon_review_snapshot.get("review_time") or ""))
+    if review_dt is None:
+        return False
+    noon_dt = _parse_local_snapshot_time(str((noon_snapshot or {}).get("snapshot_time") or ""))
+    if noon_dt is None:
+        # 没有午间快照时，视作未完成有效复盘，避免凌晨空复盘误导前端状态。
+        return False
+    return review_dt >= noon_dt
+
+
 def _fetch_mark_price_map(symbols: List[str], client: BinanceFuturesRestClient) -> Dict[str, float]:
     """
     同步辅助函数，包含阻塞网络IO，需在 executor 中运行
@@ -613,19 +638,28 @@ async def get_open_positions(
     noon_stop_loss_total = float(noon_loss_snapshot.get("total_stop_loss", 0.0)) if noon_loss_snapshot else 0.0
     noon_stop_loss_pct = float(noon_loss_snapshot.get("pct_of_balance", 0.0)) if noon_loss_snapshot else 0.0
     noon_snapshot_time = str(noon_loss_snapshot.get("snapshot_time")) if noon_loss_snapshot else None
-    noon_review_time = str(noon_review_snapshot.get("review_time")) if noon_review_snapshot else None
-    noon_review_not_cut_count = int(noon_review_snapshot.get("not_cut_count", 0)) if noon_review_snapshot else 0
+    noon_review_ready = _is_noon_review_ready(noon_loss_snapshot, noon_review_snapshot)
+    noon_review_time = (
+        str(noon_review_snapshot.get("review_time")) if (noon_review_snapshot and noon_review_ready) else None
+    )
+    noon_review_not_cut_count = (
+        int(noon_review_snapshot.get("not_cut_count", 0)) if (noon_review_snapshot and noon_review_ready) else 0
+    )
     noon_review_noon_cut_loss_total = (
-        float(noon_review_snapshot.get("noon_cut_loss_total", 0.0)) if noon_review_snapshot else 0.0
+        float(noon_review_snapshot.get("noon_cut_loss_total", 0.0))
+        if (noon_review_snapshot and noon_review_ready) else 0.0
     )
     noon_review_hold_loss_total = (
-        float(noon_review_snapshot.get("hold_loss_total", 0.0)) if noon_review_snapshot else 0.0
+        float(noon_review_snapshot.get("hold_loss_total", 0.0))
+        if (noon_review_snapshot and noon_review_ready) else 0.0
     )
     noon_review_delta_loss_total = (
-        float(noon_review_snapshot.get("delta_loss_total", 0.0)) if noon_review_snapshot else 0.0
+        float(noon_review_snapshot.get("delta_loss_total", 0.0))
+        if (noon_review_snapshot and noon_review_ready) else 0.0
     )
     noon_review_pct_of_balance = (
-        float(noon_review_snapshot.get("pct_of_balance", 0.0)) if noon_review_snapshot else 0.0
+        float(noon_review_snapshot.get("pct_of_balance", 0.0))
+        if (noon_review_snapshot and noon_review_ready) else 0.0
     )
 
     if not raw_positions:
@@ -652,9 +686,9 @@ async def get_open_positions(
                 "recent_loss_snapshot_date": today_snapshot_date if noon_loss_snapshot else None,
                 "recent_loss_snapshot_time": noon_snapshot_time,
                 "recent_loss_snapshot_ready": noon_loss_snapshot is not None,
-                "noon_review_snapshot_date": today_snapshot_date if noon_review_snapshot else None,
+                "noon_review_snapshot_date": today_snapshot_date if noon_review_ready else None,
                 "noon_review_snapshot_time": noon_review_time,
-                "noon_review_snapshot_ready": noon_review_snapshot is not None,
+                "noon_review_snapshot_ready": noon_review_ready,
                 "noon_review_not_cut_count": noon_review_not_cut_count,
                 "noon_review_noon_cut_loss_total": noon_review_noon_cut_loss_total,
                 "noon_review_hold_loss_total": noon_review_hold_loss_total,
@@ -785,9 +819,9 @@ async def get_open_positions(
         "recent_loss_snapshot_date": today_snapshot_date if noon_loss_snapshot else None,
         "recent_loss_snapshot_time": noon_snapshot_time,
         "recent_loss_snapshot_ready": noon_loss_snapshot is not None,
-        "noon_review_snapshot_date": today_snapshot_date if noon_review_snapshot else None,
+        "noon_review_snapshot_date": today_snapshot_date if noon_review_ready else None,
         "noon_review_snapshot_time": noon_review_time,
-        "noon_review_snapshot_ready": noon_review_snapshot is not None,
+        "noon_review_snapshot_ready": noon_review_ready,
         "noon_review_not_cut_count": noon_review_not_cut_count,
         "noon_review_noon_cut_loss_total": noon_review_noon_cut_loss_total,
         "noon_review_hold_loss_total": noon_review_hold_loss_total,

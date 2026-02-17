@@ -101,6 +101,8 @@ class TradeDataScheduler:
         self.rebound_7d_weight_budget_per_minute = _env_int('REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.rebound_7d_hour = _env_int('REBOUND_7D_HOUR', 7, minimum=0)
         self.rebound_7d_minute = _env_int('REBOUND_7D_MINUTE', 30, minimum=0)
+        self.noon_loss_check_hour = _env_int('NOON_LOSS_CHECK_HOUR', 11, minimum=0)
+        self.noon_loss_check_minute = _env_int('NOON_LOSS_CHECK_MINUTE', 50, minimum=0)
         self.noon_review_hour = _env_int('NOON_REVIEW_HOUR', 23, minimum=0)
         self.noon_review_minute = _env_int('NOON_REVIEW_MINUTE', 2, minimum=0)
         self.noon_review_target_day_offset = _env_int('NOON_REVIEW_TARGET_DAY_OFFSET', 0)
@@ -111,6 +113,8 @@ class TradeDataScheduler:
         self.leaderboard_alert_minute %= 60
         self.rebound_7d_hour %= 24
         self.rebound_7d_minute %= 60
+        self.noon_loss_check_hour %= 24
+        self.noon_loss_check_minute %= 60
         self.noon_review_hour %= 24
         self.noon_review_minute %= 60
         self.api_job_lock_wait_seconds = _env_int('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
@@ -846,7 +850,10 @@ class TradeDataScheduler:
 
             if loss_positions:
                 title = f"⚠️ 午间浮亏警报: {count}个新订单"
-                content = f"北京时间 11:50 监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
+                content = (
+                    f"北京时间 {self.noon_loss_check_hour:02d}:{self.noon_loss_check_minute:02d} "
+                    f"监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
+                )
                 content += "--- \n"
 
                 for pos in loss_positions:
@@ -1730,10 +1737,14 @@ class TradeDataScheduler:
             replace_existing=True
         )
 
-        # 添加午间浮亏检查任务 - 每天 11:50 (UTC+8) 执行
+        # 添加午间浮亏检查任务 - 默认每天 11:50 (UTC+8) 执行
         self.scheduler.add_job(
             func=self.check_recent_losses_at_noon,
-            trigger=CronTrigger(hour=11, minute=50, timezone=UTC8),
+            trigger=CronTrigger(
+                hour=self.noon_loss_check_hour,
+                minute=self.noon_loss_check_minute,
+                timezone=UTC8
+            ),
             id='check_losses_noon',
             name='午间浮亏检查',
             max_instances=1,
@@ -1790,6 +1801,10 @@ class TradeDataScheduler:
         logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
         logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
         logger.info("睡前风控检查已启动: 每天 23:00 执行")
+        logger.info(
+            "午间浮亏检查已启动: "
+            f"每天 {self.noon_loss_check_hour:02d}:{self.noon_loss_check_minute:02d} 执行"
+        )
         logger.info(
             "午间止损夜间复盘已启动: "
             f"每天 {self.noon_review_hour:02d}:{self.noon_review_minute:02d} 执行, "
