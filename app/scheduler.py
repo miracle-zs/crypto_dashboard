@@ -95,6 +95,8 @@ class TradeDataScheduler:
         self.leaderboard_weight_budget_per_minute = _env_int('LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
         self.leaderboard_alert_hour = _env_int('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
         self.leaderboard_alert_minute = _env_int('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
+        self.leaderboard_guard_before_minutes = _env_int('LEADERBOARD_GUARD_BEFORE_MINUTES', 2, minimum=0)
+        self.leaderboard_guard_after_minutes = _env_int('LEADERBOARD_GUARD_AFTER_MINUTES', 5, minimum=0)
         self.enable_rebound_7d_snapshot = os.getenv('ENABLE_REBOUND_7D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
         self.rebound_7d_top_n = _env_int('REBOUND_7D_TOP_N', 10, minimum=1)
         self.rebound_7d_kline_workers = _env_int('REBOUND_7D_KLINE_WORKERS', 6, minimum=1)
@@ -164,8 +166,8 @@ class TradeDataScheduler:
             second=0,
             microsecond=0
         )
-        window_start = leaderboard_dt - timedelta(minutes=2)
-        window_end = leaderboard_dt + timedelta(minutes=5)
+        window_start = leaderboard_dt - timedelta(minutes=self.leaderboard_guard_before_minutes)
+        window_end = leaderboard_dt + timedelta(minutes=self.leaderboard_guard_after_minutes)
         return window_start <= now <= window_end
 
     def sync_trades_data(self):
@@ -176,7 +178,8 @@ class TradeDataScheduler:
         if self._is_leaderboard_guard_window():
             logger.info(
                 "跳过交易同步: 位于晨间涨幅榜保护窗口内 "
-                f"({self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} 前2分钟至后5分钟)"
+                f"({self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} "
+                f"前{self.leaderboard_guard_before_minutes}分钟至后{self.leaderboard_guard_after_minutes}分钟)"
             )
             return
         if self._is_api_cooldown_active(source='交易同步'):
