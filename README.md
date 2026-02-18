@@ -234,6 +234,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `snapshot_morning_rebound_30d`：每天 07:32 生成晨间30D反弹榜快照（UTC+8，可关闭）
 - `snapshot_morning_rebound_60d`：每天 07:34 生成晨间60D反弹榜快照（UTC+8，可关闭）
 
+### 6. Hardening 验证报告
+- 2026-02-18 一周加固执行与验证记录：`docs/plans/2026-02-18-hardening-verification-report.md`
+
 ### 6. 风控复盘数据落库
 - `noon_loss_snapshots`：保存每天 11:50 午间浮亏快照（汇总 + 逐币种 rows）。
 - `noon_loss_review_snapshots`：保存每天夜间复盘结果（汇总 + 逐币种 rows）。
