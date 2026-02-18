@@ -1619,9 +1619,10 @@
         const reboundBody = panel.body;
         const reboundCards = panel.cards;
 
+        const windowEndpoint = Number(windowDays) === 14 ? '7d' : `${windowDays}d`;
         const endpoint = selectedDate
-            ? `/api/rebound-${windowDays}d?date=${encodeURIComponent(selectedDate)}`
-            : `/api/rebound-${windowDays}d`;
+            ? `/api/rebound-${windowEndpoint}?date=${encodeURIComponent(selectedDate)}`
+            : `/api/rebound-${windowEndpoint}`;
 
         try {
             const response = await fetch(endpoint);
