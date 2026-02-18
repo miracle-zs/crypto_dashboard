@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta, timezone
 from app.logger import logger, read_logs
+from app.routes.leaderboard import router as leaderboard_router
+from app.routes.system import router as system_router
+from app.routes.trades import router as trades_router
 from collections import defaultdict
 import asyncio
 from functools import partial
@@ -38,6 +41,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Scheduler instance
 scheduler = None
 user_stream = None
+app.state.scheduler = None
 
 
 def get_db():
@@ -56,6 +60,11 @@ def get_trade_service(db: Database = Depends(get_db)):
 
 def get_public_rest():
     return BinanceFuturesRestClient()
+
+
+app.include_router(system_router)
+app.include_router(trades_router)
+app.include_router(leaderboard_router)
 
 
 def _format_holding_time(total_minutes: int) -> str:
@@ -152,6 +161,7 @@ async def startup_event():
         scheduler = get_scheduler()
         # scheduler.start() 通常是非阻塞的，或者已内部处理线程
         scheduler.start()
+        app.state.scheduler = scheduler
         logger.info("定时任务调度器已启动")
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
@@ -161,6 +171,7 @@ async def startup_event():
             user_stream = BinanceUserDataStream(api_key=api_key, db=get_db())
             user_stream.start()
     else:
+        app.state.scheduler = None
         logger.warning("未配置API密钥，定时任务未启动")
 
 
@@ -171,14 +182,9 @@ async def shutdown_event():
     if scheduler:
         scheduler.stop()
         logger.info("定时任务调度器已停止")
+    app.state.scheduler = None
     if user_stream:
         user_stream.stop()
-
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    """Serve the dashboard HTML"""
-    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/live-monitor", response_class=HTMLResponse)
@@ -199,10 +205,6 @@ async def read_logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
 
 
-@app.get("/leaderboard", response_class=HTMLResponse)
-async def read_leaderboard_page(request: Request):
-    """Serve the leaderboard HTML"""
-    return templates.TemplateResponse("leaderboard.html", {"request": request})
 
 
 @app.get("/api/logs")
@@ -957,44 +959,6 @@ async def get_open_positions(
     }
 
 
-@app.get("/api/status")
-async def get_status(db: Database = Depends(get_db)):
-    """Check system status"""
-    global scheduler
-
-    loop = asyncio.get_event_loop()
-
-    # 并行执行独立的数据库查询
-    stats, sync_status = await asyncio.gather(
-        loop.run_in_executor(None, db.get_statistics),
-        loop.run_in_executor(None, db.get_sync_status)
-    )
-
-    next_run_time = None
-    is_configured = scheduler is not None and scheduler.scheduler.running
-    if scheduler:
-        next_run = scheduler.get_next_run_time()
-        next_run_time = next_run.isoformat() if next_run else None
-
-    return {
-        "status": "online",
-        "configured": is_configured,
-        "database": {
-            "total_trades": stats.get('total_trades', 0),
-            "unique_symbols": stats.get('unique_symbols', 0),
-            "earliest_trade": stats.get('earliest_trade'),
-            "latest_trade": stats.get('latest_trade')
-        },
-        "sync": {
-            "last_sync_time": sync_status.get('last_sync_time'),
-            "status": sync_status.get('status', 'idle'),
-            "next_run_time": next_run_time,
-            "error_message": sync_status.get('error_message')
-        },
-        "scheduler_running": is_configured
-    }
-
-
 @app.post("/api/sync/manual")
 async def manual_sync():
     """手动触发数据同步"""
@@ -1013,23 +977,6 @@ async def manual_sync():
         return {"message": "手动同步已触发", "status": "started"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
-
-
-@app.get("/api/database/stats")
-async def get_database_stats(db: Database = Depends(get_db)):
-    """获取数据库详细统计信息"""
-    loop = asyncio.get_event_loop()
-
-    # 并行执行
-    stats, sync_status = await asyncio.gather(
-        loop.run_in_executor(None, db.get_statistics),
-        loop.run_in_executor(None, db.get_sync_status)
-    )
-
-    return {
-        "statistics": stats,
-        "sync_status": sync_status
-    }
 
 
 @app.get("/api/daily-stats", response_model=List[DailyStats])
