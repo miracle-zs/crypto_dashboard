@@ -27,6 +27,7 @@ app = FastAPI(title="Zero Gravity Dashboard")
 
 # Setup templates
 templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Initialize database
 # db = Database()  <-- Deprecated global
