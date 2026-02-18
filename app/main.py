@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.services import TradeQueryService
 from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats, OpenPositionsResponse
-from app.scheduler import get_scheduler
+from app.scheduler import get_scheduler, should_start_scheduler
 from app.database import Database
 from app.binance_client import BinanceFuturesRestClient
 from app.user_stream import BinanceUserDataStream
@@ -153,11 +153,9 @@ async def startup_event():
     """应用启动时执行"""
     global scheduler, user_stream
 
-    # 启动定时任务调度器
-    api_key = os.getenv('BINANCE_API_KEY')
-    api_secret = os.getenv('BINANCE_API_SECRET')
-
-    if api_key and api_secret:
+    should_start, reason = should_start_scheduler()
+    if should_start:
+        api_key = os.getenv('BINANCE_API_KEY')
         scheduler = get_scheduler()
         # scheduler.start() 通常是非阻塞的，或者已内部处理线程
         scheduler.start()
@@ -172,7 +170,14 @@ async def startup_event():
             user_stream.start()
     else:
         app.state.scheduler = None
-        logger.warning("未配置API密钥，定时任务未启动")
+        if reason == "missing_api_keys":
+            logger.warning("未配置API密钥，定时任务未启动")
+        elif reason == "multi_worker_unsupported":
+            logger.warning(
+                "检测到多worker部署(WEB_CONCURRENCY/UVICORN_WORKERS > 1)，"
+                "为避免重复调度已禁用内置scheduler。"
+                "如需强制启用请设置 SCHEDULER_ALLOW_MULTI_WORKER=1。"
+            )
 
 
 @app.on_event("shutdown")

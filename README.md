@@ -186,6 +186,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 访问 `http://localhost:8000` 即可看到仪表盘。
 
+生产部署建议（调度器安全）：
+- 推荐单实例运行内置 scheduler：`WEB_CONCURRENCY=1`（或 `UVICORN_WORKERS=1`）。
+- 当 worker 数大于 1 时，应用会默认禁用 scheduler，避免重复触发定时任务。
+- 仅在你确认外部有去重机制时，才设置 `SCHEDULER_ALLOW_MULTI_WORKER=1` 强制启用。
+
 ### 4. 页面与接口
 - 页面：
   - `/`：交易分析主面板（TRADES）
