@@ -178,6 +178,7 @@ API_JOB_LOCK_WAIT_SECONDS=8
 - `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；新增 `REBOUND_30D_*`、`REBOUND_60D_*` 用于多周期快照。
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
 - 如果你只关心每天 07:40 的快照，可适当调大 `UPDATE_INTERVAL_MINUTES`，减少高频同步压力。
+- 可选设置 `DASHBOARD_ADMIN_TOKEN` 为写接口开启鉴权；开启后需在请求头传 `X-Admin-Token`。
 
 ### 3. 运行
 ```bash

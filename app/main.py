@@ -16,6 +16,7 @@ from app.logger import logger, read_logs
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.system import router as system_router
 from app.routes.trades import router as trades_router
+from app.security import require_admin_token
 from collections import defaultdict
 import asyncio
 from functools import partial
@@ -964,7 +965,7 @@ async def get_open_positions(
     }
 
 
-@app.post("/api/sync/manual")
+@app.post("/api/sync/manual", dependencies=[Depends(require_admin_token)])
 async def manual_sync():
     """手动触发数据同步"""
     global scheduler
@@ -1010,7 +1011,7 @@ async def get_monthly_progress(db: Database = Depends(get_db)):
     }
 
 
-@app.post("/api/monthly-target")
+@app.post("/api/monthly-target", dependencies=[Depends(require_admin_token)])
 async def set_monthly_target(
     target: float = Query(..., description="Monthly target amount"),
     db: Database = Depends(get_db)
@@ -1024,7 +1025,7 @@ async def set_monthly_target(
     return {"message": "目标已更新", "target": target}
 
 
-@app.post("/api/positions/set-long-term")
+@app.post("/api/positions/set-long-term", dependencies=[Depends(require_admin_token)])
 async def set_long_term(
     symbol: str,
     order_id: int,
@@ -1048,7 +1049,7 @@ async def get_watch_notes(
     return {"items": items}
 
 
-@app.post("/api/watch-notes")
+@app.post("/api/watch-notes", dependencies=[Depends(require_admin_token)])
 async def create_watch_note(
     symbol: str = Query(..., description="观察币种"),
     db: Database = Depends(get_db)
@@ -1072,7 +1073,7 @@ async def create_watch_note(
     }
 
 
-@app.delete("/api/watch-notes/{note_id}")
+@app.delete("/api/watch-notes/{note_id}", dependencies=[Depends(require_admin_token)])
 async def remove_watch_note(
     note_id: int,
     db: Database = Depends(get_db)
