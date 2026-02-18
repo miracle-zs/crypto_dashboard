@@ -41,11 +41,17 @@ user_stream = None
 
 
 def get_db():
-    return Database()
+    db = Database()
+    try:
+        yield db
+    finally:
+        close = getattr(db, "close", None)
+        if callable(close):
+            close()
 
 
-def get_trade_service():
-    return TradeQueryService()
+def get_trade_service(db: Database = Depends(get_db)):
+    return TradeQueryService(db=db)
 
 
 def get_public_rest():

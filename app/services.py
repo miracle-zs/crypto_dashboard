@@ -3,16 +3,16 @@ Services module - 从数据库读取交易数据
 """
 from app.database import Database
 from app.models import Trade, TradeSummary
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 
 class TradeQueryService:
     """交易数据查询服务 - 从数据库读取 (Read-Only)"""
 
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, db: Optional[Database] = None, api_key: str = None, api_secret: str = None):
         # API密钥用于定时任务，这里只负责读取数据库
-        self.db = Database()
+        self.db = db or Database()
 
     def get_summary(self) -> TradeSummary:
         """获取交易汇总数据和统计指标"""
