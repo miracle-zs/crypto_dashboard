@@ -85,6 +85,7 @@ class TradeDataScheduler:
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
         self.sync_lookback_minutes = _env_int('SYNC_LOOKBACK_MINUTES', 1440, minimum=1)
         self.symbol_sync_overlap_minutes = _env_int('SYMBOL_SYNC_OVERLAP_MINUTES', 1440, minimum=1)
+        self.open_positions_lookback_days = _env_int('OPEN_POSITIONS_LOOKBACK_DAYS', 60, minimum=1)
         self.enable_daily_full_sync = os.getenv('ENABLE_DAILY_FULL_SYNC', '1').lower() in ('1', 'true', 'yes')
         self.daily_full_sync_hour = _env_int('DAILY_FULL_SYNC_HOUR', 3, minimum=0)
         self.daily_full_sync_minute = _env_int('DAILY_FULL_SYNC_MINUTE', 30, minimum=0)
@@ -352,10 +353,22 @@ class TradeDataScheduler:
                 save_trades_elapsed += time.perf_counter() - stage_started
                 logger.warning(f"同步水位未推进(失败): failed_symbols={len(failure_symbols)}")
 
-            # 同步未平仓订单
-            logger.info("同步未平仓订单...")
+            # 同步未平仓订单（独立窗口，不复用闭仓增量 since）
+            open_since = max(
+                0,
+                until - self.open_positions_lookback_days * 24 * 60 * 60 * 1000
+            )
+            logger.info(
+                "同步未平仓订单... "
+                f"lookback_days={self.open_positions_lookback_days}, "
+                f"window=[{open_since}, {until}]"
+            )
             stage_started = time.perf_counter()
-            open_positions = self.processor.get_open_positions(since, until, traded_symbols=traded_symbols)
+            open_positions = self.processor.get_open_positions(
+                open_since,
+                until,
+                traded_symbols=traded_symbols
+            )
             if open_positions is None:
                 logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
             elif open_positions:
