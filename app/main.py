@@ -723,8 +723,11 @@ async def get_noon_loss_review_history(
 ):
     """返回午间止损与夜间复盘历史对比（按日期倒序）。"""
     loop = asyncio.get_event_loop()
-    rows = await loop.run_in_executor(None, partial(db.list_noon_loss_review_history, limit))
-    return {"rows": rows}
+    rows, summary = await asyncio.gather(
+        loop.run_in_executor(None, partial(db.list_noon_loss_review_history, limit)),
+        loop.run_in_executor(None, db.get_noon_loss_review_history_summary)
+    )
+    return {"rows": rows, "summary": summary}
 
 
 @app.get("/api/summary", response_model=TradeSummary)

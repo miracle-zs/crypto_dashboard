@@ -1666,6 +1666,16 @@ class Database:
             result.append(item)
         return result
 
+    def get_noon_loss_review_history_summary(self) -> Dict:
+        """返回复盘历史全量汇总（包含全历史 Delta 累计）。"""
+        rows = self.list_noon_loss_review_history(limit=10000)
+        reviewed_rows = [row for row in rows if row.get("review_time")]
+        delta_sum_all = sum(float(row.get("delta_loss_total") or 0.0) for row in reviewed_rows)
+        return {
+            "reviewed_count_all": len(reviewed_rows),
+            "delta_sum_all": float(delta_sum_all),
+        }
+
     @staticmethod
     def _parse_snapshot_dt(value: str | None) -> Optional[datetime]:
         if not value:

@@ -813,7 +813,9 @@
                     <div class="glass-panel rounded-xl p-4 panel-reveal">
                         <div class="metric-label flex items-center justify-between mb-2">
                             <span>复盘对比（最近7天）</span>
-                            <span id="daily-review-history-count" class="text-[10px] text-gray-600">0</span>
+                            <div class="flex items-baseline whitespace-nowrap">
+                                <span id="daily-review-delta-sum" class="text-[10px] tracking-tight text-gray-500">Σ Delta(All) --</span>
+                            </div>
                         </div>
                         <div class="overflow-x-auto border border-gray-800/70 rounded">
                             <table class="w-full text-[11px] text-gray-300 min-w-[760px]">
@@ -2156,11 +2158,29 @@
         function renderNoonReviewHistory(payload) {
             const tbody = document.getElementById('daily-review-history-body');
             const emptyEl = document.getElementById('daily-review-history-empty');
-            const countEl = document.getElementById('daily-review-history-count');
+            const deltaSumEl = document.getElementById('daily-review-delta-sum');
             if (!tbody) return;
 
             const rows = payload && Array.isArray(payload.rows) ? payload.rows : [];
-            if (countEl) countEl.innerText = String(rows.length);
+            const reviewedRows = rows.filter((row) => Boolean(row && row.review_time));
+            const summary = (payload && payload.summary && typeof payload.summary === 'object') ? payload.summary : null;
+            const hasAllHistorySum = summary && Number.isFinite(Number(summary.delta_sum_all));
+            const deltaSum = hasAllHistorySum
+                ? Number(summary.delta_sum_all || 0)
+                : reviewedRows.reduce((acc, row) => acc + Number(row.delta_loss_total || 0), 0);
+            const reviewedCountAll = hasAllHistorySum
+                ? Number(summary.reviewed_count_all || 0)
+                : reviewedRows.length;
+            if (deltaSumEl) {
+                if (!reviewedCountAll) {
+                    deltaSumEl.innerText = 'Σ Delta(All) -- (0)';
+                    deltaSumEl.className = 'text-[10px] text-gray-500';
+                } else {
+                    const sign = deltaSum >= 0 ? '+' : '';
+                    deltaSumEl.innerText = `Σ Delta(All) ${sign}${deltaSum.toFixed(2)} U (${reviewedCountAll})`;
+                    deltaSumEl.className = `text-[10px] ${deltaSum >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}`;
+                }
+            }
             if (expandedNoonReviewDate && !rows.some(r => String(r.snapshot_date || '') === expandedNoonReviewDate)) {
                 expandedNoonReviewDate = null;
             }
