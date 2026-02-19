@@ -81,6 +81,11 @@ class TradeDataScheduler:
 
         self.days_to_fetch = _env_int('DAYS_TO_FETCH', 30, minimum=1)
         self.update_interval_minutes = _env_int('UPDATE_INTERVAL_MINUTES', 10, minimum=1)
+        self.open_positions_update_interval_minutes = _env_int(
+            'OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES',
+            self.update_interval_minutes,
+            minimum=1
+        )
         self.start_date = os.getenv('START_DATE')  # 自定义起始日期
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
         self.sync_lookback_minutes = _env_int('SYNC_LOOKBACK_MINUTES', 1440, minimum=1)
@@ -353,36 +358,6 @@ class TradeDataScheduler:
                 save_trades_elapsed += time.perf_counter() - stage_started
                 logger.warning(f"同步水位未推进(失败): failed_symbols={len(failure_symbols)}")
 
-            # 同步未平仓订单（独立窗口，不复用闭仓增量 since）
-            open_since = max(
-                0,
-                until - self.open_positions_lookback_days * 24 * 60 * 60 * 1000
-            )
-            logger.info(
-                "同步未平仓订单... "
-                f"lookback_days={self.open_positions_lookback_days}, "
-                f"window=[{open_since}, {until}]"
-            )
-            stage_started = time.perf_counter()
-            open_positions = self.processor.get_open_positions(
-                open_since,
-                until,
-                traded_symbols=traded_symbols
-            )
-            if open_positions is None:
-                logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
-            elif open_positions:
-                open_count = self.db.save_open_positions(open_positions)
-                open_saved = open_count
-                logger.info(f"保存 {open_count} 条未平仓订单")
-                self.check_same_symbol_reentry_alert()
-                self.check_open_positions_profit_alert(threshold_pct=self.profit_alert_threshold_pct)
-            else:
-                # 清空未平仓记录（如果没有未平仓订单）
-                self.db.save_open_positions([])
-                logger.info("当前无未平仓订单")
-            open_positions_elapsed = time.perf_counter() - stage_started
-
             # 检查持仓超时告警
             stage_started = time.perf_counter()
             self.check_long_held_positions()
@@ -427,6 +402,50 @@ class TradeDataScheduler:
             self.db.update_sync_status(status='error', error_message=error_msg)
             import traceback
             logger.error(traceback.format_exc())
+        finally:
+            self._release_api_job_slot()
+
+    def sync_open_positions_data(self):
+        """独立同步未平仓订单，避免与闭仓ETL耦合"""
+        if not self.processor:
+            logger.warning("无法同步未平仓: API密钥未配置")
+            return
+        if self._is_api_cooldown_active(source='未平仓同步'):
+            return
+        if not self._try_enter_api_job_slot(source='未平仓同步'):
+            return
+
+        started_at = time.perf_counter()
+        try:
+            until = int(datetime.now(UTC8).timestamp() * 1000)
+            open_since = max(
+                0,
+                until - self.open_positions_lookback_days * 24 * 60 * 60 * 1000
+            )
+            logger.info(
+                "开始同步未平仓订单... "
+                f"lookback_days={self.open_positions_lookback_days}, "
+                f"window=[{open_since}, {until}]"
+            )
+            open_positions = self.processor.get_open_positions(
+                open_since,
+                until,
+                traded_symbols=None
+            )
+            if open_positions is None:
+                logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
+                return
+            if open_positions:
+                open_count = self.db.save_open_positions(open_positions)
+                logger.info(f"保存 {open_count} 条未平仓订单")
+                self.check_same_symbol_reentry_alert()
+                self.check_open_positions_profit_alert(threshold_pct=self.profit_alert_threshold_pct)
+            else:
+                self.db.save_open_positions([])
+                logger.info("当前无未平仓订单")
+            logger.info(f"未平仓同步完成: elapsed={time.perf_counter() - started_at:.2f}s")
+        except Exception as exc:
+            logger.error(f"未平仓同步失败: {exc}")
         finally:
             self._release_api_job_slot()
 
@@ -1903,6 +1922,7 @@ class TradeDataScheduler:
         # 立即执行一次同步
         logger.info("立即执行首次数据同步...")
         self.scheduler.add_job(self.sync_trades_incremental, 'date')
+        self.scheduler.add_job(self.sync_open_positions_data, 'date')
         self.scheduler.add_job(self.sync_balance_data, 'date')
 
         # 增量同步任务 - 每隔N分钟执行一次
@@ -1911,6 +1931,18 @@ class TradeDataScheduler:
             trigger=IntervalTrigger(minutes=self.update_interval_minutes),
             id='sync_trades_incremental',
             name='同步交易数据(增量)',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+            replace_existing=True
+        )
+
+        # 未平仓同步任务 - 与闭仓ETL解耦
+        self.scheduler.add_job(
+            func=self.sync_open_positions_data,
+            trigger=IntervalTrigger(minutes=self.open_positions_update_interval_minutes),
+            id='sync_open_positions',
+            name='同步未平仓订单',
             max_instances=1,
             coalesce=True,
             misfire_grace_time=120,
@@ -2089,6 +2121,10 @@ class TradeDataScheduler:
 
         self.scheduler.start()
         logger.info(f"增量交易同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
+        logger.info(
+            f"未平仓同步任务已启动: 每 {self.open_positions_update_interval_minutes} 分钟自动更新一次 "
+            f"(lookback_days={self.open_positions_lookback_days})"
+        )
         logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
         logger.info("睡前风控检查已启动: 每天 23:00 执行")
         logger.info(

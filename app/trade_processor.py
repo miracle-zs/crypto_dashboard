@@ -1212,7 +1212,7 @@ class TradeDataProcessor:
             return None
 
         if traded_symbols is None:
-            traded_symbols = self.get_traded_symbols(since, until)
+            traded_symbols = []
 
         # Add any symbols that have real positions but might be missed (unlikely but safe)
         all_target_symbols = set(traded_symbols) if traded_symbols else set()
