@@ -323,11 +323,9 @@ class TradeDataScheduler:
             if df.empty:
                 logger.info("没有新数据需要更新")
             else:
-                # 保存到数据库
-                # 如果是全量更新模式（start_date 或无 last_entry_time），建议使用覆盖模式防止重复
-                # 这里简单起见，只要有新数据计算出来，我们就认为这批数据是最新的真理
-                # 尤其是当重新计算了历史盈亏时，覆盖旧数据是必须的
-                is_full_sync = self.force_full_sync or self.start_date is not None or self.db.get_last_entry_time() is None
+                # 仅“本轮明确全量”时才允许覆盖写入。
+                # 增量同步必须 append/upsert，避免重复删写导致日统计抖动。
+                is_full_sync = force_full
 
                 logger.info(f"保存 {len(df)} 条记录到数据库 (覆盖模式={is_full_sync})...")
                 stage_started = time.perf_counter()
