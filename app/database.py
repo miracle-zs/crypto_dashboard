@@ -110,6 +110,17 @@ class Database:
             VALUES (1, NULL, 'idle')
         """)
 
+        # 按 symbol 维护增量同步水位
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS symbol_sync_state (
+                symbol TEXT PRIMARY KEY,
+                last_success_end_ms INTEGER,
+                last_attempt_end_ms INTEGER,
+                last_error TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # 创建余额历史表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS balance_history (
@@ -681,6 +692,67 @@ class Database:
         conn.close()
 
         return result[0] if result and result[0] else None
+
+    def get_symbol_sync_watermarks(self, symbols: List[str]) -> Dict[str, Optional[int]]:
+        """获取给定 symbols 的增量同步成功水位（毫秒时间戳）"""
+        if not symbols:
+            return {}
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in symbols)
+        cursor.execute(
+            f"""
+            SELECT symbol, last_success_end_ms
+            FROM symbol_sync_state
+            WHERE symbol IN ({placeholders})
+            """,
+            tuple(symbols),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        watermarks: Dict[str, Optional[int]] = {s: None for s in symbols}
+        for row in rows:
+            watermarks[row["symbol"]] = row["last_success_end_ms"]
+        return watermarks
+
+    def update_symbol_sync_success(self, symbol: str, end_ms: int):
+        """记录 symbol 同步成功（推进水位）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO symbol_sync_state (symbol, last_success_end_ms, last_attempt_end_ms, last_error, updated_at)
+            VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP)
+            ON CONFLICT(symbol) DO UPDATE SET
+                last_success_end_ms = excluded.last_success_end_ms,
+                last_attempt_end_ms = excluded.last_attempt_end_ms,
+                last_error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (symbol, end_ms, end_ms),
+        )
+        conn.commit()
+        conn.close()
+
+    def update_symbol_sync_failure(self, symbol: str, end_ms: int, error_message: str):
+        """记录 symbol 同步失败（不推进成功水位）"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO symbol_sync_state (symbol, last_success_end_ms, last_attempt_end_ms, last_error, updated_at)
+            VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(symbol) DO UPDATE SET
+                last_attempt_end_ms = excluded.last_attempt_end_ms,
+                last_error = excluded.last_error,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (symbol, end_ms, (error_message or "")[:500]),
+        )
+        conn.commit()
+        conn.close()
 
     def update_sync_status(self, status: str = 'idle', error_message: str = None):
         """

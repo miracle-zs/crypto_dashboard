@@ -7,7 +7,7 @@ Analyze trading history based on orders (not individual trades)
 
 import pandas as pd
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import time
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -227,6 +227,7 @@ class TradeDataProcessor:
         start_time: int = None,
         end_time: int = None,
         client: Optional[BinanceFuturesRestClient] = None,
+        fail_on_error: bool = False,
     ) -> List[Dict]:
         """Get all orders for a symbol"""
         client = client or self.client
@@ -240,6 +241,8 @@ class TradeDataProcessor:
         if start_time is None and end_time is None:
             result = client.signed_get(endpoint, params)
             if result is None:
+                if fail_on_error:
+                    raise RuntimeError(f"allOrders request failed for {symbol}")
                 logger.warning(f"API request failed for {symbol}")
             elif isinstance(result, list) and len(result) == 0:
                 logger.debug(f"No orders in time range for {symbol}")
@@ -269,7 +272,13 @@ class TradeDataProcessor:
                     'endTime': current_end
                 }
 
-                batch = client.signed_get(endpoint, params) or []
+                batch = client.signed_get(endpoint, params)
+                if batch is None:
+                    if fail_on_error:
+                        raise RuntimeError(
+                            f"allOrders request failed for {symbol}, window=[{window_start},{current_end}]"
+                        )
+                    batch = []
                 if not batch:
                     break
 
@@ -600,7 +609,8 @@ class TradeDataProcessor:
                 limit=1000,
                 start_time=since,
                 end_time=until,
-                client=worker_client
+                client=worker_client,
+                fail_on_error=True,
             )
         else:
             # Get all orders without time filter (API limit issue)
@@ -637,8 +647,10 @@ class TradeDataProcessor:
         since: int,
         until: int,
         traded_symbols: Optional[List[str]] = None,
-        use_time_filter: bool = True
-    ) -> pd.DataFrame:
+        use_time_filter: bool = True,
+        symbol_since_map: Optional[Dict[str, int]] = None,
+        return_symbol_status: bool = False,
+    ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
         """Analyze orders and convert to DataFrame"""
 
         # 获取有交易记录的币种
@@ -658,6 +670,8 @@ class TradeDataProcessor:
         success_count = 0
         failure_count = 0
         symbol_timings: List[tuple[str, float, int]] = []
+        success_symbols: List[str] = []
+        failure_symbols: Dict[str, str] = {}
         fee_prefetch_started = time.perf_counter()
         fee_totals_by_symbol = self.get_fee_totals_by_symbol(since=since, until=until)
         fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
@@ -669,20 +683,23 @@ class TradeDataProcessor:
             for idx, symbol in enumerate(symbols, 1):
                 logger.info(f"[{idx}/{len(symbols)}] Processing {symbol}...")
                 try:
+                    symbol_since = symbol_since_map.get(symbol, since) if symbol_since_map else since
                     positions, elapsed = self._extract_symbol_closed_positions(
                         symbol=symbol,
-                        since=since,
+                        since=symbol_since,
                         until=until,
                         use_time_filter=use_time_filter,
                         fee_totals_by_symbol=fee_totals_by_symbol
                     )
                     symbol_timings.append((symbol, elapsed, len(positions)))
                     success_count += 1
+                    success_symbols.append(symbol)
                     if positions:
                         all_positions.extend(positions)
                         logger.debug(f"Found {len(positions)} closed positions for {symbol}")
                 except Exception as exc:
                     failure_count += 1
+                    failure_symbols[symbol] = str(exc)
                     logger.error(f"Processing {symbol} failed: {exc}")
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -690,7 +707,7 @@ class TradeDataProcessor:
                     executor.submit(
                         self._extract_symbol_closed_positions,
                         symbol,
-                        since,
+                        symbol_since_map.get(symbol, since) if symbol_since_map else since,
                         until,
                         use_time_filter,
                         fee_totals_by_symbol
@@ -704,12 +721,14 @@ class TradeDataProcessor:
                         positions, elapsed = future.result()
                         symbol_timings.append((symbol, elapsed, len(positions)))
                         success_count += 1
+                        success_symbols.append(symbol)
                         if positions:
                             all_positions.extend(positions)
                             logger.debug(f"Found {len(positions)} closed positions for {symbol}")
                         logger.info(f"[{idx}/{len(symbols)}] Processed {symbol}")
                     except Exception as exc:
                         failure_count += 1
+                        failure_symbols[symbol] = str(exc)
                         logger.error(f"[{idx}/{len(symbols)}] Processing {symbol} failed: {exc}")
 
         if symbol_timings:
@@ -731,7 +750,10 @@ class TradeDataProcessor:
 
         if not all_positions:
             logger.warning("No closed positions found")
-            return pd.DataFrame()
+            empty_df = pd.DataFrame()
+            if return_symbol_status:
+                return empty_df, success_symbols, failure_symbols
+            return empty_df
 
         # Prefetch daily open price by unique (symbol, UTC day) to avoid per-trade network call.
         price_prefetch_started = time.perf_counter()
@@ -885,6 +907,8 @@ class TradeDataProcessor:
             f"Closed ETL transform stats: prefetch={price_prefetch_elapsed:.2f}s, transform={transform_elapsed:.2f}s"
         )
 
+        if return_symbol_status:
+            return df, success_symbols, failure_symbols
         return df
 
     def merge_same_entry_positions(self, df: pd.DataFrame) -> pd.DataFrame:

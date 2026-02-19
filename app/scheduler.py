@@ -84,6 +84,10 @@ class TradeDataScheduler:
         self.start_date = os.getenv('START_DATE')  # 自定义起始日期
         self.end_date = os.getenv('END_DATE')      # 自定义结束日期
         self.sync_lookback_minutes = _env_int('SYNC_LOOKBACK_MINUTES', 1440, minimum=1)
+        self.symbol_sync_overlap_minutes = _env_int('SYMBOL_SYNC_OVERLAP_MINUTES', 1440, minimum=1)
+        self.enable_daily_full_sync = os.getenv('ENABLE_DAILY_FULL_SYNC', '1').lower() in ('1', 'true', 'yes')
+        self.daily_full_sync_hour = _env_int('DAILY_FULL_SYNC_HOUR', 3, minimum=0)
+        self.daily_full_sync_minute = _env_int('DAILY_FULL_SYNC_MINUTE', 30, minimum=0)
         self.use_time_filter = os.getenv('SYNC_USE_TIME_FILTER', '1').lower() in ('1', 'true', 'yes')
         self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
         self.force_full_sync = os.getenv('FORCE_FULL_SYNC', '0').lower() in ('1', 'true', 'yes')
@@ -190,7 +194,7 @@ class TradeDataScheduler:
         window_end = leaderboard_dt + timedelta(minutes=self.leaderboard_guard_after_minutes)
         return window_start <= now <= window_end
 
-    def sync_trades_data(self):
+    def sync_trades_data(self, force_full: bool = False):
         """同步交易数据到数据库"""
         if not self.processor:
             logger.warning("无法同步: API密钥未配置")
@@ -219,13 +223,8 @@ class TradeDataScheduler:
 
         try:
             logger.info("=" * 50)
-            logger.info("开始同步交易数据...")
-            if self.force_full_sync:
-                logger.info("同步策略: FORCE_FULL_SYNC=ON (始终走全量模式)")
-            elif self.start_date:
-                logger.info("同步策略: START_DATE 全量模式")
-            else:
-                logger.info("同步策略: 增量模式(带回溯窗口)")
+            run_mode = "全量" if force_full else "增量"
+            logger.info(f"开始同步交易数据... mode={run_mode}")
 
             # 更新同步状态为进行中
             self.db.update_sync_status(status='syncing')
@@ -234,11 +233,12 @@ class TradeDataScheduler:
             # last_entry_time = self.db.get_last_entry_time()
 
             # 同步模式：
-            # 1) 如果配置 START_DATE -> 全量
-            # 2) 否则如果数据库已有最后入场时间 -> 增量(带回溯窗口)
-            # 3) 否则 -> DAYS_TO_FETCH 天全量
+            # 1) force_full=True -> 全量模式（支持 START_DATE）
+            # 2) force_full=False -> 增量模式（按最后入场时间回看）
             last_entry_time = self.db.get_last_entry_time()
-            if self.force_full_sync:
+            is_full_sync_run = force_full
+            if force_full:
+                is_full_sync_run = True
                 if self.start_date:
                     try:
                         start_dt = datetime.strptime(self.start_date, '%Y-%m-%d').replace(tzinfo=UTC8)
@@ -251,16 +251,6 @@ class TradeDataScheduler:
                 else:
                     logger.warning("FORCE_FULL_SYNC=1 但未设置 START_DATE，回退为 DAYS_TO_FETCH 窗口")
                     since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
-            elif self.start_date:
-                # 使用自定义起始日期
-                try:
-                    start_dt = datetime.strptime(self.start_date, '%Y-%m-%d').replace(tzinfo=UTC8)
-                    start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
-                    since = int(start_dt.timestamp() * 1000)
-                    logger.info(f"全量更新模式 - 从自定义日期 {self.start_date} 开始")
-                except ValueError as e:
-                    logger.error(f"日期格式错误: {e}，使用默认DAYS_TO_FETCH")
-                    since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
             elif last_entry_time:
                 try:
                     last_dt = datetime.strptime(last_entry_time, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
@@ -272,8 +262,8 @@ class TradeDataScheduler:
                     logger.error(f"入场时间解析失败: {e}，使用默认DAYS_TO_FETCH")
                     since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
             else:
-                # 使用DAYS_TO_FETCH
-                logger.info(f"全量更新模式 - 获取最近 {self.days_to_fetch} 天数据")
+                # 增量模式冷启动：使用 DAYS_TO_FETCH 窗口
+                logger.info(f"增量冷启动 - 获取最近 {self.days_to_fetch} 天数据")
                 since = int((datetime.now(UTC8) - timedelta(days=self.days_to_fetch)).timestamp() * 1000)
 
             # 计算结束时间
@@ -297,12 +287,36 @@ class TradeDataScheduler:
             logger.info(f"拉取活跃交易币种完成: count={symbol_count}, elapsed={symbols_elapsed:.2f}s")
 
             stage_started = time.perf_counter()
-            df = self.processor.analyze_orders(
+            symbol_since_map = None
+            if not is_full_sync_run and traded_symbols:
+                watermarks = self.db.get_symbol_sync_watermarks(traded_symbols)
+                overlap_ms = self.symbol_sync_overlap_minutes * 60 * 1000
+                symbol_since_map = {}
+                warmed_symbols = 0
+                for symbol in traded_symbols:
+                    symbol_watermark = watermarks.get(symbol)
+                    if symbol_watermark is None:
+                        symbol_since_map[symbol] = since
+                    else:
+                        symbol_since_map[symbol] = max(since, symbol_watermark - overlap_ms)
+                        warmed_symbols += 1
+                logger.info(
+                    "增量水位策略: "
+                    f"symbols={len(traded_symbols)}, "
+                    f"warm={warmed_symbols}, "
+                    f"cold={len(traded_symbols) - warmed_symbols}, "
+                    f"overlap_minutes={self.symbol_sync_overlap_minutes}"
+                )
+
+            analysis_result = self.processor.analyze_orders(
                 since=since,
                 until=until,
                 traded_symbols=traded_symbols,
-                use_time_filter=self.use_time_filter
+                use_time_filter=self.use_time_filter,
+                symbol_since_map=symbol_since_map,
+                return_symbol_status=True,
             )
+            df, success_symbols, failure_symbols = analysis_result
             analyze_elapsed = time.perf_counter() - stage_started
             logger.info(f"闭仓ETL完成: rows={len(df)}, elapsed={analyze_elapsed:.2f}s")
 
@@ -326,6 +340,19 @@ class TradeDataScheduler:
                     stage_started = time.perf_counter()
                     self.db.recompute_trade_summary()
                     save_trades_elapsed += time.perf_counter() - stage_started
+
+            if success_symbols:
+                stage_started = time.perf_counter()
+                for symbol in success_symbols:
+                    self.db.update_symbol_sync_success(symbol=symbol, end_ms=until)
+                save_trades_elapsed += time.perf_counter() - stage_started
+                logger.info(f"同步水位推进: success_symbols={len(success_symbols)}")
+            if failure_symbols:
+                stage_started = time.perf_counter()
+                for symbol, err in failure_symbols.items():
+                    self.db.update_symbol_sync_failure(symbol=symbol, end_ms=until, error_message=err)
+                save_trades_elapsed += time.perf_counter() - stage_started
+                logger.warning(f"同步水位未推进(失败): failed_symbols={len(failure_symbols)}")
 
             # 同步未平仓订单
             logger.info("同步未平仓订单...")
@@ -391,6 +418,14 @@ class TradeDataScheduler:
             logger.error(traceback.format_exc())
         finally:
             self._release_api_job_slot()
+
+    def sync_trades_incremental(self):
+        """增量同步交易数据"""
+        self.sync_trades_data(force_full=False)
+
+    def sync_trades_full(self):
+        """全量同步交易数据"""
+        self.sync_trades_data(force_full=True)
 
     def _get_mark_price_map(self, symbols: list[str]) -> dict[str, float]:
         """批量获取标记价格（优先 premiumIndex，其次 ticker/price）。"""
@@ -1856,20 +1891,43 @@ class TradeDataScheduler:
 
         # 立即执行一次同步
         logger.info("立即执行首次数据同步...")
-        self.scheduler.add_job(self.sync_trades_data, 'date')
+        self.scheduler.add_job(self.sync_trades_incremental, 'date')
         self.scheduler.add_job(self.sync_balance_data, 'date')
 
-        # 添加定时任务 - 每隔N分钟执行一次
+        # 增量同步任务 - 每隔N分钟执行一次
         self.scheduler.add_job(
-            func=self.sync_trades_data,
+            func=self.sync_trades_incremental,
             trigger=IntervalTrigger(minutes=self.update_interval_minutes),
-            id='sync_trades',
-            name='同步交易数据',
+            id='sync_trades_incremental',
+            name='同步交易数据(增量)',
             max_instances=1,
             coalesce=True,
             misfire_grace_time=120,
             replace_existing=True
         )
+
+        # 每日全量同步任务 - 默认每天 03:30 (UTC+8)
+        if self.enable_daily_full_sync:
+            self.scheduler.add_job(
+                func=self.sync_trades_full,
+                trigger=CronTrigger(
+                    hour=self.daily_full_sync_hour,
+                    minute=self.daily_full_sync_minute,
+                    timezone=UTC8
+                ),
+                id='sync_trades_full_daily',
+                name='同步交易数据(全量)',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=600,
+                replace_existing=True
+            )
+            logger.info(
+                "全量同步任务已启动: "
+                f"每天 {self.daily_full_sync_hour:02d}:{self.daily_full_sync_minute:02d} 执行"
+            )
+        else:
+            logger.info("全量同步任务未启用: ENABLE_DAILY_FULL_SYNC=0")
 
         if not self.enable_user_stream:
             # 添加余额同步任务 - 每分钟执行一次
@@ -2019,7 +2077,7 @@ class TradeDataScheduler:
             logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
 
         self.scheduler.start()
-        logger.info(f"交易数据同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
+        logger.info(f"增量交易同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
         logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
         logger.info("睡前风控检查已启动: 每天 23:00 执行")
         logger.info(
@@ -2040,7 +2098,9 @@ class TradeDataScheduler:
 
     def get_next_run_time(self):
         """获取下次运行时间"""
-        job = self.scheduler.get_job('sync_trades')
+        job = self.scheduler.get_job('sync_trades_incremental')
+        if not job:
+            job = self.scheduler.get_job('sync_trades_full_daily')
         if job:
             return job.next_run_time
         return None
