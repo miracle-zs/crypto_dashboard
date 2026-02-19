@@ -22,6 +22,8 @@ class BinanceFuturesRestClient:
     """Lightweight REST client for Binance USD-M Futures."""
     _cooldown_until_ms = 0
     _cooldown_lock = threading.Lock()
+    _throttle_lock = threading.Lock()
+    _global_last_request_ts = 0.0
 
     def __init__(
         self,
@@ -39,7 +41,6 @@ class BinanceFuturesRestClient:
             else float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", 0.3))
         )
         self._recv_window = int(os.getenv("BINANCE_RECV_WINDOW", 10000))
-        self._last_request_ts = 0.0
         self._time_offset_ms = 0
         self._last_cooldown_log_ts = 0.0
 
@@ -57,11 +58,13 @@ class BinanceFuturesRestClient:
         ).hexdigest()
 
     def _throttle(self):
-        now = time.time()
-        elapsed = now - self._last_request_ts
-        if elapsed < self._min_request_interval:
-            time.sleep(self._min_request_interval - elapsed)
-        self._last_request_ts = time.time()
+        # 全局节流：所有 client 实例共享请求节奏，避免多线程实例级并发叠加打爆IP限额。
+        with self.__class__._throttle_lock:
+            now = time.time()
+            elapsed = now - self.__class__._global_last_request_ts
+            if elapsed < self._min_request_interval:
+                time.sleep(self._min_request_interval - elapsed)
+            self.__class__._global_last_request_ts = time.time()
 
     def _sync_server_time(self) -> bool:
         """Sync local request timestamp offset with Binance server time."""
