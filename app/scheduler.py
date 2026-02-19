@@ -1052,7 +1052,7 @@ class TradeDataScheduler:
             balance_history = self.db.get_balance_history(limit=1)
             if balance_history:
                 latest_balance = float(balance_history[-1].get("balance") or 0.0)
-            pct_of_balance = (hold_loss_total / latest_balance * 100) if latest_balance > 0 else 0.0
+            pct_of_balance = (delta_loss_total / latest_balance * 100) if latest_balance > 0 else 0.0
 
             self.db.save_noon_loss_review_snapshot({
                 "snapshot_date": snapshot_date,
@@ -1094,7 +1094,7 @@ class TradeDataScheduler:
                 f"- 午间止损PnL: {noon_cut_loss_total:+.2f} U\n"
                 f"- 持有到夜间PnL: {hold_loss_total:+.2f} U\n"
                 f"- Delta PnL(午间-夜间): {delta_loss_total:+.2f} U\n"
-                f"- 夜间PnL占账户余额: {pct_of_balance:+.2f}%\n\n"
+                f"- Delta PnL占账户余额: {pct_of_balance:+.2f}%\n\n"
                 "---\n"
             )
             for row in review_rows[:10]:
