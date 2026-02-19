@@ -1024,7 +1024,8 @@ class TradeDataScheduler:
                     night_profit_count += 1
                 else:
                     night_flat_count += 1
-                delta_pnl = night_pnl - noon_cut_pnl
+                # Delta 统一口径：午间止损PnL - 持有到夜间PnL
+                delta_pnl = noon_cut_pnl - night_pnl
 
                 noon_cut_loss_total += noon_cut_pnl
                 hold_loss_total += night_pnl
@@ -1046,7 +1047,7 @@ class TradeDataScheduler:
                     "delta_loss": delta_pnl,
                 })
 
-            delta_loss_total = hold_loss_total - noon_cut_loss_total
+            delta_loss_total = noon_cut_loss_total - hold_loss_total
             latest_balance = 0.0
             balance_history = self.db.get_balance_history(limit=1)
             if balance_history:
@@ -1092,7 +1093,7 @@ class TradeDataScheduler:
                 f"北京时间 {now.strftime('%H:%M')} 复盘结果（{snapshot_date}）\n\n"
                 f"- 午间止损PnL: {noon_cut_loss_total:+.2f} U\n"
                 f"- 持有到夜间PnL: {hold_loss_total:+.2f} U\n"
-                f"- Delta PnL(夜间-午间): {delta_loss_total:+.2f} U\n"
+                f"- Delta PnL(午间-夜间): {delta_loss_total:+.2f} U\n"
                 f"- 夜间PnL占账户余额: {pct_of_balance:+.2f}%\n\n"
                 "---\n"
             )
@@ -1105,9 +1106,9 @@ class TradeDataScheduler:
                 )
 
             if delta_loss_total > 0:
-                content += "结论：今晚看，不砍仓更优（PnL更高），但仍需遵守纪律。"
-            elif delta_loss_total < 0:
                 content += "结论：今晚看，不砍仓更差，午间止损更优。"
+            elif delta_loss_total < 0:
+                content += "结论：今晚看，不砍仓更优（PnL更高），但仍需遵守纪律。"
             else:
                 content += "结论：两种处理结果接近。"
 

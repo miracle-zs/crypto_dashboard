@@ -2198,11 +2198,11 @@
                         conclusion = '已处理/离场';
                         conclusionClass = 'text-emerald-300';
                     } else if (delta > 0) {
-                        conclusion = '不砍更好';
-                        conclusionClass = 'text-emerald-300';
-                    } else if (delta < 0) {
                         conclusion = '不砍更差';
                         conclusionClass = 'text-rose-300';
+                    } else if (delta < 0) {
+                        conclusion = '不砍更好';
+                        conclusionClass = 'text-emerald-300';
                     } else {
                         conclusion = '结果接近';
                         conclusionClass = 'text-gray-300';
@@ -2211,7 +2211,7 @@
 
                 const deltaClass = !reviewReady
                     ? 'text-gray-500'
-                    : (delta > 0 ? 'text-emerald-400 font-bold' : (delta < 0 ? 'text-rose-400 font-bold' : 'text-gray-300'));
+                    : (delta > 0 ? 'text-rose-400 font-bold' : (delta < 0 ? 'text-emerald-400 font-bold' : 'text-gray-300'));
                 const holdClass = !reviewReady
                     ? 'text-gray-500'
                     : (holdLoss < 0 ? 'text-rose-400' : 'text-emerald-400');
@@ -2244,8 +2244,8 @@
                                         const nightLossVal = Number(d.night_loss || 0);
                                         const deltaVal = Number(d.delta_loss || 0);
                                         const deltaColor = deltaVal > 0
-                                            ? 'text-emerald-300 font-bold'
-                                            : (deltaVal < 0 ? 'text-rose-300 font-bold' : 'text-gray-300');
+                                            ? 'text-rose-300 font-bold'
+                                            : (deltaVal < 0 ? 'text-emerald-300 font-bold' : 'text-gray-300');
                                         const statusLabel = status === 'not_cut'
                                             ? '<span class="text-amber-300">NOT_CUT</span>'
                                             : '<span class="text-gray-500">CLOSED</span>';
