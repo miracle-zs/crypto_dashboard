@@ -22,3 +22,30 @@ class SnapshotRepository:
 
     def get_noon_loss_review_snapshot_by_date(self, snapshot_date: str):
         return self.db.get_noon_loss_review_snapshot_by_date(snapshot_date)
+
+    def get_rebound_7d_snapshot_by_date(self, snapshot_date: str):
+        return self.db.get_rebound_7d_snapshot_by_date(snapshot_date)
+
+    def get_latest_rebound_7d_snapshot(self):
+        return self.db.get_latest_rebound_7d_snapshot()
+
+    def list_rebound_7d_snapshot_dates(self, limit: int):
+        return self.db.list_rebound_7d_snapshot_dates(limit)
+
+    def get_rebound_30d_snapshot_by_date(self, snapshot_date: str):
+        return self.db.get_rebound_30d_snapshot_by_date(snapshot_date)
+
+    def get_latest_rebound_30d_snapshot(self):
+        return self.db.get_latest_rebound_30d_snapshot()
+
+    def list_rebound_30d_snapshot_dates(self, limit: int):
+        return self.db.list_rebound_30d_snapshot_dates(limit)
+
+    def get_rebound_60d_snapshot_by_date(self, snapshot_date: str):
+        return self.db.get_rebound_60d_snapshot_by_date(snapshot_date)
+
+    def get_latest_rebound_60d_snapshot(self):
+        return self.db.get_latest_rebound_60d_snapshot()
+
+    def list_rebound_60d_snapshot_dates(self, limit: int):
+        return self.db.list_rebound_60d_snapshot_dates(limit)

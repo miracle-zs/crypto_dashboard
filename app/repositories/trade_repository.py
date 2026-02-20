@@ -16,3 +16,9 @@ class TradeRepository:
 
     def get_open_positions(self):
         return self.db.get_open_positions()
+
+    def get_balance_history(self, **kwargs):
+        return self.db.get_balance_history(**kwargs)
+
+    def get_transfers(self):
+        return self.db.get_transfers()
