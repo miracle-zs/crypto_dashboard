@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import get_db
+from app.repositories import SnapshotRepository
 from app.services import LeaderboardService
 
 router = APIRouter()
@@ -24,7 +25,8 @@ async def get_leaderboard_snapshot_dates(
     db=Depends(get_db),
 ):
     loop = asyncio.get_event_loop()
-    dates = await loop.run_in_executor(None, db.list_leaderboard_snapshot_dates, limit)
+    snapshot_repo = SnapshotRepository(db)
+    dates = await loop.run_in_executor(None, snapshot_repo.list_leaderboard_snapshot_dates, limit)
     return {"dates": dates}
 
 
@@ -34,14 +36,15 @@ async def get_leaderboard_metrics_history(
     db=Depends(get_db),
 ):
     loop = asyncio.get_event_loop()
-    dates = await loop.run_in_executor(None, db.list_leaderboard_snapshot_dates, limit)
+    snapshot_repo = SnapshotRepository(db)
+    dates = await loop.run_in_executor(None, snapshot_repo.list_leaderboard_snapshot_dates, limit)
     if not dates:
         return {"rows": []}
 
-    metrics_map = await loop.run_in_executor(None, db.get_leaderboard_daily_metrics_by_dates, dates)
+    metrics_map = await loop.run_in_executor(None, snapshot_repo.get_leaderboard_daily_metrics_by_dates, dates)
     missing_dates = [d for d in dates if d not in metrics_map]
     for d in missing_dates:
-        payload = await loop.run_in_executor(None, db.upsert_leaderboard_daily_metrics_for_date, d)
+        payload = await loop.run_in_executor(None, snapshot_repo.upsert_leaderboard_daily_metrics_for_date, d)
         if payload:
             metrics_map[d] = payload
 

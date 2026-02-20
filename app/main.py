@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -13,7 +14,8 @@ from app.api.rebound_api import router as rebound_api_router
 from app.api.system_api import router as system_api_router
 from app.api.trades_api import router as trades_api_router
 from app.api.watchnotes_api import router as watchnotes_api_router
-from app.core.deps import get_db
+from app.core.deps import get_db as core_get_db
+from app.database import Database
 from app.logger import logger
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.system import router as system_router
@@ -23,28 +25,16 @@ from app.user_stream import BinanceUserDataStream
 
 load_dotenv()
 
-app = FastAPI(title="Zero Gravity Dashboard")
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 scheduler = None
 user_stream = None
-app.state.scheduler = None
-
-app.include_router(system_router)
-app.include_router(trades_router)
-app.include_router(leaderboard_router)
-app.include_router(system_api_router)
-app.include_router(trades_api_router)
-app.include_router(leaderboard_api_router)
-app.include_router(positions_api_router)
-app.include_router(watchnotes_api_router)
-app.include_router(rebound_api_router)
-app.include_router(balance_api_router)
 
 
-@app.on_event("startup")
-async def startup_event():
+def get_db():
+    yield from core_get_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global scheduler, user_stream
 
     should_start, reason = should_start_scheduler()
@@ -57,7 +47,7 @@ async def startup_event():
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
         if enable_user_stream:
-            user_stream = BinanceUserDataStream(api_key=api_key, db=get_db())
+            user_stream = BinanceUserDataStream(api_key=api_key, db=Database())
             user_stream.start()
     else:
         app.state.scheduler = None
@@ -70,16 +60,32 @@ async def startup_event():
                 "如需强制启用请设置 SCHEDULER_ALLOW_MULTI_WORKER=1。"
             )
 
+    try:
+        yield
+    finally:
+        if scheduler:
+            scheduler.stop()
+            logger.info("定时任务调度器已停止")
+        app.state.scheduler = None
+        if user_stream:
+            user_stream.stop()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    global scheduler, user_stream
-    if scheduler:
-        scheduler.stop()
-        logger.info("定时任务调度器已停止")
-    app.state.scheduler = None
-    if user_stream:
-        user_stream.stop()
+
+app = FastAPI(title="Zero Gravity Dashboard", lifespan=lifespan)
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.state.scheduler = None
+
+app.include_router(system_router)
+app.include_router(trades_router)
+app.include_router(leaderboard_router)
+app.include_router(system_api_router)
+app.include_router(trades_api_router)
+app.include_router(leaderboard_api_router)
+app.include_router(positions_api_router)
+app.include_router(watchnotes_api_router)
+app.include_router(rebound_api_router)
+app.include_router(balance_api_router)
 
 
 @app.get("/live-monitor", response_class=HTMLResponse)

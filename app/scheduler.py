@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.trade_processor import TradeDataProcessor
 from app.database import Database
 from app.jobs.noon_loss_job import run_noon_loss_check, run_noon_loss_review
+from app.jobs.risk_jobs import run_long_held_positions_check, run_sleep_risk_check
 from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremental
 from app.logger import logger
 from app.notifier import send_server_chan_notification
@@ -710,142 +711,10 @@ class TradeDataScheduler:
             logger.error(f"浮盈提醒检查失败: {exc}")
 
     def check_long_held_positions(self):
-        """检查持仓时间超过48小时的订单并发送合并通知 (每24小时复提)"""
-        try:
-            positions = self.db.get_open_positions()
-            now = datetime.now(UTC8)
-            now_utc = datetime.now(timezone.utc)
-            stale_positions = []
-
-            for pos in positions:
-                # 跳过用户标记为长期持仓的订单
-                if pos.get('is_long_term'):
-                    continue
-
-                entry_time_str = pos['entry_time']
-                try:
-                    entry_dt = datetime.strptime(entry_time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC8)
-                except ValueError:
-                    logger.warning(f"无法解析时间: {entry_time_str}")
-                    continue
-
-                duration = now - entry_dt
-
-                # 48小时 = 48 * 3600 秒
-                if duration.total_seconds() > 48 * 3600:
-                    should_alert = False
-
-                    # 检查是否需要报警
-                    if pos.get('alerted', 0) == 0:
-                        should_alert = True
-                    else:
-                        # 如果已报警，检查距离上次报警是否超过24小时
-                        last_alert_str = pos.get('last_alert_time')
-                        if last_alert_str:
-                            try:
-                                # SQLite CURRENT_TIMESTAMP 是 UTC 时间
-                                last_alert_dt = datetime.strptime(last_alert_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                                time_since_last = now_utc - last_alert_dt
-                                if time_since_last.total_seconds() > 24 * 3600:
-                                    should_alert = True
-                            except ValueError:
-                                # 解析失败，为安全起见再次报警
-                                should_alert = True
-                        else:
-                            # 有alerted标志但无时间，视为需要更新
-                            should_alert = True
-
-                    if should_alert:
-                        hours = int(duration.total_seconds() / 3600)
-                        pos['hours_held'] = hours
-
-                        # 获取实时价格计算浮盈
-                        try:
-                            symbol_for_quote = self._normalize_futures_symbol(pos['symbol'])
-                            ticker = self.processor.client.public_get('/fapi/v1/ticker/price', {'symbol': symbol_for_quote})
-                            if ticker and ticker.get('price') is not None:
-                                current_price = float(ticker['price'])
-                                entry_price = float(pos['entry_price'])
-                                qty = float(pos['qty'])
-                                side = pos['side']
-
-                                if side == 'LONG':
-                                    pnl = (current_price - entry_price) * qty
-                                else:
-                                    pnl = (entry_price - current_price) * qty
-
-                                pos['current_pnl'] = pnl
-                                pos['current_price'] = current_price
-                            else:
-                                pos['current_pnl'] = None
-                                pos['current_price'] = None
-
-                        except Exception as e:
-                            logger.warning(f"获取实时价格失败: {e}")
-                            pos['current_pnl'] = None
-                            pos['current_price'] = None
-
-                        stale_positions.append(pos)
-
-            if stale_positions:
-                count = len(stale_positions)
-                title = f"⚠️ 持仓超时告警: {count}个订单"
-
-                content = f"监测到 **{count}** 个订单持仓超过 48 小时 (复提周期: 24h)。\n\n"
-                content += "--- \n"
-
-                for pos in stale_positions:
-                    pnl_str = "N/A"
-                    if pos.get('current_pnl') is not None:
-                        pnl_val = pos['current_pnl']
-                        emoji = "🟢" if pnl_val >= 0 else "🔴"
-                        pnl_str = f"{emoji} {pnl_val:+.2f} U"
-                    current_price = pos.get('current_price')
-                    current_price_str = f"{current_price:.6g}" if current_price is not None else "--"
-
-                    content += (
-                        f"**{pos['symbol']}** ({pos['side']})\n"
-                        f"- 盈亏: {pnl_str}\n"
-                        f"- 时长: {pos['hours_held']} 小时\n"
-                        f"- 开仓: {pos['entry_price']}\n"
-                        f"- 现价: {current_price_str}\n\n"
-                    )
-
-                content += "请关注风险，及时处理。"
-
-                send_server_chan_notification(title, content)
-
-                # 批量标记为已通知
-                for pos in stale_positions:
-                    self.db.set_position_alerted(pos['symbol'], pos['order_id'])
-                    logger.info(f"已发送持仓超时告警: {pos['symbol']} ({pos['hours_held']}h)")
-
-        except Exception as e:
-            logger.error(f"检查持仓超时失败: {e}")
+        return run_long_held_positions_check(self)
 
     def check_risk_before_sleep(self):
-        """每晚11点检查持仓风险"""
-        try:
-            positions = self.db.get_open_positions()
-            # 统计持仓币种数量 (去重)
-            unique_symbols = set(p['symbol'] for p in positions)
-            count = len(unique_symbols)
-
-            if count > 5:
-                title = f"🌙 睡前风控提醒: 持仓过重 ({count}个)"
-                content = (
-                    f"当前持有 **{count}** 个币种，超过建议的 5 个。\n\n"
-                    f"**持仓列表**:\n"
-                    f"{', '.join(sorted(unique_symbols))}\n\n"
-                    f"建议睡前检查风险，考虑减仓或设置止损。"
-                )
-                send_server_chan_notification(title, content)
-                logger.info(f"已发送睡前风控提醒: 持仓 {count} 个币种")
-            else:
-                logger.info(f"睡前风控检查通过: 持仓 {count} 个币种")
-
-        except Exception as e:
-            logger.error(f"睡前风控检查失败: {e}")
+        return run_sleep_risk_check(self)
 
     def check_recent_losses_at_noon(self):
         return run_noon_loss_check(self)

@@ -66,3 +66,27 @@ def test_scheduler_open_positions_sync_delegates_to_job_module(monkeypatch):
 
     assert scheduler.sync_open_positions_data() == "open-ok"
     assert calls == {"open": 1}
+
+
+def test_scheduler_risk_methods_delegate_to_job_module(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+    calls = {"stale": 0, "sleep": 0}
+
+    def fake_stale(s):
+        calls["stale"] += 1
+        assert s is scheduler
+        return "stale-ok"
+
+    def fake_sleep(s):
+        calls["sleep"] += 1
+        assert s is scheduler
+        return "sleep-ok"
+
+    monkeypatch.setattr("app.scheduler.run_long_held_positions_check", fake_stale)
+    monkeypatch.setattr("app.scheduler.run_sleep_risk_check", fake_sleep)
+
+    assert scheduler.check_long_held_positions() == "stale-ok"
+    assert scheduler.check_risk_before_sleep() == "sleep-ok"
+    assert calls == {"stale": 1, "sleep": 1}

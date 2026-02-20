@@ -27,3 +27,14 @@ def test_balance_service_uses_repository_for_balance_queries():
     ]
     for pattern in forbidden:
         assert pattern not in text
+
+
+def test_leaderboard_api_uses_repository_for_snapshot_queries():
+    text = Path("app/api/leaderboard_api.py").read_text(encoding="utf-8")
+    forbidden = [
+        "db.list_leaderboard_snapshot_dates",
+        "db.get_leaderboard_daily_metrics_by_dates",
+        "db.upsert_leaderboard_daily_metrics_for_date",
+    ]
+    for pattern in forbidden:
+        assert pattern not in text

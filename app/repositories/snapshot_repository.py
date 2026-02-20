@@ -14,6 +14,12 @@ class SnapshotRepository:
     def get_leaderboard_daily_metrics(self, snapshot_date: str):
         return self.db.get_leaderboard_daily_metrics(snapshot_date)
 
+    def list_leaderboard_snapshot_dates(self, limit: int):
+        return self.db.list_leaderboard_snapshot_dates(limit)
+
+    def get_leaderboard_daily_metrics_by_dates(self, dates):
+        return self.db.get_leaderboard_daily_metrics_by_dates(dates)
+
     def upsert_leaderboard_daily_metrics_for_date(self, snapshot_date: str):
         return self.db.upsert_leaderboard_daily_metrics_for_date(snapshot_date)
 
