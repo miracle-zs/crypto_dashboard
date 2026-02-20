@@ -730,6 +730,17 @@ async def get_noon_loss_review_history(
     return {"rows": rows, "summary": summary}
 
 
+@app.get("/api/sync-runs")
+async def get_sync_runs(
+    limit: int = Query(100, ge=1, le=500),
+    db: Database = Depends(get_db)
+):
+    """返回最近同步运行审计记录（按时间倒序）"""
+    loop = asyncio.get_event_loop()
+    rows = await loop.run_in_executor(None, partial(db.list_sync_run_logs, limit))
+    return {"rows": rows}
+
+
 @app.get("/api/summary", response_model=TradeSummary)
 async def get_summary(service: TradeQueryService = Depends(get_trade_service)):
     """Get calculated trading metrics and equity curve"""

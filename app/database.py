@@ -121,6 +121,26 @@ class Database:
             )
         """)
 
+        # 同步运行审计日志（便于复盘同步链路问题）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sync_run_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_type TEXT NOT NULL,
+                mode TEXT,
+                status TEXT NOT NULL,
+                symbol_count INTEGER DEFAULT 0,
+                rows_count INTEGER DEFAULT 0,
+                trades_saved INTEGER DEFAULT 0,
+                open_saved INTEGER DEFAULT 0,
+                elapsed_ms INTEGER DEFAULT 0,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sync_run_log_created_at ON sync_run_log(created_at DESC)
+        """)
+
         # 创建余额历史表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS balance_history (
@@ -797,6 +817,72 @@ class Database:
         if row:
             return dict(row)
         return {}
+
+    def log_sync_run(
+        self,
+        run_type: str,
+        status: str,
+        mode: Optional[str] = None,
+        symbol_count: int = 0,
+        rows_count: int = 0,
+        trades_saved: int = 0,
+        open_saved: int = 0,
+        elapsed_ms: int = 0,
+        error_message: Optional[str] = None,
+    ):
+        """写入同步运行审计日志"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO sync_run_log (
+                run_type, mode, status, symbol_count, rows_count,
+                trades_saved, open_saved, elapsed_ms, error_message
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_type,
+                mode,
+                status,
+                int(symbol_count or 0),
+                int(rows_count or 0),
+                int(trades_saved or 0),
+                int(open_saved or 0),
+                int(elapsed_ms or 0),
+                (error_message or "")[:500],
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    def list_sync_run_logs(self, limit: int = 100) -> List[Dict]:
+        """按时间倒序返回最近同步运行记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                id,
+                run_type,
+                mode,
+                status,
+                symbol_count,
+                rows_count,
+                trades_saved,
+                open_saved,
+                elapsed_ms,
+                error_message,
+                created_at
+            FROM sync_run_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def clear_all_trades(self):
         """清空所有交易记录（慎用）"""
