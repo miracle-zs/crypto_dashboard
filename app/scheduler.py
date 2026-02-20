@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import os
 import time
 import threading
+from functools import partial
 from dotenv import load_dotenv
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.trade_processor import TradeDataProcessor
 from app.database import Database
+from app.jobs.noon_loss_job import run_noon_loss_check
+from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremental
 from app.logger import logger
 from app.notifier import send_server_chan_notification
 from app.binance_client import BinanceFuturesRestClient
@@ -1991,13 +1994,13 @@ class TradeDataScheduler:
 
         # 立即执行一次同步
         logger.info("立即执行首次数据同步...")
-        self.scheduler.add_job(self.sync_trades_incremental, 'date')
-        self.scheduler.add_job(self.sync_open_positions_data, 'date')
+        self.scheduler.add_job(partial(run_sync_trades_incremental, self), 'date')
+        self.scheduler.add_job(partial(run_sync_open_positions, self), 'date')
         self.scheduler.add_job(self.sync_balance_data, 'date')
 
         # 增量同步任务 - 每隔N分钟执行一次
         self.scheduler.add_job(
-            func=self.sync_trades_incremental,
+            func=partial(run_sync_trades_incremental, self),
             trigger=IntervalTrigger(minutes=self.update_interval_minutes),
             id='sync_trades_incremental',
             name='同步交易数据(增量)',
@@ -2009,7 +2012,7 @@ class TradeDataScheduler:
 
         # 未平仓同步任务 - 与闭仓ETL解耦
         self.scheduler.add_job(
-            func=self.sync_open_positions_data,
+            func=partial(run_sync_open_positions, self),
             trigger=IntervalTrigger(minutes=self.open_positions_update_interval_minutes),
             id='sync_open_positions',
             name='同步未平仓订单',
@@ -2087,7 +2090,7 @@ class TradeDataScheduler:
 
         # 添加午间浮亏检查任务 - 默认每天 11:50 (UTC+8) 执行
         self.scheduler.add_job(
-            func=self.check_recent_losses_at_noon,
+            func=partial(run_noon_loss_check, self),
             trigger=CronTrigger(
                 hour=self.noon_loss_check_hour,
                 minute=self.noon_loss_check_minute,
