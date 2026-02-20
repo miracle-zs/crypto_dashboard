@@ -90,3 +90,27 @@ def test_scheduler_risk_methods_delegate_to_job_module(monkeypatch):
     assert scheduler.check_long_held_positions() == "stale-ok"
     assert scheduler.check_risk_before_sleep() == "sleep-ok"
     assert calls == {"stale": 1, "sleep": 1}
+
+
+def test_scheduler_alert_methods_delegate_to_job_module(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+    calls = {"reentry": 0, "profit": 0}
+
+    def fake_reentry(s):
+        calls["reentry"] += 1
+        assert s is scheduler
+        return "reentry-ok"
+
+    def fake_profit(s, threshold_pct):
+        calls["profit"] += 1
+        assert s is scheduler
+        return f"profit-ok:{threshold_pct}"
+
+    monkeypatch.setattr("app.scheduler.run_reentry_alert_check", fake_reentry)
+    monkeypatch.setattr("app.scheduler.run_profit_alert_check", fake_profit)
+
+    assert scheduler.check_same_symbol_reentry_alert() == "reentry-ok"
+    assert scheduler.check_open_positions_profit_alert(25.0) == "profit-ok:25.0"
+    assert calls == {"reentry": 1, "profit": 1}
