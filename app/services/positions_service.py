@@ -6,6 +6,7 @@ from functools import partial
 
 from app.core.time import UTC8
 from app.logger import logger
+from app.repositories import SnapshotRepository, TradeRepository
 
 
 class PositionsService:
@@ -84,14 +85,16 @@ class PositionsService:
 
     async def build_open_positions_response(self, db, client):
         loop = asyncio.get_event_loop()
+        trade_repo = TradeRepository(db)
+        snapshot_repo = SnapshotRepository(db)
         profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
         now = datetime.now(UTC8)
         today_snapshot_date = now.strftime("%Y-%m-%d")
 
         raw_positions, noon_loss_snapshot, noon_review_snapshot = await asyncio.gather(
-            loop.run_in_executor(None, db.get_open_positions),
-            loop.run_in_executor(None, partial(db.get_noon_loss_snapshot_by_date, today_snapshot_date)),
-            loop.run_in_executor(None, partial(db.get_noon_loss_review_snapshot_by_date, today_snapshot_date))
+            loop.run_in_executor(None, trade_repo.get_open_positions),
+            loop.run_in_executor(None, partial(snapshot_repo.get_noon_loss_snapshot_by_date, today_snapshot_date)),
+            loop.run_in_executor(None, partial(snapshot_repo.get_noon_loss_review_snapshot_by_date, today_snapshot_date))
         )
         noon_loss_count = int(noon_loss_snapshot.get("loss_count", 0)) if noon_loss_snapshot else 0
         noon_stop_loss_total = float(noon_loss_snapshot.get("total_stop_loss", 0.0)) if noon_loss_snapshot else 0.0

@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from app.database import Database
 from app.models import Trade, TradeSummary
+from app.repositories import TradeRepository
 
 
 class TradeQueryService:
@@ -14,21 +15,22 @@ class TradeQueryService:
     def __init__(self, db: Optional[Database] = None, api_key: str = None, api_secret: str = None):
         # API密钥用于定时任务，这里只负责读取数据库
         self.db = db or Database()
+        self.repo = TradeRepository(self.db)
 
     def get_summary(self) -> TradeSummary:
         """获取交易汇总数据和统计指标"""
-        cached = self.db.get_trade_summary()
+        cached = self.repo.get_trade_summary()
         if cached:
-            stats = self.db.get_statistics()
+            stats = self.repo.get_statistics()
             if cached.get('total_trades', 0) == stats.get('total_trades', 0):
                 return TradeSummary(**cached)
 
-        summary = self.db.recompute_trade_summary()
+        summary = self.repo.recompute_trade_summary()
         return TradeSummary(**summary)
 
     def get_trades_list(self) -> List[Trade]:
         """获取交易记录列表"""
-        df = self.db.get_all_trades()
+        df = self.repo.get_all_trades()
 
         if df.empty:
             return []
