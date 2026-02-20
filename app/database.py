@@ -120,6 +120,14 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_symbol_sync_state_updated_at
+            ON symbol_sync_state(updated_at DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_symbol_sync_state_last_attempt
+            ON symbol_sync_state(last_attempt_end_ms DESC)
+        """)
 
         # 同步运行审计日志（便于复盘同步链路问题）
         cursor.execute("""
@@ -250,6 +258,12 @@ class Database:
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_open_positions_date ON open_positions(date)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_entry_time ON open_positions(entry_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_symbol ON open_positions(symbol)
         """)
 
         # 检查是否需要迁移 alerted 列
@@ -398,6 +412,9 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot_time ON leaderboard_snapshots(snapshot_time DESC)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot_date ON leaderboard_snapshots(snapshot_date DESC)
+        """)
         try:
             cursor.execute("SELECT losers_rows_json FROM leaderboard_snapshots LIMIT 1")
         except sqlite3.OperationalError:
@@ -451,6 +468,9 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_rebound_7d_snapshot_time ON rebound_7d_snapshots(snapshot_time DESC)
         """)
         cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rebound_7d_snapshot_date ON rebound_7d_snapshots(snapshot_date DESC)
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS rebound_30d_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 snapshot_date TEXT NOT NULL,
@@ -467,6 +487,9 @@ class Database:
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_rebound_30d_snapshot_time ON rebound_30d_snapshots(snapshot_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rebound_30d_snapshot_date ON rebound_30d_snapshots(snapshot_date DESC)
         """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS rebound_60d_snapshots (
@@ -486,6 +509,9 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_rebound_60d_snapshot_time ON rebound_60d_snapshots(snapshot_time DESC)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rebound_60d_snapshot_date ON rebound_60d_snapshots(snapshot_date DESC)
+        """)
 
         # 午间浮亏快照（每天11:50记录一次）
         cursor.execute("""
@@ -504,6 +530,9 @@ class Database:
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_noon_loss_snapshot_time ON noon_loss_snapshots(snapshot_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_noon_loss_snapshot_date ON noon_loss_snapshots(snapshot_date DESC)
         """)
 
         # 午间浮亏复盘快照（每天23:00后复盘一次）
@@ -526,6 +555,9 @@ class Database:
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_noon_loss_review_snapshot_time ON noon_loss_review_snapshots(review_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_noon_loss_review_snapshot_date ON noon_loss_review_snapshots(snapshot_date DESC)
         """)
 
         conn.commit()
@@ -1457,6 +1489,13 @@ class Database:
         """获取所有未平仓订单"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        if os.getenv("DB_QUERY_PLAN_DEBUG", "0").lower() in ("1", "true", "yes"):
+            cursor.execute("EXPLAIN QUERY PLAN SELECT * FROM open_positions ORDER BY entry_time DESC")
+            plan_rows = cursor.fetchall()
+            logger.info(
+                "open_positions query plan: %s",
+                [str(row["detail"]) for row in plan_rows if "detail" in row.keys()],
+            )
         cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
         rows = cursor.fetchall()
         conn.close()
@@ -2203,6 +2242,15 @@ class Database:
             return None
         self.save_leaderboard_daily_metrics(payload)
         return payload
+
+    def upsert_leaderboard_daily_metrics_for_dates(self, dates: List[str]) -> Dict[str, Dict]:
+        """批量计算并保存多天三指标。"""
+        result: Dict[str, Dict] = {}
+        for d in dates:
+            payload = self.upsert_leaderboard_daily_metrics_for_date(str(d))
+            if payload:
+                result[str(d)] = payload
+        return result
 
     def get_leaderboard_daily_metrics(self, snapshot_date: str) -> Optional[Dict]:
         """读取某天三指标。"""

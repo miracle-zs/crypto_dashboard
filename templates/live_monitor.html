@@ -1006,6 +1006,7 @@
         let maxDDWindow = null;
         let showMarkers = true;
         let latestOpenPositionsData = null;
+        let latestOpenPositionsVersion = null;
         let latestNoonReviewHistoryData = { rows: [] };
         let expandedNoonReviewDate = null;
         let openPositionsMobileExpanded = false;
@@ -2308,11 +2309,31 @@
 
         async function fetchOpenPositions() {
             try {
-                const response = await fetch('/api/open-positions');
+                const params = new URLSearchParams();
+                if (latestOpenPositionsVersion !== null) {
+                    params.set('since_version', String(latestOpenPositionsVersion));
+                }
+                const suffix = params.toString() ? `?${params.toString()}` : '';
+                const response = await fetch(`/api/open-positions${suffix}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
+                if (typeof data.version === 'number') {
+                    latestOpenPositionsVersion = data.version;
+                }
+                if (data.incremental === true && data.changed === false) {
+                    return;
+                }
+                if (data.incremental === true && data.changed === true) {
+                    latestOpenPositionsData = {
+                        as_of: data.as_of,
+                        positions: data.positions || [],
+                        summary: data.summary || {},
+                    };
+                    renderOpenPositions(latestOpenPositionsData);
+                    return;
+                }
                 latestOpenPositionsData = data;
                 renderOpenPositions(data);
             } catch (error) {

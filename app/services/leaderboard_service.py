@@ -1,12 +1,18 @@
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
+from app.core.cache import TTLCache
 from app.core.time import UTC8
 from app.repositories import SnapshotRepository, TradeRepository
 
 
 class LeaderboardService:
+    def __init__(self):
+        self._cache = TTLCache()
+        self._cache_ttl_seconds = float(os.getenv("LEADERBOARD_CACHE_TTL_SECONDS", "10") or 10)
+
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
         return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
@@ -15,6 +21,10 @@ class LeaderboardService:
         loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
         trade_repo = TradeRepository(db)
+        cache_key = f"leaderboard:snapshot:{date or 'latest'}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         if date:
             try:
                 requested_date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -138,6 +148,8 @@ class LeaderboardService:
             metric_payload = await loop.run_in_executor(
                 None, snapshot_repo.upsert_leaderboard_daily_metrics_for_date, str(snapshot.get("snapshot_date"))
             )
+            # upsert metric is a write path; drop leaderboard cache to avoid stale reads
+            self._cache.invalidate(prefix="leaderboard:snapshot:")
 
         metric1 = metric_payload.get("metric1", {}) if metric_payload else {}
         metric2 = metric_payload.get("metric2", {}) if metric_payload else {}
@@ -192,4 +204,6 @@ class LeaderboardService:
         snapshot["short_48h_metric"] = metric3
         snapshot["hold_48h_metric"] = metric3
         snapshot.pop("all_rows", None)
-        return {"ok": True, **snapshot}
+        payload = {"ok": True, **snapshot}
+        self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
+        return payload

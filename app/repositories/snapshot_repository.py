@@ -23,6 +23,9 @@ class SnapshotRepository:
     def upsert_leaderboard_daily_metrics_for_date(self, snapshot_date: str):
         return self.db.upsert_leaderboard_daily_metrics_for_date(snapshot_date)
 
+    def upsert_leaderboard_daily_metrics_for_dates(self, dates):
+        return self.db.upsert_leaderboard_daily_metrics_for_dates(dates)
+
     def get_noon_loss_snapshot_by_date(self, snapshot_date: str):
         return self.db.get_noon_loss_snapshot_by_date(snapshot_date)
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 
 class Trade(BaseModel):
@@ -112,6 +112,9 @@ class OpenPositionsSummary(BaseModel):
 
 
 class OpenPositionsResponse(BaseModel):
-    as_of: str
-    positions: List[OpenPositionItem]
-    summary: OpenPositionsSummary
+    as_of: Optional[str] = None
+    positions: List[OpenPositionItem] = Field(default_factory=list)
+    summary: Optional[OpenPositionsSummary] = None
+    version: Optional[int] = None
+    incremental: Optional[bool] = None
+    changed: Optional[bool] = None
