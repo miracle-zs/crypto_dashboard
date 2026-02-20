@@ -1,10 +1,11 @@
 """
 Services module - 从数据库读取交易数据
 """
+from datetime import datetime
+from typing import List, Optional
+
 from app.database import Database
 from app.models import Trade, TradeSummary
-from typing import List, Optional
-from datetime import datetime
 
 
 class TradeQueryService:
