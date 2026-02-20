@@ -8,6 +8,8 @@ from app.scheduler import get_scheduler, should_start_scheduler
 from app.database import Database
 from app.binance_client import BinanceFuturesRestClient
 from app.user_stream import BinanceUserDataStream
+from app.core.deps import get_db
+from app.core.time import UTC8
 import os
 from dotenv import load_dotenv
 from typing import List, Optional, Dict
@@ -23,9 +25,6 @@ from functools import partial
 
 # Load environment variables
 load_dotenv()
-
-# 定义UTC+8时区
-UTC8 = timezone(timedelta(hours=8))
 
 app = FastAPI(title="Zero Gravity Dashboard")
 
@@ -43,16 +42,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 scheduler = None
 user_stream = None
 app.state.scheduler = None
-
-
-def get_db():
-    db = Database()
-    try:
-        yield db
-    finally:
-        close = getattr(db, "close", None)
-        if callable(close):
-            close()
 
 
 def get_trade_service(db: Database = Depends(get_db)):
