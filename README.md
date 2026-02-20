@@ -249,12 +249,19 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### 6. Hardening 验证报告
 - 2026-02-18 一周加固执行与验证记录：`docs/plans/2026-02-18-hardening-verification-report.md`
 
-### 6. 风控复盘数据落库
+### 7. Performance Refactor 验证报告
+- 2026-02-21 性能优先重构验证记录：`docs/plans/2026-02-20-performance-refactor-verification-report.md`
+- 关键对比（baseline -> post）：
+  - `/api/open-positions` P95：`3.975 ms -> 1.421 ms`（-64.25%）
+  - `sync_trades_data` P95（mocked IO）：`5.319 ms -> 5.988 ms`（+12.58%）
+  - `get_open_positions` 热查询 P95（8k rows）：`40.564 ms -> 39.603 ms`（-2.37%）
+
+### 8. 风控复盘数据落库
 - `noon_loss_snapshots`：保存每天 11:50 午间浮亏快照（汇总 + 逐币种 rows）。
 - `noon_loss_review_snapshots`：保存每天夜间复盘结果（汇总 + 逐币种 rows）。
 - 两张表均以 `snapshot_date` 唯一键，支持按天覆盖更新，便于稳定复盘与回溯。
 
-### 7. 实盘策略SOP（当前版本）
+### 9. 实盘策略SOP（当前版本）
 以下为当前实盘执行流程（循环制）：
 
 1. `05:00-08:00` 开单窗口（UTC+8）

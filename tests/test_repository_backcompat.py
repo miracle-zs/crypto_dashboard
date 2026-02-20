@@ -14,3 +14,10 @@ def test_repository_calls_database_backcompat():
     assert hasattr(trade_repo, "get_open_positions")
     assert hasattr(snapshot_repo, "get_latest_leaderboard_snapshot")
     assert hasattr(settings_repo, "set_position_long_term")
+
+
+def test_sync_repository_exposes_existing_sync_methods():
+    from app.repositories.sync_repository import SyncRepository
+
+    repo = SyncRepository(db=None)
+    assert hasattr(repo, "get_last_entry_time")

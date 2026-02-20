@@ -41,6 +41,11 @@ def _env_float(name: str, default: float, minimum: float | None = None) -> float
     return value
 
 
+# compatibility aliases used by scheduler refactor path
+read_int_env = _env_int
+read_float_env = _env_float
+
+
 @dataclass(frozen=True)
 class SchedulerConfig:
     scheduler_timezone: str

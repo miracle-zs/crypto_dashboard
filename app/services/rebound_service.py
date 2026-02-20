@@ -1,12 +1,18 @@
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 
+from app.core.cache import TTLCache
 from app.core.time import UTC8
-from app.repositories import SnapshotRepository, TradeRepository
+from app.repositories import SnapshotRepository, SyncRepository
 
 
 class ReboundService:
+    def __init__(self):
+        self._cache = TTLCache()
+        self._cache_ttl_seconds = float(os.getenv("REBOUND_CACHE_TTL_SECONDS", "10") or 10)
+
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
         return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
@@ -20,7 +26,11 @@ class ReboundService:
     ):
         loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
-        trade_repo = TradeRepository(db)
+        sync_repo = SyncRepository(db)
+        cache_key = f"rebound:snapshot:{window}:{date or 'latest'}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         getter_map = {
             "7d": (snapshot_repo.get_rebound_7d_snapshot_by_date, snapshot_repo.get_latest_rebound_7d_snapshot),
@@ -53,7 +63,7 @@ class ReboundService:
             }[window]
             return {"ok": False, "reason": "no_snapshot", "message": msg}
 
-        open_positions = await loop.run_in_executor(None, trade_repo.get_open_positions)
+        open_positions = await loop.run_in_executor(None, sync_repo.get_open_positions)
         held_symbols = set()
         for pos in open_positions:
             sym = str(pos.get("symbol", "")).upper().strip()
@@ -70,15 +80,23 @@ class ReboundService:
         snapshot["rows"] = enriched_rows
         snapshot["top_count"] = len(enriched_rows)
         snapshot.pop("all_rows", None)
-        return {"ok": True, **snapshot}
+        payload = {"ok": True, **snapshot}
+        self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
+        return payload
 
     async def list_dates(self, *, db, window: str, limit: int):
         loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
+        cache_key = f"rebound:dates:{window}:{int(limit)}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         list_map = {
             "7d": snapshot_repo.list_rebound_7d_snapshot_dates,
             "30d": snapshot_repo.list_rebound_30d_snapshot_dates,
             "60d": snapshot_repo.list_rebound_60d_snapshot_dates,
         }
         dates = await loop.run_in_executor(None, list_map[window], limit)
-        return {"dates": dates}
+        payload = {"dates": dates}
+        self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
+        return payload

@@ -15,6 +15,7 @@ from app.api.system_api import router as system_api_router
 from app.api.trades_api import router as trades_api_router
 from app.api.watchnotes_api import router as watchnotes_api_router
 from app.core.deps import get_db as core_get_db
+from app.core.metrics import log_api_metric, measure_ms
 from app.database import Database
 from app.logger import logger
 from app.routes.leaderboard import router as leaderboard_router
@@ -75,6 +76,23 @@ app = FastAPI(title="Zero Gravity Dashboard", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.state.scheduler = None
+
+
+@app.middleware("http")
+async def request_metrics_middleware(request: Request, call_next):
+    response = None
+    with measure_ms("api.request", path=request.url.path, method=request.method) as snapshot:
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            status_code = response.status_code if response is not None else 500
+            log_api_metric(
+                path=request.url.path,
+                method=request.method,
+                status_code=status_code,
+                snapshot=snapshot,
+            )
 
 app.include_router(system_router)
 app.include_router(trades_router)

@@ -19,10 +19,11 @@ class LeaderboardHistoryService:
 
         metrics_map = await loop.run_in_executor(None, snapshot_repo.get_leaderboard_daily_metrics_by_dates, dates)
         missing_dates = [d for d in dates if d not in metrics_map]
-        for d in missing_dates:
-            payload = await loop.run_in_executor(None, snapshot_repo.upsert_leaderboard_daily_metrics_for_date, d)
-            if payload:
-                metrics_map[d] = payload
+        if missing_dates:
+            filled_map = await loop.run_in_executor(
+                None, snapshot_repo.upsert_leaderboard_daily_metrics_for_dates, missing_dates
+            )
+            metrics_map.update(filled_map)
 
         rows = []
         for snapshot_date in dates:
