@@ -82,6 +82,13 @@ graph TD
 - **数据层**: Pandas (清洗计算) + SQLite (持久化存储)
 - **前端**: 原生 JavaScript (无框架依赖) + Tailwind CSS + ApexCharts.js
 
+### Refactor Layers (Zero-Behavior)
+- `app/api/`: API 路由聚合层（按领域拆分）
+- `app/services/`: 业务聚合层（保持接口行为不变）
+- `app/repositories/`: 数据访问门面层（对 `Database` 做兼容封装）
+- `app/jobs/`: 调度任务实现层（由 `scheduler.py` 统一注册）
+- `app/core/`: 通用依赖与时间工具
+
 ---
 
 ## 🚀 快速开始
