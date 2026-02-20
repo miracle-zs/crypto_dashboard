@@ -181,6 +181,20 @@ class TradeDataScheduler:
         if self._api_job_lock.locked():
             self._api_job_lock.release()
 
+    def _format_ms_to_utc8(self, ts_ms: int) -> str:
+        """将毫秒时间戳格式化为 UTC+8 可读时间。"""
+        try:
+            dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=UTC8)
+            return dt.strftime("%Y-%m-%d %H:%M:%S%z")
+        except Exception:
+            return str(ts_ms)
+
+    def _format_window_with_ms(self, start_ms: int, end_ms: int) -> str:
+        """输出窗口的可读时间和原始毫秒，便于日志排查。"""
+        start_text = self._format_ms_to_utc8(start_ms)
+        end_text = self._format_ms_to_utc8(end_ms)
+        return f"[{start_text} ~ {end_text}] ({start_ms} ~ {end_ms})"
+
     def _is_leaderboard_guard_window(self) -> bool:
         """
         在晨间涨幅榜前后短时间窗口内跳过交易同步，避免 API 权重叠加。
@@ -384,6 +398,16 @@ class TradeDataScheduler:
                 f"trades_saved={trades_saved}, "
                 f"open_saved={open_saved}"
             )
+            self.db.log_sync_run(
+                run_type='trades_sync',
+                mode='full' if force_full else 'incremental',
+                status='success',
+                symbol_count=symbol_count,
+                rows_count=len(df),
+                trades_saved=trades_saved,
+                open_saved=open_saved,
+                elapsed_ms=int(total_elapsed * 1000),
+            )
             logger.info("=" * 50)
 
         except Exception as e:
@@ -400,6 +424,17 @@ class TradeDataScheduler:
                 f"total={total_elapsed:.2f}s"
             )
             self.db.update_sync_status(status='error', error_message=error_msg)
+            self.db.log_sync_run(
+                run_type='trades_sync',
+                mode='full' if force_full else 'incremental',
+                status='error',
+                symbol_count=symbol_count,
+                rows_count=0,
+                trades_saved=trades_saved,
+                open_saved=open_saved,
+                elapsed_ms=int(total_elapsed * 1000),
+                error_message=error_msg,
+            )
             import traceback
             logger.error(traceback.format_exc())
         finally:
@@ -425,7 +460,7 @@ class TradeDataScheduler:
             logger.info(
                 "开始同步未平仓订单... "
                 f"lookback_days={self.open_positions_lookback_days}, "
-                f"window=[{open_since}, {until}]"
+                f"window={self._format_window_with_ms(open_since, until)}"
             )
             open_positions = self.processor.get_open_positions(
                 open_since,
@@ -434,6 +469,17 @@ class TradeDataScheduler:
             )
             if open_positions is None:
                 logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
+                self.db.log_sync_run(
+                    run_type='open_positions_sync',
+                    mode='incremental',
+                    status='skipped',
+                    symbol_count=0,
+                    rows_count=0,
+                    trades_saved=0,
+                    open_saved=0,
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                    error_message='position_risk_failed',
+                )
                 return
             if open_positions:
                 open_count = self.db.save_open_positions(open_positions)
@@ -441,11 +487,34 @@ class TradeDataScheduler:
                 self.check_same_symbol_reentry_alert()
                 self.check_open_positions_profit_alert(threshold_pct=self.profit_alert_threshold_pct)
             else:
+                open_count = 0
                 self.db.save_open_positions([])
                 logger.info("当前无未平仓订单")
-            logger.info(f"未平仓同步完成: elapsed={time.perf_counter() - started_at:.2f}s")
+            elapsed = time.perf_counter() - started_at
+            logger.info(f"未平仓同步完成: elapsed={elapsed:.2f}s")
+            self.db.log_sync_run(
+                run_type='open_positions_sync',
+                mode='incremental',
+                status='success',
+                symbol_count=0,
+                rows_count=open_count,
+                trades_saved=0,
+                open_saved=open_count,
+                elapsed_ms=int(elapsed * 1000),
+            )
         except Exception as exc:
             logger.error(f"未平仓同步失败: {exc}")
+            self.db.log_sync_run(
+                run_type='open_positions_sync',
+                mode='incremental',
+                status='error',
+                symbol_count=0,
+                rows_count=0,
+                trades_saved=0,
+                open_saved=0,
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                error_message=str(exc),
+            )
         finally:
             self._release_api_job_slot()
 
@@ -942,7 +1011,14 @@ class TradeDataScheduler:
                     f"北京时间 {self.noon_loss_check_hour:02d}:{self.noon_loss_check_minute:02d} "
                     f"监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
                 )
+                content += (
+                    f"**总结**\n"
+                    f"- 若全部执行止损，预计总计亏损: {total_stop_loss:.2f} U\n"
+                    f"- 占账户余额: {stop_loss_pct_of_balance:.2f}%\n"
+                    f"- 建议: 考虑全部止损\n\n"
+                )
                 content += "--- \n"
+                content += "**明细**\n\n"
 
                 for pos in loss_positions:
                     pnl_val = pos['current_pnl']
@@ -956,12 +1032,6 @@ class TradeDataScheduler:
                         f"- 时间: {pos['entry_time']}\n\n"
                     )
 
-                content += (
-                    f"**若全部执行止损，预计总计亏损: {total_stop_loss:.2f} U "
-                    f"(占账户余额 {stop_loss_pct_of_balance:.2f}%)**\n\n"
-                    f"建议：考虑全部止损，预计亏损 {total_stop_loss:.2f} U "
-                    f"(占余额 {stop_loss_pct_of_balance:.2f}%)。"
-                )
                 send_server_chan_notification(title, content)
                 logger.info(
                     f"已发送午间浮亏提醒: {count} 个订单，"
@@ -1898,7 +1968,7 @@ class TradeDataScheduler:
                     logger.info(
                         "出入金同步完成: "
                         f"fetched={len(transfer_rows)}, inserted={inserted_count}, "
-                        f"window=[{start_time_ms}, {end_time_ms}]"
+                        f"window={self._format_window_with_ms(start_time_ms, end_time_ms)}"
                     )
                 except Exception as e:
                     logger.warning(f"出入金同步出错: {e}")
