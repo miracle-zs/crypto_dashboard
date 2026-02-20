@@ -2,8 +2,7 @@ from fastapi import FastAPI, Request, HTTPException, Query, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from app.services import TradeQueryService
-from app.models import Trade, TradeSummary, BalanceHistoryItem, DailyStats
+from app.models import BalanceHistoryItem
 from app.scheduler import get_scheduler, should_start_scheduler
 from app.database import Database
 from app.user_stream import BinanceUserDataStream
@@ -19,7 +18,9 @@ from app.routes.system import router as system_router
 from app.routes.trades import router as trades_router
 from app.api.leaderboard_api import router as leaderboard_api_router
 from app.api.positions_api import router as positions_api_router
-from app.security import require_admin_token
+from app.api.system_api import router as system_api_router
+from app.api.trades_api import router as trades_api_router
+from app.api.watchnotes_api import router as watchnotes_api_router
 import asyncio
 from functools import partial
 
@@ -44,15 +45,14 @@ user_stream = None
 app.state.scheduler = None
 
 
-def get_trade_service(db: Database = Depends(get_db)):
-    return TradeQueryService(db=db)
-
-
 app.include_router(system_router)
 app.include_router(trades_router)
 app.include_router(leaderboard_router)
 app.include_router(leaderboard_api_router)
 app.include_router(positions_api_router)
+app.include_router(system_api_router)
+app.include_router(trades_api_router)
+app.include_router(watchnotes_api_router)
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -121,15 +121,6 @@ async def read_logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
 
 
-
-
-@app.get("/api/logs")
-async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
-    """获取最近的日志"""
-    # read_logs 是文件IO，量大时可能阻塞，放入 executor
-    loop = asyncio.get_event_loop()
-    log_lines = await loop.run_in_executor(None, read_logs, lines)
-    return {"logs": log_lines}
 
 
 @app.get("/api/leaderboard/dates")
@@ -432,167 +423,3 @@ async def get_balance_history(
         })
 
     return transformed_data
-
-
-@app.get("/api/noon-loss-review-history")
-async def get_noon_loss_review_history(
-    limit: int = Query(7, ge=1, le=90),
-    db: Database = Depends(get_db)
-):
-    """返回午间止损与夜间复盘历史对比（按日期倒序）。"""
-    loop = asyncio.get_event_loop()
-    rows, summary = await asyncio.gather(
-        loop.run_in_executor(None, partial(db.list_noon_loss_review_history, limit)),
-        loop.run_in_executor(None, db.get_noon_loss_review_history_summary)
-    )
-    return {"rows": rows, "summary": summary}
-
-
-@app.get("/api/sync-runs")
-async def get_sync_runs(
-    limit: int = Query(100, ge=1, le=500),
-    db: Database = Depends(get_db)
-):
-    """返回最近同步运行审计记录（按时间倒序）"""
-    loop = asyncio.get_event_loop()
-    rows = await loop.run_in_executor(None, partial(db.list_sync_run_logs, limit))
-    return {"rows": rows}
-
-
-@app.get("/api/summary", response_model=TradeSummary)
-async def get_summary(service: TradeQueryService = Depends(get_trade_service)):
-    """Get calculated trading metrics and equity curve"""
-    # Service 层通常调用 DB，视为阻塞
-    loop = asyncio.get_event_loop()
-    summary = await loop.run_in_executor(None, service.get_summary)
-    return summary
-
-
-@app.get("/api/trades", response_model=List[Trade])
-async def get_trades(service: TradeQueryService = Depends(get_trade_service)):
-    """Get list of individual trades"""
-    # Service 层通常调用 DB，视为阻塞
-    loop = asyncio.get_event_loop()
-    trades = await loop.run_in_executor(None, service.get_trades_list)
-    return trades
-
-
-@app.post("/api/sync/manual", dependencies=[Depends(require_admin_token)])
-async def manual_sync():
-    """手动触发数据同步"""
-    global scheduler
-
-    if not scheduler:
-        raise HTTPException(status_code=500, detail="调度器未初始化")
-
-    try:
-        # 在后台执行同步 - 这本身就是提交到 scheduler 的线程池，不阻塞主线程
-        scheduler.scheduler.add_job(
-            func=scheduler.sync_trades_data,
-            id='manual_sync',
-            replace_existing=True
-        )
-        return {"message": "手动同步已触发", "status": "started"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
-
-
-@app.get("/api/daily-stats", response_model=List[DailyStats])
-async def get_daily_stats(db: Database = Depends(get_db)):
-    """获取每日交易统计（开单数量、开单金额）"""
-    loop = asyncio.get_event_loop()
-    daily_stats = await loop.run_in_executor(None, db.get_daily_stats)
-    return daily_stats
-
-
-@app.get("/api/monthly-progress")
-async def get_monthly_progress(db: Database = Depends(get_db)):
-    """获取本月目标进度"""
-    loop = asyncio.get_event_loop()
-
-    # 串行执行（或 gather 并行）
-    target = await loop.run_in_executor(None, db.get_monthly_target)
-    current_pnl = await loop.run_in_executor(None, db.get_monthly_pnl)
-
-    progress = (current_pnl / target * 100) if target > 0 else 0
-
-    return {
-        "target": target,
-        "current": current_pnl,
-        "progress": round(progress, 1)
-    }
-
-
-@app.post("/api/monthly-target", dependencies=[Depends(require_admin_token)])
-async def set_monthly_target(
-    target: float = Query(..., description="Monthly target amount"),
-    db: Database = Depends(get_db)
-):
-    """设置月度目标"""
-    if target <= 0:
-        raise HTTPException(status_code=400, detail="目标金额必须大于0")
-
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, db.set_monthly_target, target)
-    return {"message": "目标已更新", "target": target}
-
-
-@app.post("/api/positions/set-long-term", dependencies=[Depends(require_admin_token)])
-async def set_long_term(
-    symbol: str,
-    order_id: int,
-    is_long_term: bool,
-    db: Database = Depends(get_db)
-):
-    """设置持仓是否为长期持仓"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, db.set_position_long_term, symbol, order_id, is_long_term)
-    return {"message": "状态已更新", "symbol": symbol, "is_long_term": is_long_term}
-
-
-@app.get("/api/watch-notes")
-async def get_watch_notes(
-    limit: int = Query(200, description="最大返回记录数"),
-    db: Database = Depends(get_db)
-):
-    """获取明日观察列表"""
-    loop = asyncio.get_event_loop()
-    items = await loop.run_in_executor(None, db.get_watch_notes, limit)
-    return {"items": items}
-
-
-@app.post("/api/watch-notes", dependencies=[Depends(require_admin_token)])
-async def create_watch_note(
-    symbol: str = Query(..., description="观察币种"),
-    db: Database = Depends(get_db)
-):
-    """新增明日观察记录（时间自动写入）"""
-    normalized_symbol = (symbol or "").strip().upper()
-    if not normalized_symbol:
-        raise HTTPException(status_code=400, detail="symbol 不能为空")
-
-    loop = asyncio.get_event_loop()
-    try:
-        item = await loop.run_in_executor(None, db.add_watch_note, normalized_symbol)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    exists_today = bool(item.get("exists_today"))
-    return {
-        "message": "已存在" if exists_today else "已记录",
-        "item": item,
-        "exists_today": exists_today
-    }
-
-
-@app.delete("/api/watch-notes/{note_id}", dependencies=[Depends(require_admin_token)])
-async def remove_watch_note(
-    note_id: int,
-    db: Database = Depends(get_db)
-):
-    """删除明日观察记录"""
-    loop = asyncio.get_event_loop()
-    deleted = await loop.run_in_executor(None, db.delete_watch_note, note_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="记录不存在")
-    return {"message": "已删除", "id": note_id}
