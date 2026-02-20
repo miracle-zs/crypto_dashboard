@@ -104,6 +104,11 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+开发测试（TDD）：
+```bash
+python -m pytest
+```
+
 ### 2. 配置
 复制环境变量模板并填入您的 API Key：
 ```bash
