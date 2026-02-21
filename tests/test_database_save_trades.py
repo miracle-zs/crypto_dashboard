@@ -37,9 +37,13 @@ def test_save_trades_upsert_updates_existing_row(tmp_path):
     assert db.save_trades(first, overwrite=False) == 1
     assert db.save_trades(second, overwrite=False) == 1
 
-    all_rows = db.get_all_trades()
-    assert len(all_rows) == 1
-    assert float(all_rows.iloc[0]["PNL_Net"]) == 99.0
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) AS c FROM trades")
+    assert int(cursor.fetchone()["c"]) == 1
+    cursor.execute("SELECT pnl_net FROM trades LIMIT 1")
+    assert float(cursor.fetchone()["pnl_net"]) == 99.0
+    conn.close()
 
 
 def test_save_trades_overwrite_replaces_time_window_only(tmp_path):
@@ -57,12 +61,17 @@ def test_save_trades_overwrite_replaces_time_window_only(tmp_path):
     replacement = pd.DataFrame([_trade_row("2026-02-21 10:00:00", pnl=88, entry_order_id=7, exit_order_id="8")])
     assert db.save_trades(replacement, overwrite=True) == 1
 
-    all_rows = db.get_all_trades()
-    assert len(all_rows) == 3
-    assert set(str(v) for v in all_rows["Entry_Time"]) == {
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT entry_time, entry_order_id FROM trades ORDER BY entry_time ASC")
+    rows = cursor.fetchall()
+    conn.close()
+
+    assert len(rows) == 3
+    assert {str(row["entry_time"]) for row in rows} == {
         "2026-02-20 10:00:00",
         "2026-02-21 10:00:00",
         "2026-02-22 10:00:00",
     }
-    mid = all_rows[all_rows["Entry_Time"] == "2026-02-21 10:00:00"].iloc[0]
-    assert int(mid["Entry_Order_ID"]) == 7
+    middle_row = [row for row in rows if str(row["entry_time"]) == "2026-02-21 10:00:00"][0]
+    assert int(middle_row["entry_order_id"]) == 7
