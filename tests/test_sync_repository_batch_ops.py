@@ -161,3 +161,46 @@ def test_sync_repository_status_and_watermark_queries(tmp_path):
     marks = repo.get_symbol_sync_watermarks(["BTCUSDT", "ETHUSDT"])
     assert marks["BTCUSDT"] == 12345
     assert marks["ETHUSDT"] is None
+
+
+def test_sync_repository_get_open_position_symbols_returns_distinct_symbols(tmp_path):
+    db = Database(db_path=str(tmp_path / "sync_open_symbols.db"))
+    repo = SyncRepository(db)
+
+    repo.save_open_positions(
+        [
+            {
+                "date": "20260221",
+                "symbol": "BTC",
+                "side": "LONG",
+                "entry_time": "2026-02-21 10:00:00",
+                "entry_price": 100.0,
+                "qty": 1.0,
+                "entry_amount": 100.0,
+                "order_id": 1,
+            },
+            {
+                "date": "20260221",
+                "symbol": "BTC",
+                "side": "LONG",
+                "entry_time": "2026-02-21 11:00:00",
+                "entry_price": 110.0,
+                "qty": 1.0,
+                "entry_amount": 110.0,
+                "order_id": 2,
+            },
+            {
+                "date": "20260221",
+                "symbol": "ETH",
+                "side": "SHORT",
+                "entry_time": "2026-02-21 12:00:00",
+                "entry_price": 200.0,
+                "qty": 1.0,
+                "entry_amount": 200.0,
+                "order_id": 3,
+            },
+        ]
+    )
+
+    symbols = sorted(repo.get_open_position_symbols())
+    assert symbols == ["BTC", "ETH"]

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.repositories.open_positions_query import fetch_open_positions
+from app.repositories.open_positions_query import fetch_open_position_symbols, fetch_open_positions
 from app.repositories.trade_repository import TradeRepository
 
 
@@ -302,6 +302,9 @@ class SyncRepository:
 
     def get_open_positions(self):
         return fetch_open_positions(self.db)
+
+    def get_open_position_symbols(self):
+        return fetch_open_position_symbols(self.db)
 
     def save_open_positions(self, rows):
         conn = self.db._get_connection()

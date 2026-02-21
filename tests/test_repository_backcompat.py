@@ -14,6 +14,7 @@ def test_repository_calls_database_backcompat():
     watchnotes_repo = WatchNotesRepository(db)
 
     assert hasattr(trade_repo, "get_open_positions")
+    assert hasattr(trade_repo, "get_open_position_symbols")
     assert hasattr(snapshot_repo, "get_latest_leaderboard_snapshot")
     assert hasattr(settings_repo, "set_position_long_term")
     assert hasattr(watchnotes_repo, "get_watch_notes")

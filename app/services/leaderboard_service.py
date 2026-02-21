@@ -52,10 +52,10 @@ class LeaderboardService:
                 "message": "暂无快照数据，请等待下一次07:40定时任务生成"
             }
 
-        open_positions = await run_in_thread(trade_repo.get_open_positions)
+        open_symbols = await run_in_thread(trade_repo.get_open_position_symbols)
         held_symbols = set()
-        for pos in open_positions:
-            sym = str(pos.get("symbol", "")).upper().strip()
+        for raw_symbol in open_symbols:
+            sym = str(raw_symbol).upper().strip()
             if not sym:
                 continue
             held_symbols.add(sym)

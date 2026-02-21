@@ -5,7 +5,7 @@ from datetime import timedelta, timezone
 import numpy as np
 import pandas as pd
 
-from app.repositories.open_positions_query import fetch_open_positions
+from app.repositories.open_positions_query import fetch_open_position_symbols, fetch_open_positions
 
 
 class TradeRepository:
@@ -225,6 +225,9 @@ class TradeRepository:
 
     def get_open_positions(self):
         return fetch_open_positions(self.db)
+
+    def get_open_position_symbols(self):
+        return fetch_open_position_symbols(self.db)
 
     def get_balance_history(self, **kwargs):
         start_time = kwargs.get("start_time")
