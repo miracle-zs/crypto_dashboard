@@ -6,19 +6,32 @@ from datetime import datetime, timedelta, timezone
 
 from app.logger import logger
 
+_EXCHANGE_SYMBOLS_CACHE = {"symbols": None, "expires_at": 0.0}
+_EXCHANGE_SYMBOLS_LOCK = threading.Lock()
 
-def build_top_gainers_snapshot(scheduler, utc8):
-    """构建涨跌幅榜快照（不处理锁与冷却）。"""
-    stage_started_at = time.perf_counter()
-    now_utc = datetime.now(timezone.utc)
-    midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
+
+def _resolve_exchange_symbols_cache_ttl() -> float:
+    raw = os.getenv("EXCHANGE_INFO_CACHE_TTL_SECONDS", "300")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 300.0
+    return max(0.0, value)
+
+
+def _get_usdt_perpetual_symbols(scheduler):
+    now = time.time()
+    with _EXCHANGE_SYMBOLS_LOCK:
+        cached_symbols = _EXCHANGE_SYMBOLS_CACHE.get("symbols")
+        expires_at = float(_EXCHANGE_SYMBOLS_CACHE.get("expires_at", 0.0) or 0.0)
+        if cached_symbols and now < expires_at:
+            return set(cached_symbols)
 
     exchange_info = scheduler.processor.get_exchange_info(client=scheduler.processor.client)
     if not exchange_info or "symbols" not in exchange_info:
         raise RuntimeError("无法获取 exchangeInfo")
 
-    usdt_perpetual_symbols = {
+    symbols = {
         item.get("symbol")
         for item in exchange_info.get("symbols", [])
         if (
@@ -27,8 +40,24 @@ def build_top_gainers_snapshot(scheduler, utc8):
             and str(item.get("status", "")).upper() == "TRADING"
         )
     }
-    if not usdt_perpetual_symbols:
+    if not symbols:
         raise RuntimeError("无可用USDT永续交易对")
+
+    ttl_seconds = _resolve_exchange_symbols_cache_ttl()
+    with _EXCHANGE_SYMBOLS_LOCK:
+        _EXCHANGE_SYMBOLS_CACHE["symbols"] = set(symbols)
+        _EXCHANGE_SYMBOLS_CACHE["expires_at"] = now + ttl_seconds
+    return symbols
+
+
+def build_top_gainers_snapshot(scheduler, utc8):
+    """构建涨跌幅榜快照（不处理锁与冷却）。"""
+    stage_started_at = time.perf_counter()
+    now_utc = datetime.now(timezone.utc)
+    midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
+
+    usdt_perpetual_symbols = _get_usdt_perpetual_symbols(scheduler)
 
     ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/24hr")
     if not ticker_data or not isinstance(ticker_data, list):
@@ -169,21 +198,7 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
     now_utc = datetime.now(timezone.utc)
     window_start_utc = now_utc - timedelta(days=window_days)
 
-    exchange_info = scheduler.processor.get_exchange_info(client=scheduler.processor.client)
-    if not exchange_info or "symbols" not in exchange_info:
-        raise RuntimeError("无法获取 exchangeInfo")
-
-    usdt_perpetual_symbols = {
-        item.get("symbol")
-        for item in exchange_info.get("symbols", [])
-        if (
-            item.get("contractType") == "PERPETUAL"
-            and item.get("quoteAsset") == "USDT"
-            and str(item.get("status", "")).upper() == "TRADING"
-        )
-    }
-    if not usdt_perpetual_symbols:
-        raise RuntimeError("无可用USDT永续交易对")
+    usdt_perpetual_symbols = _get_usdt_perpetual_symbols(scheduler)
 
     ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/price")
     if not ticker_data:
