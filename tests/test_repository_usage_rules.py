@@ -38,3 +38,63 @@ def test_leaderboard_api_uses_repository_for_snapshot_queries():
     ]
     for pattern in forbidden:
         assert pattern not in text
+
+
+def test_scheduler_jobs_do_not_use_db_directly():
+    job_files = [
+        "app/jobs/alert_jobs.py",
+        "app/jobs/noon_loss_job.py",
+        "app/jobs/risk_jobs.py",
+        "app/jobs/sync_jobs.py",
+    ]
+    for file_path in job_files:
+        text = Path(file_path).read_text(encoding="utf-8")
+        assert "scheduler.db." not in text
+
+
+def test_scheduler_uses_repositories_for_snapshot_and_balance_writes():
+    text = Path("app/scheduler.py").read_text(encoding="utf-8")
+    forbidden = [
+        "self.db.save_leaderboard_snapshot",
+        "self.db.save_rebound_7d_snapshot",
+        "self.db.save_rebound_30d_snapshot",
+        "self.db.save_rebound_60d_snapshot",
+        "self.db.save_balance_history",
+        "self.db.save_transfer_income",
+    ]
+    for pattern in forbidden:
+        assert pattern not in text
+
+
+def test_trade_repository_avoids_direct_passthrough_for_core_queries():
+    text = Path("app/repositories/trade_repository.py").read_text(encoding="utf-8")
+    forbidden = [
+        "return self.db.get_trade_summary()",
+        "return self.db.get_statistics()",
+        "return self.db.recompute_trade_summary()",
+        "return self.db.get_all_trades()",
+        "return self.db.get_transfers()",
+    ]
+    for pattern in forbidden:
+        assert pattern not in text
+
+
+def test_sync_repository_avoids_direct_passthrough_for_summary_queries():
+    text = Path("app/repositories/sync_repository.py").read_text(encoding="utf-8")
+    forbidden = [
+        "return self.db.recompute_trade_summary()",
+        "return self.db.get_statistics()",
+        "return self.db.get_last_entry_time()",
+        "return self.db.update_sync_status(**kwargs)",
+        "return self.db.get_symbol_sync_watermarks(symbols)",
+        "return self.db.update_symbol_sync_success(**kwargs)",
+        "return self.db.update_symbol_sync_failure(**kwargs)",
+        "return self.db.save_trades(df, overwrite=overwrite)",
+    ]
+    for pattern in forbidden:
+        assert pattern not in text
+
+
+def test_settings_repository_avoids_direct_passthrough():
+    text = Path("app/repositories/settings_repository.py").read_text(encoding="utf-8")
+    assert "return self.db.set_position_long_term(symbol, order_id, is_long_term)" not in text

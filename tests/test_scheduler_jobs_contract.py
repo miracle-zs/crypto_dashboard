@@ -114,3 +114,94 @@ def test_scheduler_alert_methods_delegate_to_job_module(monkeypatch):
     assert scheduler.check_same_symbol_reentry_alert() == "reentry-ok"
     assert scheduler.check_open_positions_profit_alert(25.0) == "profit-ok:25.0"
     assert calls == {"reentry": 1, "profit": 1}
+
+
+def test_sync_trades_data_handles_empty_symbol_list(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+
+    class FakeProcessor:
+        def get_traded_symbols(self, since, until):
+            return []
+
+    class FakeSyncRepo:
+        def update_sync_status(self, **kwargs):
+            return None
+
+        def get_last_entry_time(self):
+            return None
+
+        def get_statistics(self):
+            return {"total_trades": 0, "unique_symbols": 0, "earliest_trade": None, "latest_trade": None}
+
+        def log_sync_run(self, **kwargs):
+            return None
+
+    scheduler.processor = FakeProcessor()
+    scheduler.sync_repo = FakeSyncRepo()
+
+    monkeypatch.setattr(scheduler, "_is_leaderboard_guard_window", lambda: False)
+    monkeypatch.setattr(scheduler, "_is_api_cooldown_active", lambda source: False)
+    monkeypatch.setattr(scheduler, "_try_enter_api_job_slot", lambda source: True)
+    monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
+    monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
+
+    assert scheduler._sync_trades_data_impl(force_full=False) is True
+
+
+def test_sync_trades_data_uses_batch_watermark_updates(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+
+    class FakeProcessor:
+        def get_traded_symbols(self, since, until):
+            return ["BTCUSDT", "ETHUSDT"]
+
+        def analyze_orders(self, **kwargs):
+            return (
+                __import__("pandas").DataFrame(),
+                ["BTCUSDT"],
+                {"ETHUSDT": "failed"},
+            )
+
+    class FakeSyncRepo:
+        def __init__(self):
+            self.success_batch_calls = []
+            self.failure_batch_calls = []
+
+        def update_sync_status(self, **kwargs):
+            return None
+
+        def get_last_entry_time(self):
+            return None
+
+        def get_symbol_sync_watermarks(self, symbols):
+            return {}
+
+        def update_symbol_sync_success_batch(self, symbols, end_ms):
+            self.success_batch_calls.append((list(symbols), end_ms))
+
+        def update_symbol_sync_failure_batch(self, failures, end_ms):
+            self.failure_batch_calls.append((dict(failures), end_ms))
+
+        def get_statistics(self):
+            return {"total_trades": 0, "unique_symbols": 0, "earliest_trade": None, "latest_trade": None}
+
+        def log_sync_run(self, **kwargs):
+            return None
+
+    fake_repo = FakeSyncRepo()
+    scheduler.processor = FakeProcessor()
+    scheduler.sync_repo = fake_repo
+
+    monkeypatch.setattr(scheduler, "_is_leaderboard_guard_window", lambda: False)
+    monkeypatch.setattr(scheduler, "_is_api_cooldown_active", lambda source: False)
+    monkeypatch.setattr(scheduler, "_try_enter_api_job_slot", lambda source: True)
+    monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
+    monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
+
+    assert scheduler._sync_trades_data_impl(force_full=False) is True
+    assert len(fake_repo.success_batch_calls) == 1
+    assert len(fake_repo.failure_batch_calls) == 1

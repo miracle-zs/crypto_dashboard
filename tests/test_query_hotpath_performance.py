@@ -12,6 +12,8 @@ def test_open_positions_hot_query_uses_index(tmp_path):
     cur.execute("PRAGMA index_list('open_positions')")
     index_names = {row[1] for row in cur.fetchall()}
     assert "idx_open_positions_entry_time" in index_names
+    assert "idx_open_positions_profit_alerted_entry" in index_names
+    assert "idx_open_positions_alerted_last_alert" in index_names
 
     cur.execute("EXPLAIN QUERY PLAN SELECT * FROM open_positions ORDER BY entry_time DESC")
     plan_rows = cur.fetchall()

@@ -21,3 +21,31 @@ def test_sync_repository_exposes_existing_sync_methods():
 
     repo = SyncRepository(db=None)
     assert hasattr(repo, "get_last_entry_time")
+
+
+def test_settings_repository_can_mark_long_term(tmp_path):
+    from app.repositories.settings_repository import SettingsRepository
+
+    db = Database(db_path=str(tmp_path / "settings_repo.db"))
+    repo = SettingsRepository(db)
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO open_positions (date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id, is_long_term)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("20260221", "BTC", "LONG", "2026-02-21 10:00:00", 100.0, 1.0, 100.0, 9, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    repo.set_position_long_term("BTC", 9, True)
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_long_term FROM open_positions WHERE symbol = ? AND order_id = ?", ("BTC", 9))
+    row = cursor.fetchone()
+    conn.close()
+    assert int(row["is_long_term"]) == 1
