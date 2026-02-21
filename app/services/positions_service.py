@@ -6,10 +6,12 @@ from collections import defaultdict
 from datetime import datetime
 from functools import partial
 
+from app.core.async_utils import run_in_thread
 from app.core.cache import TTLCache
 from app.core.time import UTC8
 from app.logger import logger
 from app.repositories import SnapshotRepository, SyncRepository
+from app.services.market_price_service import MarketPriceService
 
 
 class PositionsService:
@@ -58,41 +60,6 @@ class PositionsService:
             return False
         return review_dt >= noon_dt
 
-    @staticmethod
-    def _fetch_mark_price_map(symbols, client):
-        if not symbols:
-            return {}
-
-        unique_symbols = sorted(set(symbols))
-
-        try:
-            data = client.public_get("/fapi/v1/premiumIndex")
-            if isinstance(data, dict):
-                data = [data]
-            price_map = {
-                item["symbol"]: float(item["markPrice"])
-                for item in data
-                if isinstance(item, dict) and "symbol" in item and "markPrice" in item
-            }
-            return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
-        except Exception as exc:
-            logger.warning(f"Failed to fetch mark prices via premiumIndex: {exc}")
-
-        try:
-            data = client.public_get("/fapi/v1/ticker/price")
-            if isinstance(data, dict):
-                data = [data]
-            price_map = {
-                item["symbol"]: float(item["price"])
-                for item in data
-                if isinstance(item, dict) and "symbol" in item and "price" in item
-            }
-            return {symbol: price_map.get(symbol) for symbol in unique_symbols if symbol in price_map}
-        except Exception as exc:
-            logger.warning(f"Failed to fetch mark prices via ticker/price: {exc}")
-
-        return {}
-
     def _compute_signature(self, payload: dict) -> str:
         return json.dumps(
             {
@@ -113,7 +80,6 @@ class PositionsService:
             return self._latest_version
 
     async def build_open_positions_response(self, db, client, since_version: int | None = None):
-        loop = asyncio.get_event_loop()
         sync_repo = SyncRepository(db)
         snapshot_repo = SnapshotRepository(db)
         profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
@@ -125,9 +91,9 @@ class PositionsService:
             payload = cached
         else:
             raw_positions, noon_loss_snapshot, noon_review_snapshot = await asyncio.gather(
-                loop.run_in_executor(None, sync_repo.get_open_positions),
-                loop.run_in_executor(None, partial(snapshot_repo.get_noon_loss_snapshot_by_date, today_snapshot_date)),
-                loop.run_in_executor(None, partial(snapshot_repo.get_noon_loss_review_snapshot_by_date, today_snapshot_date))
+                run_in_thread(sync_repo.get_open_positions),
+                run_in_thread(partial(snapshot_repo.get_noon_loss_snapshot_by_date, today_snapshot_date)),
+                run_in_thread(partial(snapshot_repo.get_noon_loss_review_snapshot_by_date, today_snapshot_date)),
             )
             noon_loss_count = int(noon_loss_snapshot.get("loss_count", 0)) if noon_loss_snapshot else 0
             noon_stop_loss_total = float(noon_loss_snapshot.get("total_stop_loss", 0.0)) if noon_loss_snapshot else 0.0
@@ -195,7 +161,7 @@ class PositionsService:
                 self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
             else:
                 symbols_full = [self._normalize_symbol(pos["symbol"]) for pos in raw_positions]
-                mark_prices = await loop.run_in_executor(None, self._fetch_mark_price_map, symbols_full, client)
+                mark_prices = await run_in_thread(MarketPriceService.get_mark_price_map, symbols_full, client)
 
                 positions = []
                 per_symbol_notional = defaultdict(float)

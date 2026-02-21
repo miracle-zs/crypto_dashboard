@@ -5,15 +5,18 @@ def test_repository_calls_database_backcompat():
     from app.repositories.settings_repository import SettingsRepository
     from app.repositories.snapshot_repository import SnapshotRepository
     from app.repositories.trade_repository import TradeRepository
+    from app.repositories.watchnotes_repository import WatchNotesRepository
 
     db = Database()
     trade_repo = TradeRepository(db)
     snapshot_repo = SnapshotRepository(db)
     settings_repo = SettingsRepository(db)
+    watchnotes_repo = WatchNotesRepository(db)
 
     assert hasattr(trade_repo, "get_open_positions")
     assert hasattr(snapshot_repo, "get_latest_leaderboard_snapshot")
     assert hasattr(settings_repo, "set_position_long_term")
+    assert hasattr(watchnotes_repo, "get_watch_notes")
 
 
 def test_sync_repository_exposes_existing_sync_methods():

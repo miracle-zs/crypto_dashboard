@@ -4,20 +4,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app.core.async_utils import run_in_thread
+from app.core.deps import get_db
 from app.database import Database
+from app.repositories import SyncRepository, TradeRepository
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-
-def get_db():
-    db = Database()
-    try:
-        yield db
-    finally:
-        close = getattr(db, "close", None)
-        if callable(close):
-            close()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -27,10 +20,11 @@ async def read_root(request: Request):
 
 @router.get("/api/status")
 async def get_status(request: Request, db: Database = Depends(get_db)):
-    loop = asyncio.get_event_loop()
+    trade_repo = TradeRepository(db)
+    sync_repo = SyncRepository(db)
     stats, sync_status = await asyncio.gather(
-        loop.run_in_executor(None, db.get_statistics),
-        loop.run_in_executor(None, db.get_sync_status),
+        run_in_thread(trade_repo.get_statistics),
+        run_in_thread(sync_repo.get_sync_status),
     )
 
     scheduler = getattr(request.app.state, "scheduler", None)

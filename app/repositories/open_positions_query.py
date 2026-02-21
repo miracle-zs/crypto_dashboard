@@ -1,0 +1,7 @@
+def fetch_open_positions(db):
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.repositories.open_positions_query import fetch_open_positions
 from app.repositories.trade_repository import TradeRepository
 
 
@@ -264,13 +265,43 @@ class SyncRepository:
         conn.commit()
         conn.close()
 
-    def get_open_positions(self):
+    def get_sync_status(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
+        cursor.execute("SELECT * FROM sync_status WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
+    def list_sync_run_logs(self, limit: int = 100):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                id,
+                run_type,
+                mode,
+                status,
+                symbol_count,
+                rows_count,
+                trades_saved,
+                open_saved,
+                elapsed_ms,
+                error_message,
+                created_at
+            FROM sync_run_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def get_open_positions(self):
+        return fetch_open_positions(self.db)
 
     def save_open_positions(self, rows):
         conn = self.db._get_connection()

@@ -2,26 +2,20 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 
+from app.core.async_utils import run_in_thread
+from app.core.deps import get_db
 from app.database import Database
+from app.repositories import SyncRepository, TradeRepository
 
 router = APIRouter()
 
 
-def get_db():
-    db = Database()
-    try:
-        yield db
-    finally:
-        close = getattr(db, "close", None)
-        if callable(close):
-            close()
-
-
 @router.get("/api/database/stats")
 async def get_database_stats(db: Database = Depends(get_db)):
-    loop = asyncio.get_event_loop()
+    trade_repo = TradeRepository(db)
+    sync_repo = SyncRepository(db)
     stats, sync_status = await asyncio.gather(
-        loop.run_in_executor(None, db.get_statistics),
-        loop.run_in_executor(None, db.get_sync_status),
+        run_in_thread(trade_repo.get_statistics),
+        run_in_thread(sync_repo.get_sync_status),
     )
     return {"statistics": stats, "sync_status": sync_status}

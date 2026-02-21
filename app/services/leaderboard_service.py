@@ -1,10 +1,10 @@
-import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.core.cache import TTLCache
 from app.core.time import UTC8
+from app.core.async_utils import run_in_thread
 from app.repositories import SnapshotRepository, TradeRepository
 
 
@@ -18,7 +18,6 @@ class LeaderboardService:
         return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
 
     async def build_snapshot_response(self, db, date: Optional[str]):
-        loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
         trade_repo = TradeRepository(db)
         cache_key = f"leaderboard:snapshot:{date or 'latest'}"
@@ -41,9 +40,9 @@ class LeaderboardService:
                     "reason": "future_date",
                     "message": f"请求日期 {date} 超过今天 {today_utc8.strftime('%Y-%m-%d')}"
                 }
-            snapshot = await loop.run_in_executor(None, snapshot_repo.get_leaderboard_snapshot_by_date, date)
+            snapshot = await run_in_thread(snapshot_repo.get_leaderboard_snapshot_by_date, date)
         else:
-            snapshot = await loop.run_in_executor(None, snapshot_repo.get_latest_leaderboard_snapshot)
+            snapshot = await run_in_thread(snapshot_repo.get_latest_leaderboard_snapshot)
 
         if not snapshot:
             return {
@@ -52,7 +51,7 @@ class LeaderboardService:
                 "message": "暂无快照数据，请等待下一次07:40定时任务生成"
             }
 
-        open_positions = await loop.run_in_executor(None, trade_repo.get_open_positions)
+        open_positions = await run_in_thread(trade_repo.get_open_positions)
         held_symbols = set()
         for pos in open_positions:
             sym = str(pos.get("symbol", "")).upper().strip()
@@ -69,9 +68,7 @@ class LeaderboardService:
         yesterday_snapshot = None
         if snap_date is not None:
             yesterday = (snap_date - timedelta(days=1)).strftime("%Y-%m-%d")
-            yesterday_snapshot = await loop.run_in_executor(
-                None, snapshot_repo.get_leaderboard_snapshot_by_date, yesterday
-            )
+            yesterday_snapshot = await run_in_thread(snapshot_repo.get_leaderboard_snapshot_by_date, yesterday)
         yesterday_rank = {}
         yesterday_losers_rank = {}
         if yesterday_snapshot:
@@ -89,8 +86,8 @@ class LeaderboardService:
         if snap_date is not None:
             start_date = (snap_date - timedelta(days=6)).strftime("%Y-%m-%d")
             end_date = snap_date.strftime("%Y-%m-%d")
-            snapshots_7d = await loop.run_in_executor(
-                None, snapshot_repo.get_leaderboard_snapshots_between, start_date, end_date
+            snapshots_7d = await run_in_thread(
+                snapshot_repo.get_leaderboard_snapshots_between, start_date, end_date
             )
             for snap in snapshots_7d:
                 seen = set()
@@ -141,12 +138,10 @@ class LeaderboardService:
         snapshot["gainers_top_rows"] = enriched_rows
         snapshot["gainers_top_count"] = len(enriched_rows)
         snapshot["losers_top_count"] = len(enriched_losers_rows)
-        metric_payload = await loop.run_in_executor(
-            None, snapshot_repo.get_leaderboard_daily_metrics, str(snapshot.get("snapshot_date"))
-        )
+        metric_payload = await run_in_thread(snapshot_repo.get_leaderboard_daily_metrics, str(snapshot.get("snapshot_date")))
         if not metric_payload:
-            metric_payload = await loop.run_in_executor(
-                None, snapshot_repo.upsert_leaderboard_daily_metrics_for_date, str(snapshot.get("snapshot_date"))
+            metric_payload = await run_in_thread(
+                snapshot_repo.upsert_leaderboard_daily_metrics_for_date, str(snapshot.get("snapshot_date"))
             )
             # upsert metric is a write path; drop leaderboard cache to avoid stale reads
             self._cache.invalidate(prefix="leaderboard:snapshot:")

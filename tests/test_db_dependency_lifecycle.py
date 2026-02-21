@@ -1,10 +1,10 @@
 import inspect
 
-from app import main
 
+def test_main_does_not_define_local_get_db():
+    from app import main
 
-def test_get_db_is_generator_dependency():
-    assert inspect.isgeneratorfunction(main.get_db)
+    assert not hasattr(main, "get_db")
 
 
 def test_core_get_db_is_generator():

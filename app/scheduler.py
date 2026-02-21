@@ -25,6 +25,7 @@ from app.logger import logger
 from app.notifier import send_server_chan_notification
 from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
 from app.services.market_snapshot_service import build_rebound_snapshot, build_top_gainers_snapshot
+from app.services.market_price_service import MarketPriceService
 
 load_dotenv()
 
@@ -472,65 +473,9 @@ class TradeDataScheduler:
 
     def _get_mark_price_map(self, symbols: list[str]) -> dict[str, float]:
         """批量获取标记价格（优先 premiumIndex，其次 ticker/price）。"""
-        if not symbols:
+        if not symbols or not self.processor:
             return {}
-
-        unique_symbols = sorted(set(symbols))
-        resolved: dict[str, float] = {}
-        missing = set(unique_symbols)
-
-        try:
-            data = self.processor.client.public_get("/fapi/v1/premiumIndex")
-            if isinstance(data, dict):
-                data = [data]
-            for item in data or []:
-                if not isinstance(item, dict):
-                    continue
-                symbol = str(item.get("symbol", "")).upper()
-                raw_price = item.get("markPrice")
-                if not symbol or raw_price is None:
-                    continue
-                try:
-                    price = float(raw_price)
-                except (TypeError, ValueError):
-                    continue
-                if price <= 0:
-                    continue
-                if symbol in missing:
-                    resolved[symbol] = price
-                    missing.discard(symbol)
-        except Exception as exc:
-            logger.warning(f"获取标记价格(premiumIndex)失败: {exc}")
-
-        if missing:
-            try:
-                data = self.processor.client.public_get("/fapi/v1/ticker/price")
-                if isinstance(data, dict):
-                    data = [data]
-                for item in data or []:
-                    if not isinstance(item, dict):
-                        continue
-                    symbol = str(item.get("symbol", "")).upper()
-                    raw_price = item.get("price")
-                    if symbol not in missing or raw_price is None:
-                        continue
-                    try:
-                        price = float(raw_price)
-                    except (TypeError, ValueError):
-                        continue
-                    if price <= 0:
-                        continue
-                    resolved[symbol] = price
-                    missing.discard(symbol)
-            except Exception as exc:
-                logger.warning(f"获取标记价格(ticker/price)失败: {exc}")
-
-        if missing:
-            logger.warning(
-                f"仍有{len(missing)}个symbol无法获取夜间价格: {sorted(list(missing))[:10]}"
-            )
-
-        return resolved
+        return MarketPriceService.get_mark_price_map(symbols, self.processor.client)
 
     @staticmethod
     def _parse_entry_time_utc8(entry_time_value) -> datetime | None:

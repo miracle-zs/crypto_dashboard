@@ -1,17 +1,14 @@
 import json
 
+from app.repositories.open_positions_query import fetch_open_positions
+
 
 class RiskRepository:
     def __init__(self, db):
         self.db = db
 
     def get_open_positions(self):
-        conn = self.db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
+        return fetch_open_positions(self.db)
 
     def get_profit_alert_candidates(self):
         conn = self.db._get_connection()

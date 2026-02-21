@@ -14,7 +14,7 @@ Command:
 conda run -n base python -m pytest -q tests
 ```
 
-Result (latest): `69 passed`
+Result (latest): `70 passed`
 
 ### 1.2 Smoke startup
 
@@ -99,6 +99,16 @@ Notes:
     - `SettingsRepository.set_position_long_term` 改为仓储内 SQL 更新。
     - 当前 `app/repositories` 中已无 `return self.db.*` 透传模式。
 14. `noon_loss_job` 午间检查改为批量取价（`_get_mark_price_map`），移除逐仓位 ticker 请求，进一步降低 API 权重和请求延迟。
+15. 统一依赖注入与线程执行模型：
+    - `get_db` 统一到 `app/core/deps.py`，移除路由/主入口重复定义。
+    - 新增 `app/core/async_utils.py`，服务层统一使用 `asyncio.to_thread` 封装，移除 `get_event_loop/run_in_executor` 样板。
+16. 统一批量取价实现：
+    - 新增 `app/services/market_price_service.py`。
+    - `scheduler` 与 `positions_service` 复用同一取价路径。
+17. 下沉系统/观察列表/月度统计到仓储层：
+    - 新增 `WatchNotesRepository`。
+    - `TradesApiService`/`SystemApiService`/`WatchNotesService` 与 `routes/system|trades` 改为仓储调用。
+    - `Database` 移除对应旧业务方法后，文件行数进一步下降（当前约 `1137` 行）。
 
 ## 4. Known Risks
 

@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -16,5 +15,4 @@ async def get_balance_history(
     time_range: Optional[str] = Query("1d", description="Time range for balance history (e.g., 1h, 1d, 1w, 1m, 1y)"),
     db=Depends(get_db),
 ):
-    loop = asyncio.get_event_loop()
-    return await service.build_balance_history_response(db=db, time_range=time_range or "1d", loop=loop)
+    return await service.build_balance_history_response(db=db, time_range=time_range or "1d")

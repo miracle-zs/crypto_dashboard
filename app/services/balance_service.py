@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
+from app.core.async_utils import run_in_thread
 from app.repositories import TradeRepository
 
 
 class BalanceService:
-    async def build_balance_history_response(self, *, db, time_range: str, loop):
+    async def build_balance_history_response(self, *, db, time_range: str):
         trade_repo = TradeRepository(db)
         end_time = datetime.utcnow()
         start_time = None
@@ -22,14 +23,13 @@ class BalanceService:
         else:
             start_time = end_time - timedelta(hours=2)
 
-        history_data = await loop.run_in_executor(
-            None,
-            lambda: trade_repo.get_balance_history(start_time=start_time, end_time=end_time),
+        history_data = await run_in_thread(
+            trade_repo.get_balance_history, start_time=start_time, end_time=end_time
         )
         if not history_data:
             return []
 
-        transfers = await loop.run_in_executor(None, trade_repo.get_transfers)
+        transfers = await run_in_thread(trade_repo.get_transfers)
 
         sorted_transfers = []
         for t in transfers:

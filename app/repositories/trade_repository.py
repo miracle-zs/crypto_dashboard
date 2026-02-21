@@ -1,8 +1,11 @@
 import json
 from datetime import datetime
+from datetime import timedelta, timezone
 
 import numpy as np
 import pandas as pd
+
+from app.repositories.open_positions_query import fetch_open_positions
 
 
 class TradeRepository:
@@ -219,12 +222,7 @@ class TradeRepository:
         return df
 
     def get_open_positions(self):
-        conn = self.db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
+        return fetch_open_positions(self.db)
 
     def get_balance_history(self, **kwargs):
         start_time = kwargs.get("start_time")
@@ -277,6 +275,104 @@ class TradeRepository:
         )
         conn.commit()
         conn.close()
+
+    def get_daily_stats(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                date,
+                SUM(trade_count) as trade_count,
+                SUM(total_amount) as total_amount,
+                SUM(total_pnl) as total_pnl,
+                SUM(win_count) as win_count,
+                SUM(loss_count) as loss_count
+            FROM (
+                SELECT
+                    date,
+                    COUNT(*) as trade_count,
+                    SUM(entry_amount) as total_amount,
+                    SUM(pnl_net) as total_pnl,
+                    SUM(CASE WHEN pnl_net > 0 THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN pnl_net < 0 THEN 1 ELSE 0 END) as loss_count
+                FROM trades
+                GROUP BY date
+                UNION ALL
+                SELECT
+                    date,
+                    COUNT(*) as trade_count,
+                    SUM(entry_amount) as total_amount,
+                    0 as total_pnl,
+                    0 as win_count,
+                    0 as loss_count
+                FROM open_positions
+                GROUP BY date
+            )
+            GROUP BY date
+            ORDER BY date DESC
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for row in rows:
+            trade_count = row["trade_count"]
+            win_count = row["win_count"]
+            win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0.0
+            results.append(
+                {
+                    "date": row["date"],
+                    "trade_count": trade_count,
+                    "total_amount": float(row["total_amount"] or 0),
+                    "total_pnl": float(row["total_pnl"] or 0),
+                    "win_count": win_count,
+                    "loss_count": row["loss_count"],
+                    "win_rate": round(win_rate, 2),
+                }
+            )
+        return results
+
+    def get_monthly_target(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT monthly_target FROM user_settings WHERE id = 1")
+        row = cursor.fetchone()
+        conn.close()
+        return row["monthly_target"] if row else 30000
+
+    def set_monthly_target(self, target: float):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE user_settings
+            SET monthly_target = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """,
+            (float(target),),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_monthly_pnl(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        utc8 = timezone(timedelta(hours=8))
+        now = datetime.now(utc8)
+        month_start = now.strftime("%Y%m01")
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(pnl_net), 0) as monthly_pnl
+            FROM trades
+            WHERE date >= ?
+            """,
+            (month_start,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return float(row["monthly_pnl"]) if row else 0.0
 
     def _save_trade_summary(self, summary):
         conn = self.db._get_connection()

@@ -1,28 +1,23 @@
-import asyncio
-
+from app.core.async_utils import run_in_thread
 from app.repositories import SnapshotRepository
 
 
 class LeaderboardHistoryService:
     async def list_dates(self, *, db, limit: int):
-        loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
-        dates = await loop.run_in_executor(None, snapshot_repo.list_leaderboard_snapshot_dates, limit)
+        dates = await run_in_thread(snapshot_repo.list_leaderboard_snapshot_dates, limit)
         return {"dates": dates}
 
     async def metrics_history(self, *, db, limit: int):
-        loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
-        dates = await loop.run_in_executor(None, snapshot_repo.list_leaderboard_snapshot_dates, limit)
+        dates = await run_in_thread(snapshot_repo.list_leaderboard_snapshot_dates, limit)
         if not dates:
             return {"rows": []}
 
-        metrics_map = await loop.run_in_executor(None, snapshot_repo.get_leaderboard_daily_metrics_by_dates, dates)
+        metrics_map = await run_in_thread(snapshot_repo.get_leaderboard_daily_metrics_by_dates, dates)
         missing_dates = [d for d in dates if d not in metrics_map]
         if missing_dates:
-            filled_map = await loop.run_in_executor(
-                None, snapshot_repo.upsert_leaderboard_daily_metrics_for_dates, missing_dates
-            )
+            filled_map = await run_in_thread(snapshot_repo.upsert_leaderboard_daily_metrics_for_dates, missing_dates)
             metrics_map.update(filled_map)
 
         rows = []

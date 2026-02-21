@@ -14,7 +14,6 @@ from app.api.rebound_api import router as rebound_api_router
 from app.api.system_api import router as system_api_router
 from app.api.trades_api import router as trades_api_router
 from app.api.watchnotes_api import router as watchnotes_api_router
-from app.core.deps import get_db as core_get_db
 from app.core.metrics import log_api_metric, measure_ms
 from app.database import Database
 from app.logger import logger
@@ -28,10 +27,6 @@ load_dotenv()
 
 scheduler = None
 user_stream = None
-
-
-def get_db():
-    yield from core_get_db()
 
 
 @asynccontextmanager

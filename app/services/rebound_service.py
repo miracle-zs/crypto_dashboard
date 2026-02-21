@@ -1,10 +1,10 @@
-import asyncio
 import os
 from datetime import datetime
 from typing import Optional
 
 from app.core.cache import TTLCache
 from app.core.time import UTC8
+from app.core.async_utils import run_in_thread
 from app.repositories import SnapshotRepository, SyncRepository
 
 
@@ -24,7 +24,6 @@ class ReboundService:
         date: Optional[str],
         window: str,
     ):
-        loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
         sync_repo = SyncRepository(db)
         cache_key = f"rebound:snapshot:{window}:{date or 'latest'}"
@@ -51,9 +50,9 @@ class ReboundService:
                     "reason": "future_date",
                     "message": f"请求日期 {date} 超过今天 {today_utc8.strftime('%Y-%m-%d')}",
                 }
-            snapshot = await loop.run_in_executor(None, by_date, date)
+            snapshot = await run_in_thread(by_date, date)
         else:
-            snapshot = await loop.run_in_executor(None, latest)
+            snapshot = await run_in_thread(latest)
 
         if not snapshot:
             msg = {
@@ -63,7 +62,7 @@ class ReboundService:
             }[window]
             return {"ok": False, "reason": "no_snapshot", "message": msg}
 
-        open_positions = await loop.run_in_executor(None, sync_repo.get_open_positions)
+        open_positions = await run_in_thread(sync_repo.get_open_positions)
         held_symbols = set()
         for pos in open_positions:
             sym = str(pos.get("symbol", "")).upper().strip()
@@ -85,7 +84,6 @@ class ReboundService:
         return payload
 
     async def list_dates(self, *, db, window: str, limit: int):
-        loop = asyncio.get_event_loop()
         snapshot_repo = SnapshotRepository(db)
         cache_key = f"rebound:dates:{window}:{int(limit)}"
         cached = self._cache.get(cache_key)
@@ -96,7 +94,7 @@ class ReboundService:
             "30d": snapshot_repo.list_rebound_30d_snapshot_dates,
             "60d": snapshot_repo.list_rebound_60d_snapshot_dates,
         }
-        dates = await loop.run_in_executor(None, list_map[window], limit)
+        dates = await run_in_thread(list_map[window], limit)
         payload = {"dates": dates}
         self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
         return payload

@@ -98,3 +98,30 @@ def test_sync_repository_avoids_direct_passthrough_for_summary_queries():
 def test_settings_repository_avoids_direct_passthrough():
     text = Path("app/repositories/settings_repository.py").read_text(encoding="utf-8")
     assert "return self.db.set_position_long_term(symbol, order_id, is_long_term)" not in text
+
+
+def test_services_avoid_direct_db_calls_for_system_watchnotes_and_trades():
+    service_files = [
+        "app/services/trades_api_service.py",
+        "app/services/system_api_service.py",
+        "app/services/watchnotes_service.py",
+        "app/routes/system.py",
+        "app/routes/trades.py",
+    ]
+    forbidden = [
+        "db.get_daily_stats",
+        "db.get_monthly_target",
+        "db.get_monthly_pnl",
+        "db.set_monthly_target",
+        "db.list_noon_loss_review_history",
+        "db.get_noon_loss_review_history_summary",
+        "db.list_sync_run_logs",
+        "db.get_watch_notes",
+        "db.add_watch_note",
+        "db.delete_watch_note",
+        "db.get_sync_status",
+    ]
+    for file_path in service_files:
+        text = Path(file_path).read_text(encoding="utf-8")
+        for pattern in forbidden:
+            assert pattern not in text
