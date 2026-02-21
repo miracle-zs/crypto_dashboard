@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.core.cache import TTLCache
+from app.core.symbols import normalize_futures_symbol
 from app.core.time import UTC8
 from app.core.async_utils import run_in_thread
 from app.repositories import SnapshotRepository, SyncRepository
@@ -15,7 +16,7 @@ class ReboundService:
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
-        return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
+        return normalize_futures_symbol(symbol)
 
     async def get_snapshot_response(
         self,

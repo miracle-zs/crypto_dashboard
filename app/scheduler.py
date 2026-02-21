@@ -21,11 +21,13 @@ from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremen
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import read_float_env, read_int_env
+from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
 from app.notifier import send_server_chan_notification
 from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
 from app.services.market_snapshot_service import build_rebound_snapshot, build_top_gainers_snapshot
 from app.services.market_price_service import MarketPriceService
+from app.services.sync_planning_service import build_symbol_since_map
 
 load_dotenv()
 
@@ -288,16 +290,12 @@ class TradeDataScheduler:
             symbol_since_map = None
             if not is_full_sync_run and traded_symbols:
                 watermarks = self.sync_repo.get_symbol_sync_watermarks(traded_symbols)
-                overlap_ms = self.symbol_sync_overlap_minutes * 60 * 1000
-                symbol_since_map = {}
-                warmed_symbols = 0
-                for symbol in traded_symbols:
-                    symbol_watermark = watermarks.get(symbol)
-                    if symbol_watermark is None:
-                        symbol_since_map[symbol] = since
-                    else:
-                        symbol_since_map[symbol] = max(since, symbol_watermark - overlap_ms)
-                        warmed_symbols += 1
+                symbol_since_map, warmed_symbols = build_symbol_since_map(
+                    traded_symbols=traded_symbols,
+                    watermarks=watermarks,
+                    since=since,
+                    overlap_minutes=self.symbol_sync_overlap_minutes,
+                )
                 logger.info(
                     "增量水位策略: "
                     f"symbols={len(traded_symbols)}, "
@@ -845,12 +843,7 @@ class TradeDataScheduler:
     @staticmethod
     def _normalize_futures_symbol(symbol: str) -> str:
         """将库内symbol规范化为Binance USDT交易对symbol"""
-        sym = str(symbol or "").upper().strip()
-        if not sym:
-            return sym
-        if sym.endswith("USDT") or sym.endswith("BUSD"):
-            return sym
-        return f"{sym}USDT"
+        return normalize_futures_symbol(symbol, preserve_busd=True)
 
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""

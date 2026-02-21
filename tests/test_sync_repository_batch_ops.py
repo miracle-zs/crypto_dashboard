@@ -56,6 +56,71 @@ def test_save_open_positions_caches_state_columns(tmp_path):
     assert getattr(repo, "_open_positions_state_columns", None)
 
 
+def test_save_open_positions_preserves_alert_state_for_surviving_rows(tmp_path):
+    db = Database(db_path=str(tmp_path / "positions_state_preserve.db"))
+    repo = SyncRepository(db)
+
+    initial_rows = [
+        {
+            "date": "20260221",
+            "symbol": "BTC",
+            "side": "LONG",
+            "entry_time": "2026-02-21 10:00:00",
+            "entry_price": 100.0,
+            "qty": 1.0,
+            "entry_amount": 100.0,
+            "order_id": 1,
+        },
+        {
+            "date": "20260221",
+            "symbol": "ETH",
+            "side": "SHORT",
+            "entry_time": "2026-02-21 11:00:00",
+            "entry_price": 200.0,
+            "qty": 2.0,
+            "entry_amount": 400.0,
+            "order_id": 2,
+        },
+    ]
+    repo.save_open_positions(initial_rows)
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE open_positions
+        SET alerted = 1, profit_alerted = 1, reentry_alerted = 1
+        WHERE symbol = 'BTC' AND order_id = 1
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    repo.save_open_positions([initial_rows[0]])
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT symbol, order_id, alerted, profit_alerted, reentry_alerted
+        FROM open_positions
+        ORDER BY symbol
+        """
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+
+    assert rows == [
+        {
+            "symbol": "BTC",
+            "order_id": 1,
+            "alerted": 1,
+            "profit_alerted": 1,
+            "reentry_alerted": 1,
+        }
+    ]
+
+
 def test_sync_repository_status_and_watermark_queries(tmp_path):
     db = Database(db_path=str(tmp_path / "sync_status.db"))
     repo = SyncRepository(db)

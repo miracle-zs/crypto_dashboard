@@ -8,6 +8,7 @@ from functools import partial
 
 from app.core.async_utils import run_in_thread
 from app.core.cache import TTLCache
+from app.core.symbols import normalize_futures_symbol
 from app.core.time import UTC8
 from app.logger import logger
 from app.repositories import SnapshotRepository, SyncRepository
@@ -38,7 +39,7 @@ class PositionsService:
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
-        return symbol if symbol.endswith("USDT") else f"{symbol}USDT"
+        return normalize_futures_symbol(symbol)
 
     @staticmethod
     def _parse_local_snapshot_time(value):

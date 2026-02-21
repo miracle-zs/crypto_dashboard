@@ -37,22 +37,24 @@ class TradeRepository:
     def get_statistics(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
-
-        cursor.execute("SELECT COUNT(*) FROM trades")
-        total_trades = cursor.fetchone()[0]
-
-        cursor.execute("SELECT MIN(entry_time), MAX(entry_time) FROM trades")
-        date_range = cursor.fetchone()
-
-        cursor.execute("SELECT COUNT(DISTINCT symbol) FROM trades")
-        unique_symbols = cursor.fetchone()[0]
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_trades,
+                MIN(entry_time) AS earliest_trade,
+                MAX(entry_time) AS latest_trade,
+                COUNT(DISTINCT symbol) AS unique_symbols
+            FROM trades
+            """
+        )
+        row = cursor.fetchone()
         conn.close()
 
         return {
-            "total_trades": total_trades,
-            "earliest_trade": date_range[0],
-            "latest_trade": date_range[1],
-            "unique_symbols": unique_symbols,
+            "total_trades": int(row["total_trades"] or 0) if row else 0,
+            "earliest_trade": row["earliest_trade"] if row else None,
+            "latest_trade": row["latest_trade"] if row else None,
+            "unique_symbols": int(row["unique_symbols"] or 0) if row else 0,
         }
 
     def get_cached_total_trades(self):

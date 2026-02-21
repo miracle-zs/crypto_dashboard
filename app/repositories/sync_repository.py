@@ -329,8 +329,13 @@ class SyncRepository:
 
             query_cols = list(self._open_positions_state_columns or ("symbol", "order_id", "alerted"))
 
-            if rows:
-                cursor.execute(f"SELECT {', '.join(query_cols)} FROM open_positions")
+            incoming_symbols = sorted({str(pos.get("symbol", "")) for pos in rows if pos.get("symbol")}) if rows else []
+            if rows and incoming_symbols:
+                placeholders = ",".join("?" for _ in incoming_symbols)
+                cursor.execute(
+                    f"SELECT {', '.join(query_cols)} FROM open_positions WHERE symbol IN ({placeholders})",
+                    tuple(incoming_symbols),
+                )
             else:
                 cursor.execute("SELECT 1 WHERE 0")
 
