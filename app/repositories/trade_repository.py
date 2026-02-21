@@ -276,6 +276,16 @@ class TradeRepository:
         conn.commit()
         conn.close()
 
+    def save_ws_event(self, event_type: str, event_time: int, payload):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO ws_events (event_type, event_time, payload) VALUES (?, ?, ?)",
+            (str(event_type), int(event_time), json.dumps(payload, ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
+
     def get_daily_stats(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()

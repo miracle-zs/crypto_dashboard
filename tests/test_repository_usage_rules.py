@@ -125,3 +125,8 @@ def test_services_avoid_direct_db_calls_for_system_watchnotes_and_trades():
         text = Path(file_path).read_text(encoding="utf-8")
         for pattern in forbidden:
             assert pattern not in text
+
+
+def test_user_stream_avoids_direct_db_event_write():
+    text = Path("app/user_stream.py").read_text(encoding="utf-8")
+    assert "self.db.save_ws_event" not in text

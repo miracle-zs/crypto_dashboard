@@ -14,7 +14,7 @@ Command:
 conda run -n base python -m pytest -q tests
 ```
 
-Result (latest): `70 passed`
+Result (latest): `71 passed`
 
 ### 1.2 Smoke startup
 
@@ -109,6 +109,10 @@ Notes:
     - 新增 `WatchNotesRepository`。
     - `TradesApiService`/`SystemApiService`/`WatchNotesService` 与 `routes/system|trades` 改为仓储调用。
     - `Database` 移除对应旧业务方法后，文件行数进一步下降（当前约 `1137` 行）。
+18. 继续清理 `Database` 历史遗留方法（已无业务路径引用）：
+    - 删除旧的交易汇总/同步状态/观察列表/月度统计/ws事件等直接业务方法。
+    - `user_stream` 改为通过 `TradeRepository.save_ws_event` 落库。
+    - `Database` 文件进一步缩减至约 `658` 行。
 
 ## 4. Known Risks
 

@@ -113,7 +113,7 @@ class BinanceUserDataStream:
 
         event_type = payload.get("e", "UNKNOWN")
         event_time = payload.get("E") or int(time.time() * 1000)
-        self.db.save_ws_event(event_type, event_time, payload)
+        self.trade_repo.save_ws_event(event_type, event_time, payload)
 
         if event_type == "ACCOUNT_UPDATE":
             self._handle_account_update(payload)
