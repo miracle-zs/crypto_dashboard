@@ -7,7 +7,7 @@ from app.notifier import send_server_chan_notification
 def run_reentry_alert_check(scheduler):
     """同币在 UTC 当天内重复开仓提醒（每笔重复开仓仅提醒一次）。"""
     try:
-        positions = scheduler.db.get_open_positions()
+        positions = scheduler.risk_repo.get_open_positions()
         if not positions:
             return
 
@@ -91,8 +91,9 @@ def run_reentry_alert_check(scheduler):
 
         send_server_chan_notification(title, content)
 
-        for item in triggered:
-            scheduler.db.set_position_reentry_alerted(item["symbol"], item["order_id"])
+        scheduler.risk_repo.set_positions_reentry_alerted_batch(
+            [(item["symbol"], item["order_id"]) for item in triggered]
+        )
 
         logger.info(
             "同币重复开仓提醒已发送: "
@@ -108,11 +109,11 @@ def run_profit_alert_check(scheduler, threshold_pct: float):
         return
 
     try:
-        positions = scheduler.db.get_open_positions()
-        if not positions:
-            return
-
-        candidates = [p for p in positions if int(p.get("profit_alerted", 0) or 0) == 0]
+        if hasattr(scheduler.risk_repo, "get_profit_alert_candidates"):
+            candidates = scheduler.risk_repo.get_profit_alert_candidates()
+        else:
+            positions = scheduler.risk_repo.get_open_positions()
+            candidates = [p for p in positions if int(p.get("profit_alerted", 0) or 0) == 0]
         if not candidates:
             return
 
@@ -176,8 +177,9 @@ def run_profit_alert_check(scheduler, threshold_pct: float):
             )
         send_server_chan_notification(title, content)
 
-        for item in triggered:
-            scheduler.db.set_position_profit_alerted(item["symbol"], item["order_id"])
+        scheduler.risk_repo.set_positions_profit_alerted_batch(
+            [(item["symbol"], item["order_id"]) for item in triggered]
+        )
 
         logger.info(
             "浮盈提醒已发送: "

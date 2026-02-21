@@ -108,14 +108,14 @@ app.include_router(balance_api_router)
 
 @app.get("/live-monitor", response_class=HTMLResponse)
 async def read_live_monitor(request: Request):
-    return templates.TemplateResponse("live_monitor.html", {"request": request})
+    return templates.TemplateResponse(request, "live_monitor.html")
 
 
 @app.get("/metrics", response_class=HTMLResponse)
 async def read_metrics(request: Request):
-    return templates.TemplateResponse("metrics.html", {"request": request})
+    return templates.TemplateResponse(request, "metrics.html")
 
 
 @app.get("/logs", response_class=HTMLResponse)
 async def read_logs_page(request: Request):
-    return templates.TemplateResponse("logs.html", {"request": request})
+    return templates.TemplateResponse(request, "logs.html")

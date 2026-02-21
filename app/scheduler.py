@@ -4,19 +4,13 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
 import time
-import threading
 from functools import partial
 from dotenv import load_dotenv
-import sys
-from pathlib import Path
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
 
 from app.trade_processor import TradeDataProcessor
 from app.database import Database
@@ -29,7 +23,8 @@ from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import read_float_env, read_int_env
 from app.logger import logger
 from app.notifier import send_server_chan_notification
-from app.repositories import RiskRepository, SyncRepository
+from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
+from app.services.market_snapshot_service import build_rebound_snapshot, build_top_gainers_snapshot
 
 load_dotenv()
 
@@ -50,6 +45,8 @@ class TradeDataScheduler:
         self.db = Database()
         self.sync_repo = SyncRepository(self.db)
         self.risk_repo = RiskRepository(self.db)
+        self.snapshot_repo = SnapshotRepository(self.db)
+        self.trade_repo = TradeRepository(self.db)
 
         # 从环境变量获取配置
         api_key = os.getenv('BINANCE_API_KEY')
@@ -176,29 +173,40 @@ class TradeDataScheduler:
         window_end = leaderboard_dt + timedelta(minutes=self.leaderboard_guard_after_minutes)
         return window_start <= now <= window_end
 
-    def sync_trades_data(self, force_full: bool = False):
+    def sync_trades_data(self, force_full: bool = False, emit_metric: bool = True):
         """同步交易数据到数据库"""
+        if not emit_metric:
+            return self._sync_trades_data_impl(force_full=force_full)
+
         job_status = "success"
         with measure_ms("scheduler.sync_trades_data", mode="full" if force_full else "incremental") as metric:
-            self._sync_trades_data_impl(force_full=force_full)
-            log_job_metric(job_name="sync_trades_data", status=job_status, snapshot=metric)
+            try:
+                ok = self._sync_trades_data_impl(force_full=force_full)
+                if ok is False:
+                    job_status = "error"
+            except Exception:
+                job_status = "error"
+                raise
+            finally:
+                log_job_metric(job_name="sync_trades_data", status=job_status, snapshot=metric)
+        return job_status == "success"
 
     def _sync_trades_data_impl(self, force_full: bool = False):
         """同步交易数据到数据库（实际执行逻辑）"""
         if not self.processor:
             logger.warning("无法同步: API密钥未配置")
-            return
+            return True
         if self._is_leaderboard_guard_window():
             logger.info(
                 "跳过交易同步: 位于晨间涨幅榜保护窗口内 "
                 f"({self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} "
                 f"前{self.leaderboard_guard_before_minutes}分钟至后{self.leaderboard_guard_after_minutes}分钟)"
             )
-            return
+            return True
         if self._is_api_cooldown_active(source='交易同步'):
-            return
+            return True
         if not self._try_enter_api_job_slot(source='交易同步'):
-            return
+            return True
 
         sync_started_at = time.perf_counter()
         symbols_elapsed = 0.0
@@ -297,15 +305,27 @@ class TradeDataScheduler:
                     f"overlap_minutes={self.symbol_sync_overlap_minutes}"
                 )
 
-            analysis_result = self.processor.analyze_orders(
-                since=since,
-                until=until,
-                traded_symbols=traded_symbols,
-                use_time_filter=self.use_time_filter,
-                symbol_since_map=symbol_since_map,
-                return_symbol_status=True,
-            )
-            df, success_symbols, failure_symbols = analysis_result
+            if traded_symbols:
+                analysis_result = self.processor.analyze_orders(
+                    since=since,
+                    until=until,
+                    traded_symbols=traded_symbols,
+                    use_time_filter=self.use_time_filter,
+                    symbol_since_map=symbol_since_map,
+                    return_symbol_status=True,
+                )
+                if not isinstance(analysis_result, (tuple, list)) or len(analysis_result) != 3:
+                    raise RuntimeError(
+                        f"analyze_orders返回结构异常: type={type(analysis_result)}, "
+                        f"value={analysis_result}"
+                    )
+                df, success_symbols, failure_symbols = analysis_result
+            else:
+                df = pd.DataFrame()
+                success_symbols = []
+                failure_symbols = {}
+                logger.info("无活跃币种，跳过闭仓ETL分析")
+
             analyze_elapsed = time.perf_counter() - stage_started
             logger.info(f"闭仓ETL完成: rows={len(df)}, elapsed={analyze_elapsed:.2f}s")
 
@@ -330,14 +350,12 @@ class TradeDataScheduler:
 
             if success_symbols:
                 stage_started = time.perf_counter()
-                for symbol in success_symbols:
-                    self.sync_repo.update_symbol_sync_success(symbol=symbol, end_ms=until)
+                self.sync_repo.update_symbol_sync_success_batch(symbols=success_symbols, end_ms=until)
                 save_trades_elapsed += time.perf_counter() - stage_started
                 logger.info(f"同步水位推进: success_symbols={len(success_symbols)}")
             if failure_symbols:
                 stage_started = time.perf_counter()
-                for symbol, err in failure_symbols.items():
-                    self.sync_repo.update_symbol_sync_failure(symbol=symbol, end_ms=until, error_message=err)
+                self.sync_repo.update_symbol_sync_failure_batch(failures=failure_symbols, end_ms=until)
                 save_trades_elapsed += time.perf_counter() - stage_started
                 logger.warning(f"同步水位未推进(失败): failed_symbols={len(failure_symbols)}")
 
@@ -378,6 +396,7 @@ class TradeDataScheduler:
                 elapsed_ms=int(total_elapsed * 1000),
             )
             logger.info("=" * 50)
+            return True
 
         except Exception as e:
             error_msg = f"同步失败: {str(e)}"
@@ -406,6 +425,7 @@ class TradeDataScheduler:
             )
             import traceback
             logger.error(traceback.format_exc())
+            return False
         finally:
             self._release_api_job_slot()
 
@@ -425,24 +445,30 @@ class TradeDataScheduler:
         status = "success"
         with measure_ms("scheduler.sync_trades_incremental") as metric:
             try:
-                self.sync_trades_data(force_full=False)
+                ok = self.sync_trades_data(force_full=False, emit_metric=False)
+                if ok is False:
+                    status = "error"
             except Exception:
                 status = "error"
                 raise
             finally:
                 log_job_metric(job_name="sync_trades_incremental", status=status, snapshot=metric)
+        return status == "success"
 
     def sync_trades_full(self):
         """全量同步交易数据"""
         status = "success"
         with measure_ms("scheduler.sync_trades_full") as metric:
             try:
-                self.sync_trades_data(force_full=True)
+                ok = self.sync_trades_data(force_full=True, emit_metric=False)
+                if ok is False:
+                    status = "error"
             except Exception:
                 status = "error"
                 raise
             finally:
                 log_job_metric(job_name="sync_trades_full", status=status, snapshot=metric)
+        return status == "success"
 
     def _get_mark_price_map(self, symbols: list[str]) -> dict[str, float]:
         """批量获取标记价格（优先 premiumIndex，其次 ticker/price）。"""
@@ -551,160 +577,7 @@ class TradeDataScheduler:
         self.review_noon_loss_at_night(snapshot_date=snapshot_date, send_notification=send_notification)
 
     def _build_top_gainers_snapshot(self):
-        """构建涨跌幅榜快照（不处理锁与冷却）。"""
-        stage_started_at = time.perf_counter()
-        now_utc = datetime.now(timezone.utc)
-        midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
-
-        exchange_info = self.processor.get_exchange_info(client=self.processor.client)
-        if not exchange_info or 'symbols' not in exchange_info:
-            raise RuntimeError("无法获取 exchangeInfo")
-
-        usdt_perpetual_symbols = {
-            item.get('symbol')
-            for item in exchange_info.get('symbols', [])
-            if (
-                item.get('contractType') == 'PERPETUAL'
-                and item.get('quoteAsset') == 'USDT'
-                and str(item.get('status', '')).upper() == 'TRADING'
-            )
-        }
-        if not usdt_perpetual_symbols:
-            raise RuntimeError("无可用USDT永续交易对")
-
-        ticker_data = self.processor.client.public_get('/fapi/v1/ticker/24hr')
-        if not ticker_data or not isinstance(ticker_data, list):
-            raise RuntimeError("无法获取 24hr ticker")
-
-        candidates = []
-        for item in ticker_data:
-            symbol = item.get('symbol')
-            if not symbol or symbol not in usdt_perpetual_symbols:
-                continue
-            try:
-                last_price = float(item.get('lastPrice', 0.0))
-                quote_volume = float(item.get('quoteVolume', 0.0))
-            except (TypeError, ValueError):
-                continue
-
-            if last_price <= 0:
-                continue
-            if quote_volume < self.leaderboard_min_quote_volume:
-                continue
-
-            candidates.append({
-                'symbol': symbol,
-                'last_price': last_price,
-                'quote_volume': quote_volume,
-            })
-
-        # 先按成交额排序；如配置了上限则截断，避免K线请求过多
-        candidates.sort(key=lambda x: x['quote_volume'], reverse=True)
-        if self.leaderboard_max_symbols > 0:
-            candidates = candidates[:self.leaderboard_max_symbols]
-        logger.info(
-            "晨间涨幅榜候选统计: "
-            f"candidates={len(candidates)}, "
-            f"min_quote_volume={self.leaderboard_min_quote_volume:.0f}, "
-            f"max_symbols={self.leaderboard_max_symbols}"
-        )
-
-        leaderboard = []
-        progress_step = 20
-        total_candidates = len(candidates)
-        if total_candidates > 0:
-            # Binance Futures REST REQUEST_WEIGHT limit: 2400/min.
-            # Klines(limit=1) weight=1; we reserve part of budget for other jobs and keep a conservative cap.
-            min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
-            per_worker_rpm = max(1.0, 60.0 / min_interval)  # each request here costs weight=1
-            workers_by_budget = max(1, int(self.leaderboard_weight_budget_per_minute // per_worker_rpm))
-            worker_count = min(total_candidates, self.leaderboard_kline_workers, workers_by_budget)
-            estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
-            estimated_total_weight = 1 + 40 + total_candidates  # exchangeInfo + 24hr ticker + per-symbol klines
-            logger.info(
-                "晨间涨幅榜并发计划: "
-                f"workers={worker_count}, "
-                f"min_interval={min_interval:.2f}s, "
-                f"budget={self.leaderboard_weight_budget_per_minute}/min, "
-                f"est_peak={estimated_peak_weight_per_min}/min, "
-                f"est_total_weight={estimated_total_weight}"
-            )
-
-            thread_local = threading.local()
-
-            def _kline_task(item: dict):
-                if self._is_api_cooldown_active(source='涨幅榜-逐币种计算'):
-                    return item, None
-                worker_client = getattr(thread_local, "client", None)
-                if worker_client is None:
-                    worker_client = self.processor._create_worker_client()
-                    thread_local.client = worker_client
-                open_price = self.processor.get_price_change_from_utc_start(
-                    symbol=item['symbol'],
-                    timestamp=midnight_utc_ms,
-                    client=worker_client
-                )
-                return item, open_price
-
-            processed = 0
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [executor.submit(_kline_task, item) for item in candidates]
-                for future in as_completed(futures):
-                    processed += 1
-                    try:
-                        item, open_price = future.result()
-                    except Exception as exc:
-                        logger.warning(f"涨幅榜逐币种计算异常: {exc}")
-                        if processed % progress_step == 0 or processed == total_candidates:
-                            logger.info(
-                                "晨间涨幅榜进度: "
-                                f"{processed}/{total_candidates}, "
-                                f"effective={len(leaderboard)}, "
-                                f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                            )
-                        continue
-
-                    if open_price is not None and open_price > 0:
-                        pct_change = (item['last_price'] / open_price - 1) * 100
-                        leaderboard.append({
-                            'symbol': item['symbol'],
-                            'change': pct_change,
-                            'volume': item['quote_volume'],
-                            'last_price': item['last_price'],
-                        })
-
-                    if processed % progress_step == 0 or processed == total_candidates:
-                        logger.info(
-                            "晨间涨幅榜进度: "
-                            f"{processed}/{total_candidates}, "
-                            f"effective={len(leaderboard)}, "
-                            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                        )
-
-        leaderboard.sort(key=lambda x: x['change'], reverse=True)
-        top_list = leaderboard[:self.leaderboard_top_n]
-        losers_list = sorted(leaderboard, key=lambda x: x['change'])[:self.leaderboard_top_n]
-
-        snapshot = {
-            "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
-            "snapshot_time": datetime.now(UTC8).strftime('%Y-%m-%d %H:%M:%S'),
-            "window_start_utc": midnight_utc.strftime('%Y-%m-%d %H:%M:%S'),
-            "candidates": len(candidates),
-            "effective": len(leaderboard),
-            "top": len(top_list),
-            "rows": top_list,
-            "losers_rows": losers_list,
-            "all_rows": leaderboard,
-        }
-        logger.info(
-            "晨间涨幅榜快照构建完成: "
-            f"candidates={snapshot['candidates']}, "
-            f"effective={snapshot['effective']}, "
-            f"top={snapshot['top']}, "
-            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-        )
-        return snapshot
+        return build_top_gainers_snapshot(self, UTC8)
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
         """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
@@ -749,7 +622,7 @@ class TradeDataScheduler:
             return
 
         try:
-            self.db.save_leaderboard_snapshot(result)
+            self.snapshot_repo.save_leaderboard_snapshot(result)
             logger.info(
                 f"涨幅榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
             )
@@ -757,7 +630,7 @@ class TradeDataScheduler:
             logger.error(f"保存涨幅榜快照失败: {e}")
 
         try:
-            metrics_payload = self.db.upsert_leaderboard_daily_metrics_for_date(
+            metrics_payload = self.snapshot_repo.upsert_leaderboard_daily_metrics_for_date(
                 str(result.get("snapshot_date"))
             )
             if metrics_payload:
@@ -819,178 +692,15 @@ class TradeDataScheduler:
         weight_budget_per_minute: int,
         label: str
     ):
-        """构建反弹幅度榜快照（不处理锁与冷却）。"""
-        stage_started_at = time.perf_counter()
-        now_utc = datetime.now(timezone.utc)
-        window_start_utc = now_utc - timedelta(days=window_days)
-
-        exchange_info = self.processor.get_exchange_info(client=self.processor.client)
-        if not exchange_info or 'symbols' not in exchange_info:
-            raise RuntimeError("无法获取 exchangeInfo")
-
-        usdt_perpetual_symbols = {
-            item.get('symbol')
-            for item in exchange_info.get('symbols', [])
-            if (
-                item.get('contractType') == 'PERPETUAL'
-                and item.get('quoteAsset') == 'USDT'
-                and str(item.get('status', '')).upper() == 'TRADING'
-            )
-        }
-        if not usdt_perpetual_symbols:
-            raise RuntimeError("无可用USDT永续交易对")
-
-        ticker_data = self.processor.client.public_get('/fapi/v1/ticker/price')
-        if not ticker_data:
-            raise RuntimeError("无法获取 ticker/price")
-        if isinstance(ticker_data, dict):
-            ticker_data = [ticker_data]
-
-        candidates = []
-        for item in ticker_data:
-            symbol = item.get('symbol')
-            if not symbol or symbol not in usdt_perpetual_symbols:
-                continue
-            try:
-                current_price = float(item.get('price', 0.0))
-            except (TypeError, ValueError):
-                continue
-            if current_price <= 0:
-                continue
-            candidates.append({
-                'symbol': symbol,
-                'current_price': current_price,
-            })
-
-        # 稳定排序，确保同等条件下输出一致
-        candidates.sort(key=lambda x: x['symbol'])
-        logger.info(
-            f"{label}候选统计: "
-            f"candidates={len(candidates)}, "
-            f"top_n={top_n}"
+        return build_rebound_snapshot(
+            self,
+            utc8=UTC8,
+            window_days=window_days,
+            top_n=top_n,
+            kline_workers=kline_workers,
+            weight_budget_per_minute=weight_budget_per_minute,
+            label=label,
         )
-
-        rebound_rows = []
-        progress_step = 20
-        total_candidates = len(candidates)
-        if total_candidates > 0:
-            min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
-            per_worker_rpm = max(1.0, 60.0 / min_interval)
-            workers_by_budget = max(1, int(weight_budget_per_minute // per_worker_rpm))
-            worker_count = min(total_candidates, kline_workers, workers_by_budget)
-            estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
-            estimated_total_weight = 1 + 1 + total_candidates  # exchangeInfo + ticker/price + per-symbol klines
-            logger.info(
-                f"{label}并发计划: "
-                f"workers={worker_count}, "
-                f"min_interval={min_interval:.2f}s, "
-                f"budget={weight_budget_per_minute}/min, "
-                f"est_peak={estimated_peak_weight_per_min}/min, "
-                f"est_total_weight={estimated_total_weight}"
-            )
-
-            thread_local = threading.local()
-            metric_field = f"rebound_{window_days}d_pct"
-            low_field = f"low_{window_days}d"
-            low_time_field = f"low_{window_days}d_at_utc"
-            kline_limit = max(14, int(window_days))
-
-            def _kline_task(item: dict):
-                if self._is_api_cooldown_active(source=f'{label}-逐币种计算'):
-                    return item, None
-
-                worker_client = getattr(thread_local, "client", None)
-                if worker_client is None:
-                    worker_client = self.processor._create_worker_client()
-                    thread_local.client = worker_client
-
-                try:
-                    klines = worker_client.public_get('/fapi/v1/klines', {
-                        'symbol': item['symbol'],
-                        'interval': '1d',
-                        'limit': kline_limit
-                    }) or []
-                except Exception:
-                    return item, None
-
-                lows = []
-                for kline in klines:
-                    if not isinstance(kline, list) or len(kline) < 4:
-                        continue
-                    try:
-                        low_price = float(kline[3])
-                        open_time = int(kline[0])
-                    except (TypeError, ValueError):
-                        continue
-                    if low_price <= 0:
-                        continue
-                    lows.append((low_price, open_time))
-
-                if not lows:
-                    return item, None
-
-                low_price, low_ts = min(lows, key=lambda entry: entry[0])
-                rebound_pct = (item['current_price'] / low_price - 1.0) * 100.0
-                low_at_utc = datetime.fromtimestamp(
-                    low_ts / 1000, tz=timezone.utc
-                ).strftime('%Y-%m-%d %H:%M:%S')
-                return item, {
-                    low_field: low_price,
-                    low_time_field: low_at_utc,
-                    metric_field: rebound_pct,
-                }
-
-            processed = 0
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [executor.submit(_kline_task, item) for item in candidates]
-                for future in as_completed(futures):
-                    processed += 1
-                    try:
-                        item, payload = future.result()
-                    except Exception as exc:
-                        logger.warning(f"{label}逐币种计算异常: {exc}")
-                        payload = None
-                        item = None
-
-                    if item and payload:
-                        rebound_rows.append({
-                            'symbol': item['symbol'],
-                            'current_price': item['current_price'],
-                            low_field: payload[low_field],
-                            low_time_field: payload[low_time_field],
-                            metric_field: payload[metric_field],
-                        })
-
-                    if processed % progress_step == 0 or processed == total_candidates:
-                        logger.info(
-                            f"{label}进度: "
-                            f"{processed}/{total_candidates}, "
-                            f"effective={len(rebound_rows)}, "
-                            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                        )
-
-        metric_field = f"rebound_{window_days}d_pct"
-        rebound_rows.sort(key=lambda x: x[metric_field], reverse=True)
-        top_list = rebound_rows[:top_n]
-
-        snapshot = {
-            "snapshot_date": datetime.now(UTC8).strftime('%Y-%m-%d'),
-            "snapshot_time": datetime.now(UTC8).strftime('%Y-%m-%d %H:%M:%S'),
-            "window_start_utc": window_start_utc.strftime('%Y-%m-%d %H:%M:%S'),
-            "candidates": len(candidates),
-            "effective": len(rebound_rows),
-            "top": len(top_list),
-            "rows": top_list,
-            "all_rows": rebound_rows,
-        }
-        logger.info(
-            f"{label}快照构建完成: "
-            f"candidates={snapshot['candidates']}, "
-            f"effective={snapshot['effective']}, "
-            f"top={snapshot['top']}, "
-            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-        )
-        return snapshot
 
     def _build_rebound_7d_snapshot(self):
         """构建14D反弹幅度榜快照（兼容历史函数名）。"""
@@ -1065,7 +775,7 @@ class TradeDataScheduler:
             return
 
         try:
-            self.db.save_rebound_7d_snapshot(result)
+            self.snapshot_repo.save_rebound_7d_snapshot(result)
             logger.info(
                 f"14D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
             )
@@ -1120,7 +830,7 @@ class TradeDataScheduler:
             return
 
         try:
-            self.db.save_rebound_30d_snapshot(result)
+            self.snapshot_repo.save_rebound_30d_snapshot(result)
             logger.info(
                 f"30D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
             )
@@ -1175,7 +885,7 @@ class TradeDataScheduler:
             return
 
         try:
-            self.db.save_rebound_60d_snapshot(result)
+            self.snapshot_repo.save_rebound_60d_snapshot(result)
             logger.info(
                 f"60D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
             )
@@ -1220,7 +930,7 @@ class TradeDataScheduler:
 
                         # --- 通过 Binance income API 直接同步出入金 ---
                         try:
-                            latest_event_time_ms = self.db.get_latest_transfer_event_time()
+                            latest_event_time_ms = self.sync_repo.get_latest_transfer_event_time()
                             if latest_event_time_ms is None:
                                 lookback_days_raw = os.getenv('TRANSFER_SYNC_LOOKBACK_DAYS', '90')
                                 try:
@@ -1245,7 +955,7 @@ class TradeDataScheduler:
 
                             inserted_count = 0
                             for row in transfer_rows:
-                                inserted = self.db.save_transfer_income(
+                                inserted = self.sync_repo.save_transfer_income(
                                     amount=row['amount'],
                                     event_time=row['event_time_ms'],
                                     asset=row.get('asset') or 'USDT',
@@ -1265,7 +975,7 @@ class TradeDataScheduler:
                             logger.warning(f"出入金同步出错: {e}")
 
                         # 保存当前状态
-                        self.db.save_balance_history(current_margin, current_wallet)
+                        self.trade_repo.save_balance_history(current_margin, current_wallet)
                         logger.info(f"余额已更新: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
                     else:
                         logger.warning("获取余额失败，balance为 None")

@@ -32,8 +32,11 @@ class Database:
 
     def _get_connection(self):
         """获取数据库连接"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row  # 支持字典访问
+        conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA temp_store=MEMORY;")
         return conn
 
     @staticmethod
@@ -264,6 +267,14 @@ class Database:
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_open_positions_symbol ON open_positions(symbol)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_profit_alerted_entry
+            ON open_positions(profit_alerted, entry_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_alerted_last_alert
+            ON open_positions(alerted, last_alert_time)
         """)
 
         # 检查是否需要迁移 alerted 列
@@ -592,62 +603,69 @@ class Database:
                 # 但既然是overwrite模式且通常用于全量同步，按时间删是最安全的
                 pass
 
-        inserted_count = 0
-        updated_count = 0
+        upsert_rows = []
+        for row in df.itertuples(index=False):
+            upsert_rows.append(
+                (
+                    int(row.No),
+                    row.Date,
+                    row.Entry_Time,
+                    row.Exit_Time,
+                    row.Holding_Time,
+                    row.Symbol,
+                    row.Side,
+                    float(row.Price_Change_Pct),
+                    float(row.Entry_Amount),
+                    float(row.Entry_Price),
+                    float(row.Exit_Price),
+                    float(row.Qty),
+                    float(row.Fees),
+                    float(row.PNL_Net),
+                    row.Close_Type,
+                    row.Return_Rate,
+                    float(row.Open_Price),
+                    float(row.PNL_Before_Fees),
+                    int(row.Entry_Order_ID),
+                    str(row.Exit_Order_ID),
+                )
+            )
 
-        for _, row in df.iterrows():
-            # 检查是否已存在
-            cursor.execute("""
-                SELECT id FROM trades
-                WHERE symbol = ? AND entry_order_id = ? AND exit_order_id = ?
-            """, (row['Symbol'], int(row['Entry_Order_ID']), str(row['Exit_Order_ID'])))
-
-            existing = cursor.fetchone()
-
-            if existing:
-                # 更新现有记录
-                cursor.execute("""
-                    UPDATE trades SET
-                        no = ?, date = ?, entry_time = ?, exit_time = ?,
-                        holding_time = ?, side = ?, price_change_pct = ?,
-                        entry_amount = ?, entry_price = ?, exit_price = ?,
-                        qty = ?, fees = ?, pnl_net = ?, close_type = ?,
-                        return_rate = ?, open_price = ?, pnl_before_fees = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (
-                    int(row['No']), row['Date'], row['Entry_Time'], row['Exit_Time'],
-                    row['Holding_Time'], row['Side'], float(row['Price_Change_Pct']),
-                    float(row['Entry_Amount']), float(row['Entry_Price']), float(row['Exit_Price']),
-                    float(row['Qty']), float(row['Fees']), float(row['PNL_Net']), row['Close_Type'],
-                    row['Return_Rate'], float(row['Open_Price']), float(row['PNL_Before_Fees']),
-                    existing['id']
-                ))
-                updated_count += 1
-            else:
-                # 插入新记录
-                cursor.execute("""
-                    INSERT INTO trades (
-                        no, date, entry_time, exit_time, holding_time, symbol, side,
-                        price_change_pct, entry_amount, entry_price, exit_price, qty,
-                        fees, pnl_net, close_type, return_rate, open_price,
-                        pnl_before_fees, entry_order_id, exit_order_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    int(row['No']), row['Date'], row['Entry_Time'], row['Exit_Time'],
-                    row['Holding_Time'], row['Symbol'], row['Side'], float(row['Price_Change_Pct']),
-                    float(row['Entry_Amount']), float(row['Entry_Price']), float(row['Exit_Price']),
-                    float(row['Qty']), float(row['Fees']), float(row['PNL_Net']), row['Close_Type'],
-                    row['Return_Rate'], float(row['Open_Price']), float(row['PNL_Before_Fees']),
-                    int(row['Entry_Order_ID']), str(row['Exit_Order_ID'])
-                ))
-                inserted_count += 1
+        cursor.executemany(
+            """
+            INSERT INTO trades (
+                no, date, entry_time, exit_time, holding_time, symbol, side,
+                price_change_pct, entry_amount, entry_price, exit_price, qty,
+                fees, pnl_net, close_type, return_rate, open_price,
+                pnl_before_fees, entry_order_id, exit_order_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(symbol, entry_order_id, exit_order_id) DO UPDATE SET
+                no = excluded.no,
+                date = excluded.date,
+                entry_time = excluded.entry_time,
+                exit_time = excluded.exit_time,
+                holding_time = excluded.holding_time,
+                side = excluded.side,
+                price_change_pct = excluded.price_change_pct,
+                entry_amount = excluded.entry_amount,
+                entry_price = excluded.entry_price,
+                exit_price = excluded.exit_price,
+                qty = excluded.qty,
+                fees = excluded.fees,
+                pnl_net = excluded.pnl_net,
+                close_type = excluded.close_type,
+                return_rate = excluded.return_rate,
+                open_price = excluded.open_price,
+                pnl_before_fees = excluded.pnl_before_fees,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            upsert_rows,
+        )
 
         conn.commit()
         conn.close()
 
-        logger.info(f"数据库操作完成: 新增 {inserted_count} 条, 更新 {updated_count} 条")
-        return inserted_count + updated_count
+        logger.info(f"数据库操作完成: 批量写入 {len(upsert_rows)} 条")
+        return len(upsert_rows)
 
     def get_all_trades(self, limit: int = None) -> pd.DataFrame:
         """
@@ -849,44 +867,6 @@ class Database:
         if row:
             return dict(row)
         return {}
-
-    def log_sync_run(
-        self,
-        run_type: str,
-        status: str,
-        mode: Optional[str] = None,
-        symbol_count: int = 0,
-        rows_count: int = 0,
-        trades_saved: int = 0,
-        open_saved: int = 0,
-        elapsed_ms: int = 0,
-        error_message: Optional[str] = None,
-    ):
-        """写入同步运行审计日志"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO sync_run_log (
-                run_type, mode, status, symbol_count, rows_count,
-                trades_saved, open_saved, elapsed_ms, error_message
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_type,
-                mode,
-                status,
-                int(symbol_count or 0),
-                int(rows_count or 0),
-                int(trades_saved or 0),
-                int(open_saved or 0),
-                int(elapsed_ms or 0),
-                (error_message or "")[:500],
-            ),
-        )
-        conn.commit()
-        conn.close()
 
     def list_sync_run_logs(self, limit: int = 100) -> List[Dict]:
         """按时间倒序返回最近同步运行记录"""
@@ -1155,17 +1135,6 @@ class Database:
         self.save_trade_summary(summary)
         return summary
 
-    def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
-        """保存新的余额记录"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO balance_history (timestamp, balance, wallet_balance) VALUES (?, ?, ?)",
-            (datetime.utcnow(), balance, wallet_balance)
-        )
-        conn.commit()
-        conn.close()
-
     def save_transfer(self, amount: float, type: str = 'auto', description: str = None):
         """保存出入金记录"""
         conn = self._get_connection()
@@ -1177,63 +1146,6 @@ class Database:
         conn.commit()
         conn.close()
         logger.info(f"已记录出入金: {amount} ({type})")
-
-    def save_transfer_income(
-        self,
-        *,
-        amount: float,
-        event_time: int,
-        asset: str = "USDT",
-        income_type: str = "TRANSFER",
-        source_uid: Optional[str] = None,
-        description: Optional[str] = None
-    ) -> bool:
-        """
-        保存 Binance income 出入金记录（按 source_uid 去重）。
-
-        Returns:
-            bool: True=新增写入，False=已存在(被忽略)
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        # transfers.timestamp 统一使用事件发生时间（UTC）以便和余额曲线准确对齐
-        ts_str = datetime.utcfromtimestamp(event_time / 1000).strftime('%Y-%m-%d %H:%M:%S.%f')
-
-        cursor.execute("""
-            INSERT OR IGNORE INTO transfers (
-                timestamp, amount, type, description, event_time, asset, income_type, source_uid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            ts_str,
-            float(amount),
-            'binance_income',
-            description,
-            int(event_time),
-            str(asset or "USDT"),
-            str(income_type or "TRANSFER"),
-            source_uid
-        ))
-
-        inserted = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-        return inserted
-
-    def get_latest_transfer_event_time(self) -> Optional[int]:
-        """获取 transfers 表中最新的 Binance 事件时间（毫秒）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT MAX(event_time) AS latest_event_time
-            FROM transfers
-            WHERE event_time IS NOT NULL
-        """)
-        row = cursor.fetchone()
-        conn.close()
-        if not row or row['latest_event_time'] is None:
-            return None
-        return int(row['latest_event_time'])
 
     def save_ws_event(self, event_type: str, event_time: int, payload: Dict):
         """保存 websocket 事件记录"""
@@ -1337,142 +1249,6 @@ class Database:
         return results
 
 
-    def save_open_positions(self, positions: List[Dict]) -> int:
-        """
-        保存未平仓订单（全量替换，但保留告警与长期持仓状态）
-
-        Args:
-            positions: 未平仓订单列表
-
-        Returns:
-            int: 保存的记录数
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        # 1. 获取现有记录状态
-        state_map = {}
-        try:
-            # 检查列是否存在
-            cursor.execute("PRAGMA table_info(open_positions)")
-            columns = [info[1] for info in cursor.fetchall()]
-
-            query_cols = ["symbol", "order_id", "alerted"]
-            if 'last_alert_time' in columns:
-                query_cols.append("last_alert_time")
-            if 'profit_alerted' in columns:
-                query_cols.append("profit_alerted")
-            if 'profit_alert_time' in columns:
-                query_cols.append("profit_alert_time")
-            if 'reentry_alerted' in columns:
-                query_cols.append("reentry_alerted")
-            if 'reentry_alert_time' in columns:
-                query_cols.append("reentry_alert_time")
-            if 'is_long_term' in columns:
-                query_cols.append("is_long_term")
-
-            query = f"SELECT {', '.join(query_cols)} FROM open_positions"
-
-            cursor.execute(query)
-            for row in cursor.fetchall():
-                key = f"{row['symbol']}_{row['order_id']}"
-                state_data = {'alerted': row['alerted']}
-                if 'last_alert_time' in columns:
-                    state_data['last_alert_time'] = row['last_alert_time']
-                if 'profit_alerted' in columns:
-                    state_data['profit_alerted'] = row['profit_alerted']
-                if 'profit_alert_time' in columns:
-                    state_data['profit_alert_time'] = row['profit_alert_time']
-                if 'reentry_alerted' in columns:
-                    state_data['reentry_alerted'] = row['reentry_alerted']
-                if 'reentry_alert_time' in columns:
-                    state_data['reentry_alert_time'] = row['reentry_alert_time']
-                if 'is_long_term' in columns:
-                    state_data['is_long_term'] = row['is_long_term']
-                state_map[key] = state_data
-        except Exception as e:
-            logger.warning(f"读取状态失败: {e}")
-
-        # 2. 清空现有未平仓记录
-        cursor.execute("DELETE FROM open_positions")
-
-        # 3. 插入新记录
-        for pos in positions:
-            key = f"{pos['symbol']}_{pos['order_id']}"
-            saved_state = state_map.get(key, {})
-            is_alerted = saved_state.get('alerted', 0)
-            last_alert_time = saved_state.get('last_alert_time', None)
-            profit_alerted = saved_state.get('profit_alerted', 0)
-            profit_alert_time = saved_state.get('profit_alert_time', None)
-            reentry_alerted = saved_state.get('reentry_alerted', 0)
-            reentry_alert_time = saved_state.get('reentry_alert_time', None)
-            is_long_term = saved_state.get('is_long_term', 0)
-
-            cursor.execute("""
-                INSERT INTO open_positions (
-                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id,
-                    alerted, last_alert_time, profit_alerted, profit_alert_time,
-                    reentry_alerted, reentry_alert_time, is_long_term
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                pos['date'],
-                pos['symbol'],
-                pos['side'],
-                pos['entry_time'],
-                pos['entry_price'],
-                pos['qty'],
-                pos['entry_amount'],
-                pos['order_id'],
-                is_alerted,
-                last_alert_time,
-                profit_alerted,
-                profit_alert_time,
-                reentry_alerted,
-                reentry_alert_time,
-                is_long_term
-            ))
-
-        conn.commit()
-        conn.close()
-
-        return len(positions)
-
-    def set_position_alerted(self, symbol: str, order_id: int):
-        """标记订单为已通知，并更新最后通知时间"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE open_positions
-            SET alerted = 1, last_alert_time = CURRENT_TIMESTAMP
-            WHERE symbol = ? AND order_id = ?
-        """, (symbol, order_id))
-        conn.commit()
-        conn.close()
-
-    def set_position_profit_alerted(self, symbol: str, order_id: int):
-        """标记订单为盈利提醒已发送，并更新提醒时间"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE open_positions
-            SET profit_alerted = 1, profit_alert_time = CURRENT_TIMESTAMP
-            WHERE symbol = ? AND order_id = ?
-        """, (symbol, order_id))
-        conn.commit()
-        conn.close()
-
-    def set_position_reentry_alerted(self, symbol: str, order_id: int):
-        """标记订单为同币重复开仓提醒已发送，并更新提醒时间。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE open_positions
-            SET reentry_alerted = 1, reentry_alert_time = CURRENT_TIMESTAMP
-            WHERE symbol = ? AND order_id = ?
-        """, (symbol, order_id))
-        conn.commit()
-        conn.close()
-
     def set_position_long_term(self, symbol: str, order_id: int, is_long_term: bool):
         """设置持仓是否为长期持仓"""
         conn = self._get_connection()
@@ -1484,22 +1260,6 @@ class Database:
         """, (1 if is_long_term else 0, symbol, order_id))
         conn.commit()
         conn.close()
-
-    def get_open_positions(self) -> List[Dict]:
-        """获取所有未平仓订单"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        if os.getenv("DB_QUERY_PLAN_DEBUG", "0").lower() in ("1", "true", "yes"):
-            cursor.execute("EXPLAIN QUERY PLAN SELECT * FROM open_positions ORDER BY entry_time DESC")
-            plan_rows = cursor.fetchall()
-            logger.info(
-                "open_positions query plan: %s",
-                [str(row["detail"]) for row in plan_rows if "detail" in row.keys()],
-            )
-        cursor.execute("SELECT * FROM open_positions ORDER BY entry_time DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
 
     def add_watch_note(self, symbol: str) -> Dict:
         """新增明日观察记录（自动写入北京时间）"""
@@ -1610,860 +1370,3 @@ class Database:
         row = cursor.fetchone()
         conn.close()
         return float(row['monthly_pnl']) if row else 0.0
-
-    def get_balance_history(self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict]:
-        """
-        获取余额历史记录，可按时间范围和限制数量过滤
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        query = "SELECT timestamp, balance, wallet_balance FROM balance_history WHERE 1=1"
-        params = []
-
-        if start_time:
-            query += " AND timestamp >= ?"
-            params.append(start_time.isoformat().replace('T', ' '))
-        if end_time:
-            query += " AND timestamp <= ?"
-            params.append(end_time.isoformat().replace('T', ' '))
-
-        query += " ORDER BY timestamp DESC" # 先倒序获取，再反转，确保获取到最新的数据
-
-        if limit:
-            query += " LIMIT ?"
-            params.append(limit)
-
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-        # 返回按时间升序排列
-        return [dict(row) for row in reversed(rows)]
-
-    def save_noon_loss_snapshot(self, snapshot: Dict) -> None:
-        """保存/覆盖某天午间浮亏快照（按 snapshot_date 唯一）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO noon_loss_snapshots (
-                snapshot_date, snapshot_time, loss_count, total_stop_loss,
-                pct_of_balance, balance, rows_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(snapshot_date) DO UPDATE SET
-                snapshot_time = excluded.snapshot_time,
-                loss_count = excluded.loss_count,
-                total_stop_loss = excluded.total_stop_loss,
-                pct_of_balance = excluded.pct_of_balance,
-                balance = excluded.balance,
-                rows_json = excluded.rows_json,
-                updated_at = CURRENT_TIMESTAMP
-        """, (
-            str(snapshot.get("snapshot_date")),
-            str(snapshot.get("snapshot_time")),
-            int(snapshot.get("loss_count", 0)),
-            float(snapshot.get("total_stop_loss", 0.0)),
-            float(snapshot.get("pct_of_balance", 0.0)),
-            float(snapshot.get("balance", 0.0)),
-            rows_json
-        ))
-        conn.commit()
-        conn.close()
-
-    def _row_to_noon_loss_snapshot(self, row: sqlite3.Row) -> Dict:
-        data = dict(row)
-        rows_json = data.get("rows_json")
-        try:
-            data["rows"] = json.loads(rows_json) if rows_json else []
-        except Exception:
-            data["rows"] = []
-        data.pop("rows_json", None)
-        return data
-
-    def get_noon_loss_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        """按日期读取午间浮亏快照，snapshot_date 格式 YYYY-MM-DD。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT snapshot_date, snapshot_time, loss_count, total_stop_loss, pct_of_balance, balance, rows_json
-            FROM noon_loss_snapshots
-            WHERE snapshot_date = ?
-            LIMIT 1
-        """, (snapshot_date,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_noon_loss_snapshot(row)
-
-    def get_latest_noon_loss_snapshot(self) -> Optional[Dict]:
-        """读取最新一条午间浮亏快照（不晚于今天UTC+8）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute("""
-            SELECT snapshot_date, snapshot_time, loss_count, total_stop_loss, pct_of_balance, balance, rows_json
-            FROM noon_loss_snapshots
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, snapshot_time DESC
-            LIMIT 1
-        """, (today,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_noon_loss_snapshot(row)
-
-    def save_noon_loss_review_snapshot(self, snapshot: Dict) -> None:
-        """保存/覆盖某天午间浮亏复盘快照（按 snapshot_date 唯一）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO noon_loss_review_snapshots (
-                snapshot_date, review_time, noon_loss_count, not_cut_count,
-                noon_cut_loss_total, hold_loss_total, delta_loss_total,
-                pct_of_balance, balance, rows_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(snapshot_date) DO UPDATE SET
-                review_time = excluded.review_time,
-                noon_loss_count = excluded.noon_loss_count,
-                not_cut_count = excluded.not_cut_count,
-                noon_cut_loss_total = excluded.noon_cut_loss_total,
-                hold_loss_total = excluded.hold_loss_total,
-                delta_loss_total = excluded.delta_loss_total,
-                pct_of_balance = excluded.pct_of_balance,
-                balance = excluded.balance,
-                rows_json = excluded.rows_json,
-                updated_at = CURRENT_TIMESTAMP
-        """, (
-            str(snapshot.get("snapshot_date")),
-            str(snapshot.get("review_time")),
-            int(snapshot.get("noon_loss_count", 0)),
-            int(snapshot.get("not_cut_count", 0)),
-            float(snapshot.get("noon_cut_loss_total", 0.0)),
-            float(snapshot.get("hold_loss_total", 0.0)),
-            float(snapshot.get("delta_loss_total", 0.0)),
-            float(snapshot.get("pct_of_balance", 0.0)),
-            float(snapshot.get("balance", 0.0)),
-            rows_json,
-        ))
-        conn.commit()
-        conn.close()
-
-    def _row_to_noon_loss_review_snapshot(self, row: sqlite3.Row) -> Dict:
-        data = dict(row)
-        rows_json = data.get("rows_json")
-        try:
-            data["rows"] = json.loads(rows_json) if rows_json else []
-        except Exception:
-            data["rows"] = []
-        data.pop("rows_json", None)
-        return data
-
-    def get_noon_loss_review_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        """按日期读取午间浮亏复盘快照，snapshot_date 格式 YYYY-MM-DD。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT
-                snapshot_date, review_time, noon_loss_count, not_cut_count,
-                noon_cut_loss_total, hold_loss_total, delta_loss_total,
-                pct_of_balance, balance, rows_json
-            FROM noon_loss_review_snapshots
-            WHERE snapshot_date = ?
-            LIMIT 1
-        """, (snapshot_date,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_noon_loss_review_snapshot(row)
-
-    def get_latest_noon_loss_review_snapshot(self) -> Optional[Dict]:
-        """读取最新一条午间浮亏复盘快照（不晚于今天UTC+8）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute("""
-            SELECT
-                snapshot_date, review_time, noon_loss_count, not_cut_count,
-                noon_cut_loss_total, hold_loss_total, delta_loss_total,
-                pct_of_balance, balance, rows_json
-            FROM noon_loss_review_snapshots
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, review_time DESC
-            LIMIT 1
-        """, (today,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_noon_loss_review_snapshot(row)
-
-    def list_noon_loss_review_history(self, limit: int = 7) -> List[Dict]:
-        """按日期倒序返回午间与夜间复盘历史对比。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute("""
-            WITH all_dates AS (
-                SELECT snapshot_date FROM noon_loss_snapshots
-                UNION
-                SELECT snapshot_date FROM noon_loss_review_snapshots
-            )
-            SELECT
-                d.snapshot_date,
-                n.snapshot_time AS noon_snapshot_time,
-                COALESCE(n.loss_count, 0) AS noon_loss_count,
-                COALESCE(r.noon_cut_loss_total, -COALESCE(n.total_stop_loss, 0.0)) AS noon_cut_loss_total,
-                COALESCE(n.pct_of_balance, 0.0) AS noon_pct_of_balance,
-                r.review_time,
-                COALESCE(r.not_cut_count, 0) AS not_cut_count,
-                COALESCE(r.hold_loss_total, 0.0) AS hold_loss_total,
-                COALESCE(r.delta_loss_total, 0.0) AS delta_loss_total,
-                COALESCE(r.pct_of_balance, 0.0) AS review_pct_of_balance,
-                r.rows_json
-            FROM all_dates d
-            LEFT JOIN noon_loss_snapshots n ON n.snapshot_date = d.snapshot_date
-            LEFT JOIN noon_loss_review_snapshots r ON r.snapshot_date = d.snapshot_date
-            WHERE d.snapshot_date <= ?
-            ORDER BY d.snapshot_date DESC
-            LIMIT ?
-        """, (today, int(limit)))
-        rows = cursor.fetchall()
-        conn.close()
-
-        result = []
-        for row in rows:
-            item = dict(row)
-            snapshot_time_dt = self._parse_snapshot_dt(item.get("noon_snapshot_time"))
-            review_time_dt = self._parse_snapshot_dt(item.get("review_time"))
-            # 凌晨先跑出的“空复盘”会早于当天11:50午间快照，这类记录不应覆盖午间展示。
-            review_is_stale = (
-                snapshot_time_dt is not None
-                and review_time_dt is not None
-                and review_time_dt < snapshot_time_dt
-            )
-
-            if review_is_stale:
-                item["review_time"] = None
-                item["not_cut_count"] = 0
-                item["hold_loss_total"] = 0.0
-                item["delta_loss_total"] = 0.0
-                item["review_pct_of_balance"] = 0.0
-                item["noon_cut_loss_total"] = -abs(float(item.get("noon_cut_loss_total", 0.0)))
-
-            rows_json = item.get("rows_json")
-            try:
-                item["rows"] = [] if review_is_stale else (json.loads(rows_json) if rows_json else [])
-            except Exception:
-                item["rows"] = []
-            item.pop("rows_json", None)
-            result.append(item)
-        return result
-
-    def get_noon_loss_review_history_summary(self) -> Dict:
-        """返回复盘历史全量汇总（包含全历史 Delta 累计）。"""
-        rows = self.list_noon_loss_review_history(limit=10000)
-        reviewed_rows = [row for row in rows if row.get("review_time")]
-        delta_sum_all = sum(float(row.get("delta_loss_total") or 0.0) for row in reviewed_rows)
-        return {
-            "reviewed_count_all": len(reviewed_rows),
-            "delta_sum_all": float(delta_sum_all),
-        }
-
-    @staticmethod
-    def _parse_snapshot_dt(value: str | None) -> Optional[datetime]:
-        if not value:
-            return None
-        try:
-            return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
-        except Exception:
-            return None
-
-    def save_leaderboard_snapshot(self, snapshot: Dict) -> None:
-        """保存/覆盖某天的涨幅榜快照（按 snapshot_date 唯一）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
-        losers_rows_json = json.dumps(snapshot.get("losers_rows", []), ensure_ascii=False)
-        all_rows_json = json.dumps(snapshot.get("all_rows", []), ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO leaderboard_snapshots (
-                snapshot_date, snapshot_time, window_start_utc,
-                candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(snapshot_date) DO UPDATE SET
-                snapshot_time = excluded.snapshot_time,
-                window_start_utc = excluded.window_start_utc,
-                candidates = excluded.candidates,
-                effective = excluded.effective,
-                top_count = excluded.top_count,
-                rows_json = excluded.rows_json,
-                losers_rows_json = excluded.losers_rows_json,
-                all_rows_json = excluded.all_rows_json,
-                created_at = CURRENT_TIMESTAMP
-        """, (
-            str(snapshot.get("snapshot_date")),
-            str(snapshot.get("snapshot_time")),
-            str(snapshot.get("window_start_utc", "")),
-            int(snapshot.get("candidates", 0)),
-            int(snapshot.get("effective", 0)),
-            int(snapshot.get("top", 0)),
-            rows_json,
-            losers_rows_json,
-            all_rows_json
-        ))
-        conn.commit()
-        conn.close()
-
-    def _row_to_leaderboard_snapshot(self, row: sqlite3.Row) -> Dict:
-        data = dict(row)
-        rows_json = data.get("rows_json")
-        losers_rows_json = data.get("losers_rows_json")
-        all_rows_json = data.get("all_rows_json")
-        try:
-            data["rows"] = json.loads(rows_json) if rows_json else []
-        except Exception:
-            data["rows"] = []
-        try:
-            data["losers_rows"] = json.loads(losers_rows_json) if losers_rows_json else []
-        except Exception:
-            data["losers_rows"] = []
-        try:
-            data["all_rows"] = json.loads(all_rows_json) if all_rows_json else []
-        except Exception:
-            data["all_rows"] = []
-        data.pop("rows_json", None)
-        data.pop("losers_rows_json", None)
-        data.pop("all_rows_json", None)
-        data["top"] = data.pop("top_count", 0)
-        return data
-
-    def get_latest_leaderboard_snapshot(self) -> Optional[Dict]:
-        """获取最近一条涨幅榜快照。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
-            FROM leaderboard_snapshots
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, snapshot_time DESC
-            LIMIT 1
-        """, (today,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_leaderboard_snapshot(row)
-
-    def get_leaderboard_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        """按日期获取涨幅榜快照，snapshot_date 格式 YYYY-MM-DD。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
-            FROM leaderboard_snapshots
-            WHERE snapshot_date = ?
-            LIMIT 1
-        """, (snapshot_date,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_leaderboard_snapshot(row)
-
-    def list_leaderboard_snapshot_dates(self, limit: int = 90) -> List[str]:
-        """按时间倒序列出已存快照日期。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute("""
-            SELECT snapshot_date
-            FROM leaderboard_snapshots
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, snapshot_time DESC
-            LIMIT ?
-        """, (today, int(limit)))
-        rows = cursor.fetchall()
-        conn.close()
-        return [str(row["snapshot_date"]) for row in rows]
-
-    def get_leaderboard_snapshots_between(self, start_date: str, end_date: str) -> List[Dict]:
-        """获取日期区间内的快照（按 snapshot_date 倒序）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, losers_rows_json, all_rows_json
-            FROM leaderboard_snapshots
-            WHERE snapshot_date >= ? AND snapshot_date <= ?
-            ORDER BY snapshot_date DESC
-        """, (start_date, end_date))
-        rows = cursor.fetchall()
-        conn.close()
-        return [self._row_to_leaderboard_snapshot(row) for row in rows]
-
-    @staticmethod
-    def _lb_safe_float(value) -> Optional[float]:
-        try:
-            num = float(value)
-        except (TypeError, ValueError):
-            return None
-        if num != num:  # NaN
-            return None
-        return num
-
-    def _extract_all_rows(self, snapshot: Dict) -> List[Dict]:
-        all_rows = snapshot.get("all_rows", [])
-        if all_rows:
-            return all_rows
-
-        merged = {}
-        for row in snapshot.get("rows", []) + snapshot.get("losers_rows", []):
-            symbol = str(row.get("symbol", "")).upper()
-            if not symbol:
-                continue
-            merged[symbol] = row
-        return list(merged.values())
-
-    def _build_symbol_maps(self, snapshot: Dict) -> tuple[Dict[str, float], Dict[str, float]]:
-        change_map: Dict[str, float] = {}
-        price_map: Dict[str, float] = {}
-        for row in self._extract_all_rows(snapshot):
-            symbol = str(row.get("symbol", "")).upper()
-            if not symbol:
-                continue
-
-            change_val = self._lb_safe_float(row.get("change"))
-            if change_val is not None:
-                change_map[symbol] = change_val
-
-            price_val = self._lb_safe_float(row.get("last_price"))
-            if price_val is None:
-                price_val = self._lb_safe_float(row.get("price"))
-            if price_val is not None and price_val > 0:
-                price_map[symbol] = price_val
-        return change_map, price_map
-
-    def build_leaderboard_daily_metrics(
-        self,
-        snapshot_date: str,
-        drop_threshold_pct: float = -10.0,
-    ) -> Optional[Dict]:
-        """基于已保存快照，计算某天的三个指标。"""
-        current_snapshot = self.get_leaderboard_snapshot_by_date(snapshot_date)
-        if not current_snapshot:
-            return None
-
-        try:
-            snap_date = datetime.strptime(snapshot_date, "%Y-%m-%d").date()
-        except Exception:
-            return None
-
-        prev_date = (snap_date - timedelta(days=1)).strftime("%Y-%m-%d")
-        prev2_date = (snap_date - timedelta(days=2)).strftime("%Y-%m-%d")
-        prev_snapshot = self.get_leaderboard_snapshot_by_date(prev_date)
-        prev2_snapshot = self.get_leaderboard_snapshot_by_date(prev2_date)
-
-        prev_rows = prev_snapshot.get("rows", []) if prev_snapshot else []
-        current_losers_rows = current_snapshot.get("losers_rows", [])
-
-        # 指标1：前一日涨幅Top10进入次日跌幅Top10概率
-        prev_rank_map = {}
-        for idx, row in enumerate(prev_rows, start=1):
-            symbol = str(row.get("symbol", "")).upper()
-            if symbol:
-                prev_rank_map[symbol] = idx
-
-        metric1_hits_details = []
-        for idx, row in enumerate(current_losers_rows, start=1):
-            symbol = str(row.get("symbol", "")).upper()
-            if not symbol:
-                continue
-            prev_rank = prev_rank_map.get(symbol)
-            if prev_rank is None:
-                continue
-            metric1_hits_details.append({
-                "symbol": symbol,
-                "current_loser_rank": idx,
-                "prev_gainer_rank": prev_rank,
-            })
-
-        metric1_hits = len(metric1_hits_details)
-        metric1_base_count = len(prev_rows)
-        metric1_prob = None
-        if metric1_base_count > 0:
-            metric1_prob = round(metric1_hits * 100.0 / metric1_base_count, 2)
-        metric1 = {
-            "prev_snapshot_date": prev_snapshot.get("snapshot_date") if prev_snapshot else None,
-            "hits": metric1_hits,
-            "base_count": metric1_base_count,
-            "probability_pct": metric1_prob,
-            "symbols": [item["symbol"] for item in metric1_hits_details],
-            "details": metric1_hits_details,
-        }
-
-        # 当前快照symbol映射（change/price）
-        current_change_map, current_price_map = self._build_symbol_maps(current_snapshot)
-
-        # 指标2：前一日涨幅Top10在次日<-10%的概率
-        metric2_details = []
-        metric2_hit_symbols = []
-        for idx, row in enumerate(prev_rows, start=1):
-            symbol = str(row.get("symbol", "")).upper()
-            if not symbol:
-                continue
-            next_change = current_change_map.get(symbol)
-            prev_change = self._lb_safe_float(row.get("change"))
-            is_hit = next_change is not None and next_change <= drop_threshold_pct
-            metric2_details.append({
-                "prev_rank": idx,
-                "symbol": symbol,
-                "prev_change_pct": prev_change,
-                "next_change_pct": next_change,
-                "is_hit": is_hit,
-            })
-            if is_hit:
-                metric2_hit_symbols.append({
-                    "symbol": symbol,
-                    "next_change_pct": round(next_change, 2),
-                })
-
-        metric2_evaluated_count = sum(
-            1 for item in metric2_details if item.get("next_change_pct") is not None
-        )
-        metric2_hits = sum(1 for item in metric2_details if item.get("is_hit"))
-        metric2_prob = None
-        if metric2_evaluated_count > 0:
-            metric2_prob = round(metric2_hits * 100.0 / metric2_evaluated_count, 2)
-        metric2 = {
-            "base_snapshot_date": prev_snapshot.get("snapshot_date") if prev_snapshot else None,
-            "target_snapshot_date": current_snapshot.get("snapshot_date"),
-            "threshold_pct": drop_threshold_pct,
-            "sample_size": len(metric2_details),
-            "evaluated_count": metric2_evaluated_count,
-            "hits": metric2_hits,
-            "probability_pct": metric2_prob,
-            "hit_symbols": metric2_hit_symbols,
-            "details": metric2_details,
-        }
-
-        # 指标3：前两日涨幅Top10在48h后的涨跌幅
-        prev2_rows = prev2_snapshot.get("rows", []) if prev2_snapshot else []
-        metric3_details = []
-        metric3_changes = []
-        for idx, row in enumerate(prev2_rows, start=1):
-            symbol = str(row.get("symbol", "")).upper()
-            if not symbol:
-                continue
-
-            entry_price = self._lb_safe_float(row.get("last_price"))
-            if entry_price is None:
-                entry_price = self._lb_safe_float(row.get("price"))
-            current_price = current_price_map.get(symbol)
-
-            change_pct = None
-            if (
-                entry_price is not None and entry_price > 0
-                and current_price is not None and current_price > 0
-            ):
-                change_pct = (current_price / entry_price - 1.0) * 100.0
-                metric3_changes.append(change_pct)
-
-            metric3_details.append({
-                "prev_rank": idx,
-                "symbol": symbol,
-                "entry_price": entry_price,
-                "current_price": current_price,
-                "change_pct": None if change_pct is None else round(change_pct, 4),
-            })
-
-        metric3_evaluated_count = len(metric3_changes)
-        dist_lt_neg10 = 0
-        dist_mid = 0
-        dist_gt_pos10 = 0
-        if metric3_evaluated_count > 0:
-            dist_lt_neg10 = sum(1 for val in metric3_changes if val < -10.0)
-            dist_gt_pos10 = sum(1 for val in metric3_changes if val > 10.0)
-            dist_mid = metric3_evaluated_count - dist_lt_neg10 - dist_gt_pos10
-
-        metric3 = {
-            "base_snapshot_date": prev2_snapshot.get("snapshot_date") if prev2_snapshot else None,
-            "target_snapshot_date": current_snapshot.get("snapshot_date"),
-            "hold_hours": 48,
-            "sample_size": len(metric3_details),
-            "evaluated_count": metric3_evaluated_count,
-            "distribution": {
-                "lt_neg10": dist_lt_neg10,
-                "mid": dist_mid,
-                "gt_pos10": dist_gt_pos10,
-            },
-            "details": metric3_details,
-        }
-
-        return {
-            "snapshot_date": snapshot_date,
-            "metric1": metric1,
-            "metric2": metric2,
-            "metric3": metric3,
-        }
-
-    def save_leaderboard_daily_metrics(self, payload: Dict) -> None:
-        """保存某天的三指标计算结果。"""
-        snapshot_date = str(payload.get("snapshot_date", ""))
-        if not snapshot_date:
-            return
-
-        metric1_json = json.dumps(payload.get("metric1", {}), ensure_ascii=False)
-        metric2_json = json.dumps(payload.get("metric2", {}), ensure_ascii=False)
-        metric3_json = json.dumps(payload.get("metric3", {}), ensure_ascii=False)
-
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO leaderboard_daily_metrics (
-                snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(snapshot_date) DO UPDATE SET
-                metric1_json = excluded.metric1_json,
-                metric2_json = excluded.metric2_json,
-                metric3_json = excluded.metric3_json,
-                updated_at = CURRENT_TIMESTAMP
-        """, (snapshot_date, metric1_json, metric2_json, metric3_json))
-        conn.commit()
-        conn.close()
-
-    def upsert_leaderboard_daily_metrics_for_date(self, snapshot_date: str) -> Optional[Dict]:
-        """计算并保存某天三指标。"""
-        payload = self.build_leaderboard_daily_metrics(snapshot_date=snapshot_date)
-        if not payload:
-            return None
-        self.save_leaderboard_daily_metrics(payload)
-        return payload
-
-    def upsert_leaderboard_daily_metrics_for_dates(self, dates: List[str]) -> Dict[str, Dict]:
-        """批量计算并保存多天三指标。"""
-        result: Dict[str, Dict] = {}
-        for d in dates:
-            payload = self.upsert_leaderboard_daily_metrics_for_date(str(d))
-            if payload:
-                result[str(d)] = payload
-        return result
-
-    def get_leaderboard_daily_metrics(self, snapshot_date: str) -> Optional[Dict]:
-        """读取某天三指标。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
-            FROM leaderboard_daily_metrics
-            WHERE snapshot_date = ?
-            LIMIT 1
-        """, (snapshot_date,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-
-        data = dict(row)
-        for key in ("metric1_json", "metric2_json", "metric3_json"):
-            try:
-                data[key.replace("_json", "")] = json.loads(data.get(key) or "{}")
-            except Exception:
-                data[key.replace("_json", "")] = {}
-            data.pop(key, None)
-        return data
-
-    def list_leaderboard_daily_metrics(self, limit: int = 90) -> List[Dict]:
-        """按日期倒序列出三指标历史。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
-            FROM leaderboard_daily_metrics
-            ORDER BY snapshot_date DESC
-            LIMIT ?
-        """, (int(limit),))
-        rows = cursor.fetchall()
-        conn.close()
-
-        result = []
-        for row in rows:
-            item = dict(row)
-            for key in ("metric1_json", "metric2_json", "metric3_json"):
-                try:
-                    item[key.replace("_json", "")] = json.loads(item.get(key) or "{}")
-                except Exception:
-                    item[key.replace("_json", "")] = {}
-                item.pop(key, None)
-            result.append(item)
-        return result
-
-    def get_leaderboard_daily_metrics_by_dates(self, dates: List[str]) -> Dict[str, Dict]:
-        """按日期批量读取三指标，返回 {snapshot_date: payload}。"""
-        cleaned_dates = sorted({str(d) for d in dates if d})
-        if not cleaned_dates:
-            return {}
-
-        placeholders = ",".join("?" for _ in cleaned_dates)
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            SELECT snapshot_date, metric1_json, metric2_json, metric3_json, created_at, updated_at
-            FROM leaderboard_daily_metrics
-            WHERE snapshot_date IN ({placeholders})
-        """, cleaned_dates)
-        rows = cursor.fetchall()
-        conn.close()
-
-        result: Dict[str, Dict] = {}
-        for row in rows:
-            item = dict(row)
-            for key in ("metric1_json", "metric2_json", "metric3_json"):
-                try:
-                    item[key.replace("_json", "")] = json.loads(item.get(key) or "{}")
-                except Exception:
-                    item[key.replace("_json", "")] = {}
-                item.pop(key, None)
-            snapshot_date = str(item.get("snapshot_date", ""))
-            if snapshot_date:
-                result[snapshot_date] = item
-        return result
-
-    def _save_rebound_snapshot(self, table_name: str, snapshot: Dict) -> None:
-        """保存/覆盖某天反弹幅度榜快照（按 snapshot_date 唯一）。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        rows_json = json.dumps(snapshot.get("rows", []), ensure_ascii=False)
-        all_rows_json = json.dumps(snapshot.get("all_rows", []), ensure_ascii=False)
-        cursor.execute(f"""
-            INSERT INTO {table_name} (
-                snapshot_date, snapshot_time, window_start_utc,
-                candidates, effective, top_count, rows_json, all_rows_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(snapshot_date) DO UPDATE SET
-                snapshot_time = excluded.snapshot_time,
-                window_start_utc = excluded.window_start_utc,
-                candidates = excluded.candidates,
-                effective = excluded.effective,
-                top_count = excluded.top_count,
-                rows_json = excluded.rows_json,
-                all_rows_json = excluded.all_rows_json,
-                created_at = CURRENT_TIMESTAMP
-        """, (
-            str(snapshot.get("snapshot_date")),
-            str(snapshot.get("snapshot_time")),
-            str(snapshot.get("window_start_utc", "")),
-            int(snapshot.get("candidates", 0)),
-            int(snapshot.get("effective", 0)),
-            int(snapshot.get("top", 0)),
-            rows_json,
-            all_rows_json
-        ))
-        conn.commit()
-        conn.close()
-
-    def save_rebound_7d_snapshot(self, snapshot: Dict) -> None:
-        self._save_rebound_snapshot("rebound_7d_snapshots", snapshot)
-
-    def save_rebound_30d_snapshot(self, snapshot: Dict) -> None:
-        self._save_rebound_snapshot("rebound_30d_snapshots", snapshot)
-
-    def save_rebound_60d_snapshot(self, snapshot: Dict) -> None:
-        self._save_rebound_snapshot("rebound_60d_snapshots", snapshot)
-
-    def _row_to_rebound_snapshot(self, row: sqlite3.Row) -> Dict:
-        data = dict(row)
-        rows_json = data.get("rows_json")
-        all_rows_json = data.get("all_rows_json")
-        try:
-            data["rows"] = json.loads(rows_json) if rows_json else []
-        except Exception:
-            data["rows"] = []
-        try:
-            data["all_rows"] = json.loads(all_rows_json) if all_rows_json else []
-        except Exception:
-            data["all_rows"] = []
-        data.pop("rows_json", None)
-        data.pop("all_rows_json", None)
-        data["top"] = data.pop("top_count", 0)
-        return data
-
-    def _get_latest_rebound_snapshot(self, table_name: str) -> Optional[Dict]:
-        """获取最近一条反弹幅度榜快照。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute(f"""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, all_rows_json
-            FROM {table_name}
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, snapshot_time DESC
-            LIMIT 1
-        """, (today,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_rebound_snapshot(row)
-
-    def get_latest_rebound_7d_snapshot(self) -> Optional[Dict]:
-        return self._get_latest_rebound_snapshot("rebound_7d_snapshots")
-
-    def get_latest_rebound_30d_snapshot(self) -> Optional[Dict]:
-        return self._get_latest_rebound_snapshot("rebound_30d_snapshots")
-
-    def get_latest_rebound_60d_snapshot(self) -> Optional[Dict]:
-        return self._get_latest_rebound_snapshot("rebound_60d_snapshots")
-
-    def _get_rebound_snapshot_by_date(self, table_name: str, snapshot_date: str) -> Optional[Dict]:
-        """按日期获取反弹幅度榜快照，snapshot_date 格式 YYYY-MM-DD。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            SELECT snapshot_date, snapshot_time, window_start_utc, candidates, effective, top_count, rows_json, all_rows_json
-            FROM {table_name}
-            WHERE snapshot_date = ?
-            LIMIT 1
-        """, (snapshot_date,))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        return self._row_to_rebound_snapshot(row)
-
-    def get_rebound_7d_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        return self._get_rebound_snapshot_by_date("rebound_7d_snapshots", snapshot_date)
-
-    def get_rebound_30d_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        return self._get_rebound_snapshot_by_date("rebound_30d_snapshots", snapshot_date)
-
-    def get_rebound_60d_snapshot_by_date(self, snapshot_date: str) -> Optional[Dict]:
-        return self._get_rebound_snapshot_by_date("rebound_60d_snapshots", snapshot_date)
-
-    def _list_rebound_snapshot_dates(self, table_name: str, limit: int = 90) -> List[str]:
-        """按时间倒序列出已存反弹幅度榜快照日期。"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        today = self._today_snapshot_date_utc8()
-        cursor.execute(f"""
-            SELECT snapshot_date
-            FROM {table_name}
-            WHERE snapshot_date <= ?
-            ORDER BY snapshot_date DESC, snapshot_time DESC
-            LIMIT ?
-        """, (today, int(limit)))
-        rows = cursor.fetchall()
-        conn.close()
-        return [str(row["snapshot_date"]) for row in rows]
-
-    def list_rebound_7d_snapshot_dates(self, limit: int = 90) -> List[str]:
-        return self._list_rebound_snapshot_dates("rebound_7d_snapshots", limit)
-
-    def list_rebound_30d_snapshot_dates(self, limit: int = 90) -> List[str]:
-        return self._list_rebound_snapshot_dates("rebound_30d_snapshots", limit)
-
-    def list_rebound_60d_snapshot_dates(self, limit: int = 90) -> List[str]:
-        return self._list_rebound_snapshot_dates("rebound_60d_snapshots", limit)

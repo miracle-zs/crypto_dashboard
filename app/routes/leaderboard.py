@@ -8,4 +8,4 @@ templates = Jinja2Templates(directory="templates")
 
 @router.get("/leaderboard", response_class=HTMLResponse)
 async def read_leaderboard_page(request: Request):
-    return templates.TemplateResponse("leaderboard.html", {"request": request})
+    return templates.TemplateResponse(request, "leaderboard.html")

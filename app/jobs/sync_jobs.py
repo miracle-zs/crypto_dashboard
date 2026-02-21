@@ -33,7 +33,7 @@ def run_sync_open_positions(scheduler):
         open_positions = scheduler.processor.get_open_positions(open_since, until, traded_symbols=None)
         if open_positions is None:
             logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
-            scheduler.db.log_sync_run(
+            scheduler.sync_repo.log_sync_run(
                 run_type="open_positions_sync",
                 mode="incremental",
                 status="skipped",
@@ -46,17 +46,17 @@ def run_sync_open_positions(scheduler):
             )
             return
         if open_positions:
-            open_count = scheduler.db.save_open_positions(open_positions)
+            open_count = scheduler.sync_repo.save_open_positions(open_positions)
             logger.info(f"保存 {open_count} 条未平仓订单")
             scheduler.check_same_symbol_reentry_alert()
             scheduler.check_open_positions_profit_alert(threshold_pct=scheduler.profit_alert_threshold_pct)
         else:
             open_count = 0
-            scheduler.db.save_open_positions([])
+            scheduler.sync_repo.save_open_positions([])
             logger.info("当前无未平仓订单")
         elapsed = time.perf_counter() - started_at
         logger.info(f"未平仓同步完成: elapsed={elapsed:.2f}s")
-        scheduler.db.log_sync_run(
+        scheduler.sync_repo.log_sync_run(
             run_type="open_positions_sync",
             mode="incremental",
             status="success",
@@ -68,7 +68,7 @@ def run_sync_open_positions(scheduler):
         )
     except Exception as exc:
         logger.error(f"未平仓同步失败: {exc}")
-        scheduler.db.log_sync_run(
+        scheduler.sync_repo.log_sync_run(
             run_type="open_positions_sync",
             mode="incremental",
             status="error",

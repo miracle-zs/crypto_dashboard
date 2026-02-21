@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.logger import logger
@@ -10,9 +10,17 @@ UTC8 = ZoneInfo("Asia/Shanghai")
 def run_long_held_positions_check(scheduler):
     """检查持仓时间超过48小时的订单并发送合并通知 (每24小时复提)"""
     try:
-        positions = scheduler.db.get_open_positions()
         now = datetime.now(UTC8)
         now_utc = datetime.now(timezone.utc)
+        entry_before = (now - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+        re_alert_before_utc = (now_utc - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        if hasattr(scheduler.risk_repo, "get_long_held_alert_candidates"):
+            positions = scheduler.risk_repo.get_long_held_alert_candidates(
+                entry_before=entry_before,
+                re_alert_before_utc=re_alert_before_utc,
+            )
+        else:
+            positions = scheduler.risk_repo.get_open_positions()
         stale_positions = []
 
         for pos in positions:
@@ -51,32 +59,37 @@ def run_long_held_positions_check(scheduler):
                 if should_alert:
                     hours = int(duration.total_seconds() / 3600)
                     pos["hours_held"] = hours
-
-                    try:
-                        symbol_for_quote = scheduler._normalize_futures_symbol(pos["symbol"])
-                        ticker = scheduler.processor.client.public_get("/fapi/v1/ticker/price", {"symbol": symbol_for_quote})
-                        if ticker and ticker.get("price") is not None:
-                            current_price = float(ticker["price"])
-                            entry_price = float(pos["entry_price"])
-                            qty = float(pos["qty"])
-                            side = pos["side"]
-
-                            if side == "LONG":
-                                pnl = (current_price - entry_price) * qty
-                            else:
-                                pnl = (entry_price - current_price) * qty
-
-                            pos["current_pnl"] = pnl
-                            pos["current_price"] = current_price
-                        else:
-                            pos["current_pnl"] = None
-                            pos["current_price"] = None
-                    except Exception as e:
-                        logger.warning(f"获取实时价格失败: {e}")
-                        pos["current_pnl"] = None
-                        pos["current_price"] = None
-
                     stale_positions.append(pos)
+
+        if stale_positions:
+            symbols_full = [
+                scheduler._normalize_futures_symbol(pos.get("symbol"))
+                for pos in stale_positions
+                if pos.get("symbol")
+            ]
+            mark_prices = scheduler._get_mark_price_map(symbols_full)
+
+            for pos in stale_positions:
+                pos["current_pnl"] = None
+                pos["current_price"] = None
+                symbol = str(pos.get("symbol", "")).upper()
+                if not symbol:
+                    continue
+                symbol_full = scheduler._normalize_futures_symbol(symbol)
+                current_price = mark_prices.get(symbol_full)
+                if current_price is None:
+                    continue
+
+                try:
+                    entry_price = float(pos["entry_price"])
+                    qty = float(pos["qty"])
+                    side = str(pos.get("side", "")).upper()
+                except Exception:
+                    continue
+
+                pnl = (current_price - entry_price) * qty if side == "LONG" else (entry_price - current_price) * qty
+                pos["current_pnl"] = pnl
+                pos["current_price"] = current_price
 
         if stale_positions:
             count = len(stale_positions)
@@ -104,8 +117,10 @@ def run_long_held_positions_check(scheduler):
             content += "请关注风险，及时处理。"
             send_server_chan_notification(title, content)
 
+            scheduler.risk_repo.set_positions_alerted_batch(
+                [(pos["symbol"], pos["order_id"]) for pos in stale_positions]
+            )
             for pos in stale_positions:
-                scheduler.db.set_position_alerted(pos["symbol"], pos["order_id"])
                 logger.info(f"已发送持仓超时告警: {pos['symbol']} ({pos['hours_held']}h)")
     except Exception as e:
         logger.error(f"检查持仓超时失败: {e}")
@@ -114,7 +129,7 @@ def run_long_held_positions_check(scheduler):
 def run_sleep_risk_check(scheduler):
     """每晚11点检查持仓风险"""
     try:
-        positions = scheduler.db.get_open_positions()
+        positions = scheduler.risk_repo.get_open_positions()
         unique_symbols = {p["symbol"] for p in positions}
         count = len(unique_symbols)
 

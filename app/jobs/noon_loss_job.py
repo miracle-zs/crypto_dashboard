@@ -10,47 +10,57 @@ UTC8 = ZoneInfo("Asia/Shanghai")
 def run_noon_loss_check(scheduler):
     """每天中午11:50检查24小时内开仓且当前浮亏的订单"""
     try:
-        positions = scheduler.db.get_open_positions()
+        positions = scheduler.risk_repo.get_open_positions()
         now = datetime.now(UTC8)
-        loss_positions = []
+        candidate_positions = []
 
         for pos in positions:
             if pos.get("is_long_term"):
                 continue
-
-            entry_time_str = pos["entry_time"]
+            entry_time_str = pos.get("entry_time")
             try:
                 entry_dt = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
-            except ValueError:
+            except Exception:
                 continue
-
             if (now - entry_dt).total_seconds() <= 24 * 3600:
-                try:
-                    symbol_for_quote = scheduler._normalize_futures_symbol(pos["symbol"])
-                    ticker = scheduler.processor.client.public_get("/fapi/v1/ticker/price", {"symbol": symbol_for_quote})
-                    if ticker and ticker.get("price") is not None:
-                        current_price = float(ticker["price"])
-                        entry_price = float(pos["entry_price"])
-                        qty = float(pos["qty"])
-                        side = pos["side"]
+                candidate_positions.append(pos)
 
-                        if side == "LONG":
-                            pnl = (current_price - entry_price) * qty
-                        else:
-                            pnl = (entry_price - current_price) * qty
+        symbol_fulls = [
+            scheduler._normalize_futures_symbol(pos.get("symbol"))
+            for pos in candidate_positions
+            if pos.get("symbol")
+        ]
+        mark_prices = scheduler._get_mark_price_map(symbol_fulls) if symbol_fulls else {}
+        loss_positions = []
 
-                        pos["current_pnl"] = pnl
-                        pos["current_price"] = current_price
+        for pos in candidate_positions:
+            try:
+                symbol_for_quote = scheduler._normalize_futures_symbol(pos["symbol"])
+                current_price = mark_prices.get(symbol_for_quote)
+                if current_price is None:
+                    continue
+                current_price = float(current_price)
+                entry_price = float(pos["entry_price"])
+                qty = float(pos["qty"])
+                side = pos["side"]
 
-                        if pnl < 0:
-                            loss_positions.append(pos)
-                except Exception as e:
-                    logger.warning(f"获取实时价格失败: {e}")
+                if side == "LONG":
+                    pnl = (current_price - entry_price) * qty
+                else:
+                    pnl = (entry_price - current_price) * qty
+
+                pos["current_pnl"] = pnl
+                pos["current_price"] = current_price
+
+                if pnl < 0:
+                    loss_positions.append(pos)
+            except Exception as e:
+                logger.warning(f"获取实时价格失败: {e}")
 
         count = len(loss_positions)
         total_stop_loss = sum(abs(float(pos.get("current_pnl", 0.0))) for pos in loss_positions)
         latest_balance = 0.0
-        balance_history = scheduler.db.get_balance_history(limit=1)
+        balance_history = scheduler.trade_repo.get_balance_history(limit=1)
         if balance_history:
             latest_balance = float(balance_history[-1].get("balance") or 0.0)
         stop_loss_pct_of_balance = (total_stop_loss / latest_balance * 100) if latest_balance > 0 else 0.0
@@ -72,7 +82,7 @@ def run_noon_loss_check(scheduler):
                 }
             )
 
-        scheduler.db.save_noon_loss_snapshot(
+        scheduler.risk_repo.save_noon_loss_snapshot(
             {
                 "snapshot_date": now.strftime("%Y-%m-%d"),
                 "snapshot_time": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -141,10 +151,10 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
                 logger.error(f"午间止损复盘失败: 非法日期 {snapshot_date}，期望 YYYY-MM-DD")
                 return
 
-        noon_snapshot = scheduler.db.get_noon_loss_snapshot_by_date(snapshot_date)
+        noon_snapshot = scheduler.risk_repo.get_noon_loss_snapshot_by_date(snapshot_date)
 
         if not noon_snapshot:
-            scheduler.db.save_noon_loss_review_snapshot(
+            scheduler.risk_repo.save_noon_loss_review_snapshot(
                 {
                     "snapshot_date": snapshot_date,
                     "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -163,7 +173,7 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
 
         noon_rows = noon_snapshot.get("rows", []) or []
         if not noon_rows:
-            scheduler.db.save_noon_loss_review_snapshot(
+            scheduler.risk_repo.save_noon_loss_review_snapshot(
                 {
                     "snapshot_date": snapshot_date,
                     "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -269,12 +279,12 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
 
         delta_loss_total = noon_cut_loss_total - hold_loss_total
         latest_balance = 0.0
-        balance_history = scheduler.db.get_balance_history(limit=1)
+        balance_history = scheduler.trade_repo.get_balance_history(limit=1)
         if balance_history:
             latest_balance = float(balance_history[-1].get("balance") or 0.0)
         pct_of_balance = (delta_loss_total / latest_balance * 100) if latest_balance > 0 else 0.0
 
-        scheduler.db.save_noon_loss_review_snapshot(
+        scheduler.risk_repo.save_noon_loss_review_snapshot(
             {
                 "snapshot_date": snapshot_date,
                 "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),

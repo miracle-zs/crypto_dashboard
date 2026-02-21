@@ -14,6 +14,7 @@ import websocket
 
 from app.database import Database
 from app.logger import logger
+from app.repositories import TradeRepository
 
 
 class BinanceUserDataStream:
@@ -28,6 +29,7 @@ class BinanceUserDataStream:
     ):
         self.api_key = api_key
         self.db = db or Database()
+        self.trade_repo = TradeRepository(self.db)
         self.rest_base_url = rest_base_url or os.getenv("BINANCE_FAPI_BASE_URL", "https://fapi.binance.com")
         self.ws_base_url = ws_base_url or os.getenv("BINANCE_FAPI_WS_BASE_URL", "wss://fstream.binance.com")
 
@@ -136,7 +138,7 @@ class BinanceUserDataStream:
             return
 
         # Persist as balance history snapshot
-        self.db.save_balance_history(balance=margin_balance, wallet_balance=wallet_balance)
+        self.trade_repo.save_balance_history(balance=margin_balance, wallet_balance=wallet_balance)
 
     def _on_error(self, _ws, error):
         logger.warning(f"User stream websocket error: {error}")
