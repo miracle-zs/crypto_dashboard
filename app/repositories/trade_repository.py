@@ -68,9 +68,19 @@ class TradeRepository:
         return int(row["total_trades"])
 
     def recompute_trade_summary(self):
-        df = self.get_all_trades()
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT pnl_net, fees
+            FROM trades
+            ORDER BY entry_time ASC
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
 
-        if df.empty:
+        if not rows:
             summary = {
                 "total_pnl": 0.0,
                 "total_fees": 0.0,
@@ -93,36 +103,37 @@ class TradeRepository:
             self._save_trade_summary(summary)
             return summary
 
-        total_pnl = float(df["PNL_Net"].sum())
-        total_fees = float(df["Fees"].sum())
-        win_count = len(df[df["PNL_Net"] > 0])
-        loss_count = len(df[df["PNL_Net"] < 0])
-        total_trades = len(df)
+        pnl_values = np.array([float(row["pnl_net"] or 0.0) for row in rows], dtype=float)
+        fees_values = np.array([float(row["fees"] or 0.0) for row in rows], dtype=float)
+
+        total_pnl = float(pnl_values.sum())
+        total_fees = float(fees_values.sum())
+        win_count = int(np.sum(pnl_values > 0))
+        loss_count = int(np.sum(pnl_values < 0))
+        total_trades = int(len(pnl_values))
         win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0.0
-        equity_curve = df["PNL_Net"].cumsum().tolist()
+        equity_curve = np.cumsum(pnl_values).tolist()
 
         current_streak = 0
-        if not df.empty:
-            pnl_values = df["PNL_Net"].values
-            last_pnl = pnl_values[-1]
-            for pnl in reversed(pnl_values):
-                if pnl == 0:
+        last_pnl = pnl_values[-1]
+        for pnl in reversed(pnl_values):
+            if pnl == 0:
+                break
+            if last_pnl > 0:
+                if pnl > 0:
+                    current_streak += 1
+                else:
                     break
-                if last_pnl > 0:
-                    if pnl > 0:
-                        current_streak += 1
-                    else:
-                        break
-                elif last_pnl < 0:
-                    if pnl < 0:
-                        current_streak -= 1
-                    else:
-                        break
+            elif last_pnl < 0:
+                if pnl < 0:
+                    current_streak -= 1
+                else:
+                    break
 
         best_win_streak = 0
         worst_loss_streak = 0
         streak = 0
-        for pnl in df["PNL_Net"].values:
+        for pnl in pnl_values:
             if pnl > 0:
                 streak = streak + 1 if streak >= 0 else 1
             elif pnl < 0:
@@ -134,9 +145,9 @@ class TradeRepository:
             if streak < worst_loss_streak:
                 worst_loss_streak = streak
 
-        max_single_loss = float(df["PNL_Net"].min()) if not df.empty else 0.0
-        total_wins = float(df[df["PNL_Net"] > 0]["PNL_Net"].sum())
-        total_losses = abs(float(df[df["PNL_Net"] < 0]["PNL_Net"].sum()))
+        max_single_loss = float(np.min(pnl_values))
+        total_wins = float(np.sum(pnl_values[pnl_values > 0]))
+        total_losses = abs(float(np.sum(pnl_values[pnl_values < 0])))
         profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
 
         avg_win = total_wins / win_count if win_count > 0 else 0
@@ -149,12 +160,9 @@ class TradeRepository:
         else:
             kelly_criterion = 0.0
 
-        if total_trades > 0:
-            pnl_mean = df["PNL_Net"].mean()
-            pnl_std = df["PNL_Net"].std()
-            sqn = (pnl_mean / pnl_std) * np.sqrt(total_trades) if pnl_std > 0 else 0.0
-        else:
-            sqn = 0.0
+        pnl_mean = float(np.mean(pnl_values)) if total_trades > 0 else 0.0
+        pnl_std = float(np.std(pnl_values, ddof=1)) if total_trades > 1 else 0.0
+        sqn = (pnl_mean / pnl_std) * np.sqrt(total_trades) if pnl_std > 0 else 0.0
 
         expected_value = (win_prob * avg_win) - (loss_prob * avg_loss)
         risk_reward_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
