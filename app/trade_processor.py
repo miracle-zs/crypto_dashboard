@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Tuple
 import time
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from app.logger import logger
@@ -28,6 +29,10 @@ class TradeDataProcessor:
         self.client = BinanceFuturesRestClient(api_key=api_key, api_secret=api_secret)
         self.max_etl_workers = self._load_max_workers()
         self.max_price_workers = self._load_price_workers()
+        self._exchange_info_cache = None
+        self._exchange_info_expires_at = 0.0
+        self._exchange_info_lock = threading.Lock()
+        self._exchange_info_cache_ttl_seconds = self._load_exchange_info_cache_ttl()
 
     def _load_max_workers(self) -> int:
         raw = os.getenv('ETL_MAX_WORKERS', '2')
@@ -50,6 +55,15 @@ class TradeDataProcessor:
         except Exception:
             logger.warning(f"Invalid ETL_PRICE_WORKERS={raw}, fallback to {self.max_etl_workers}")
             return self.max_etl_workers
+
+    def _load_exchange_info_cache_ttl(self) -> float:
+        raw = os.getenv('ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS', '300')
+        try:
+            ttl = float(raw)
+            return max(0.0, ttl)
+        except Exception:
+            logger.warning(f"Invalid ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS={raw}, fallback to 300")
+            return 300.0
 
     def _resolve_workers(self, task_count: int, max_workers: Optional[int] = None) -> int:
         cap = self.max_etl_workers if max_workers is None else max_workers
@@ -311,9 +325,19 @@ class TradeDataProcessor:
     def get_exchange_info(self, client: Optional[BinanceFuturesRestClient] = None) -> dict:
         """Get exchange information"""
         client = client or self.client
+        if client is self.client:
+            now = time.time()
+            with self._exchange_info_lock:
+                if self._exchange_info_cache is not None and now < self._exchange_info_expires_at:
+                    return self._exchange_info_cache
         endpoint = '/fapi/v1/exchangeInfo'
         result = client.public_get(endpoint)
-        return result or {}
+        payload = result or {}
+        if client is self.client:
+            with self._exchange_info_lock:
+                self._exchange_info_cache = payload
+                self._exchange_info_expires_at = time.time() + self._exchange_info_cache_ttl_seconds
+        return payload
 
     def get_all_symbols(self, client: Optional[BinanceFuturesRestClient] = None) -> List[str]:
         """Get all USDT perpetual contract symbols"""
