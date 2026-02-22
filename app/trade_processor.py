@@ -461,7 +461,13 @@ class TradeDataProcessor:
                 fee_totals[symbol] = fee_totals.get(symbol, 0.0) + float(record.get('income', 0.0))
         return list(symbols), fee_totals
 
-    def match_orders_to_positions(self, orders: List[Dict], symbol: str, fees_map: Dict[int, float] = None) -> List[Dict]:
+    def match_orders_to_positions(
+        self,
+        orders: List[Dict],
+        symbol: str,
+        fees_map: Dict[int, float] = None,
+        presorted: bool = False,
+    ) -> List[Dict]:
         """Match orders to closed positions (handles partial fills)"""
 
         if fees_map is None:
@@ -473,7 +479,8 @@ class TradeDataProcessor:
         long_positions = []
         short_positions = []
 
-        for order in sorted(orders, key=lambda x: x['updateTime']):
+        iterable_orders = orders if presorted else sorted(orders, key=lambda x: x['updateTime'])
+        for order in iterable_orders:
             if float(order['executedQty']) <= 0:
                 continue
 
@@ -610,13 +617,7 @@ class TradeDataProcessor:
         client = client or self.client
         logger.info("Fetching traded symbols from income history...")
         result = self._fetch_income_history(since=since, until=until, client=client)
-        symbols = {
-            record['symbol']
-            for record in result
-            if 'symbol' in record and record['symbol']
-        }
-
-        symbols_list = list(symbols)
+        symbols_list, _fee_totals = self._summarize_income_records(result)
 
         if symbols_list:
             logger.info(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")
@@ -669,6 +670,7 @@ class TradeDataProcessor:
         ]
         if len(filled_orders) < 1:
             return [], time.perf_counter() - started_at
+        filled_orders.sort(key=lambda x: x['updateTime'])
 
         symbol_total_fees = 0.0
         if fee_totals_by_symbol is not None:
@@ -676,7 +678,7 @@ class TradeDataProcessor:
             fees_map = {0: symbol_total_fees} if symbol_total_fees != 0 else {}
         else:
             fees_map = self.get_fees_for_symbol(symbol, since, until, client=worker_client)
-        positions = self.match_orders_to_positions(filled_orders, symbol, fees_map)
+        positions = self.match_orders_to_positions(filled_orders, symbol, fees_map, presorted=True)
         return positions, time.perf_counter() - started_at
 
     def analyze_orders(
