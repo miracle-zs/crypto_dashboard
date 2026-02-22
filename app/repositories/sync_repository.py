@@ -362,9 +362,8 @@ class SyncRepository:
         except Exception:
             pass
 
-        cursor.execute("DELETE FROM open_positions")
-
         if not rows:
+            cursor.execute("DELETE FROM open_positions")
             conn.commit()
             conn.close()
             return 0
@@ -401,9 +400,45 @@ class SyncRepository:
                     alerted, last_alert_time, profit_alerted, profit_alert_time,
                     reentry_alerted, reentry_alert_time, is_long_term
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, order_id) DO UPDATE SET
+                    date = excluded.date,
+                    side = excluded.side,
+                    entry_time = excluded.entry_time,
+                    entry_price = excluded.entry_price,
+                    qty = excluded.qty,
+                    entry_amount = excluded.entry_amount,
+                    alerted = excluded.alerted,
+                    last_alert_time = excluded.last_alert_time,
+                    profit_alerted = excluded.profit_alerted,
+                    profit_alert_time = excluded.profit_alert_time,
+                    reentry_alerted = excluded.reentry_alerted,
+                    reentry_alert_time = excluded.reentry_alert_time,
+                    is_long_term = excluded.is_long_term
                 """,
                 insert_rows,
             )
+
+            active_keys = sorted(
+                {
+                    (str(pos["symbol"]), int(pos["order_id"]))
+                    for pos in rows
+                    if pos.get("symbol") is not None and pos.get("order_id") is not None
+                }
+            )
+            if active_keys:
+                placeholders = ",".join(["(?, ?)"] * len(active_keys))
+                params = []
+                for symbol, order_id in active_keys:
+                    params.extend([symbol, order_id])
+                cursor.execute(
+                    f"""
+                    DELETE FROM open_positions
+                    WHERE (symbol, order_id) NOT IN ({placeholders})
+                    """,
+                    tuple(params),
+                )
+            else:
+                cursor.execute("DELETE FROM open_positions")
 
         conn.commit()
         conn.close()
