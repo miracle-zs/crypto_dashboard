@@ -15,7 +15,31 @@ class TradeRepository:
     def get_trade_summary(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM trade_summary WHERE id = 1")
+        cursor.execute(
+            """
+            SELECT
+                id,
+                total_pnl,
+                total_fees,
+                win_rate,
+                win_count,
+                loss_count,
+                total_trades,
+                equity_curve,
+                current_streak,
+                best_win_streak,
+                worst_loss_streak,
+                max_drawdown,
+                profit_factor,
+                kelly_criterion,
+                sqn,
+                expected_value,
+                risk_reward_ratio,
+                updated_at
+            FROM trade_summary
+            WHERE id = 1
+            """
+        )
         row = cursor.fetchone()
         conn.close()
 

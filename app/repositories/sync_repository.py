@@ -268,7 +268,20 @@ class SyncRepository:
     def get_sync_status(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM sync_status WHERE id = 1")
+        cursor.execute(
+            """
+            SELECT
+                id,
+                last_sync_time,
+                last_entry_time,
+                total_trades,
+                status,
+                error_message,
+                updated_at
+            FROM sync_status
+            WHERE id = 1
+            """
+        )
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else {}

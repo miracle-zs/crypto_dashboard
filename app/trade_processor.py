@@ -852,96 +852,8 @@ class TradeDataProcessor:
                 f"elapsed={price_prefetch_elapsed:.2f}s, slowest=[{slowest_price_str}]"
             )
 
-        trades_data = []
         transform_started = time.perf_counter()
-        for idx, pos in enumerate(all_positions, 1):
-            try:
-                symbol = pos['symbol']
-                entry_time = pos['entry_time']
-                exit_time = pos['exit_time']
-
-                day_start_ms = self.get_utc_day_start(entry_time)
-                open_price = open_price_cache.get((symbol, day_start_ms))
-
-                dt = datetime.fromtimestamp(entry_time / 1000, tz=UTC8)
-                date_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-                utc_day = dt.strftime('%Y%m%d')
-
-                # 计算出场时间
-                exit_dt = datetime.fromtimestamp(exit_time / 1000, tz=UTC8)
-                exit_time_str = exit_dt.strftime('%Y-%m-%d %H:%M:%S')
-
-                # 计算持仓时间
-                duration_ms = exit_time - entry_time
-                duration_seconds = duration_ms / 1000
-
-                if duration_seconds < 60:
-                    hold_time = f"{int(duration_seconds)}秒"
-                elif duration_seconds < 3600:
-                    minutes = int(duration_seconds // 60)
-                    seconds = int(duration_seconds % 60)
-                    hold_time = f"{minutes}分{seconds}秒"
-                elif duration_seconds < 86400:
-                    hours = int(duration_seconds // 3600)
-                    minutes = int((duration_seconds % 3600) // 60)
-                    hold_time = f"{hours}小时{minutes}分"
-                else:
-                    days = int(duration_seconds // 86400)
-                    hours = int((duration_seconds % 86400) // 3600)
-                    hold_time = f"{days}天{hours}小时"
-
-                if symbol.endswith('USDT'):
-                    base = symbol[:-4]
-                else:
-                    base = symbol
-
-                # 用实际入场价格计算相对开盘价格的变化百分比
-                if open_price and pos['entry_price']:
-                    price_change_pct = (pos['entry_price'] - open_price) / open_price
-                else:
-                    price_change_pct = 0
-
-                pnl_net = round(pos['pnl'])
-                entry_amount = round(pos['entry_price'] * pos['qty'])
-
-                # 判断平仓类型：不管LONG还是SHORT，只要PNL_Net为正就是止盈
-                close_type = '止盈' if pnl_net > 0 else '止损'
-
-                # 计算收益率并格式化为保留2位小数的百分比字符串
-                return_rate_raw = (pnl_net / entry_amount * 100) if entry_amount != 0 else 0
-                return_rate = f"{return_rate_raw:.2f}%"
-
-                trades_data.append({
-                    'No': idx,
-                    'Date': utc_day,
-                    'Entry_Time': date_str,
-                    'Exit_Time': exit_time_str,
-                    'Holding_Time': hold_time,
-                    'Symbol': base,
-                    'Side': pos['side'],
-                    'Price_Change_Pct': price_change_pct,
-                    'Entry_Amount': entry_amount,
-                    'Entry_Price': pos['entry_price'],
-                    'Exit_Price': pos['exit_price'],
-                    'Qty': pos['qty'],
-                    'Fees': round(pos.get('fees', 0)),
-                    'PNL_Net': pnl_net,
-                    'Close_Type': close_type,
-                    'Return_Rate': return_rate,
-                    'Open_Price': open_price if open_price else 0,
-                    'PNL_Before_Fees': round(pos.get('pnl_before_fees', pos['pnl'])),
-                    'Entry_Order_ID': pos['entry_order_id'],
-                    'Exit_Order_ID': pos['exit_order_id']
-                })
-
-                if idx % 20 == 0:
-                    logger.info(f"Processed {idx}/{len(all_positions)} positions...")
-
-            except Exception as e:
-                logger.error(f"Parse position failed: {e}")
-                continue
-
-        df = pd.DataFrame(trades_data)
+        df = self._build_trades_dataframe(all_positions=all_positions, open_price_cache=open_price_cache)
         df = df.sort_values('Entry_Time', ascending=True)
 
         logger.info(f"Successfully parsed {len(df)} positions")
@@ -958,6 +870,87 @@ class TradeDataProcessor:
         if return_symbol_status:
             return df, success_symbols, failure_symbols
         return df
+
+    @staticmethod
+    def _format_holding_time_cn(duration_seconds: float) -> str:
+        if duration_seconds < 60:
+            return f"{int(duration_seconds)}秒"
+        if duration_seconds < 3600:
+            minutes = int(duration_seconds // 60)
+            seconds = int(duration_seconds % 60)
+            return f"{minutes}分{seconds}秒"
+        if duration_seconds < 86400:
+            hours = int(duration_seconds // 3600)
+            minutes = int((duration_seconds % 3600) // 60)
+            return f"{hours}小时{minutes}分"
+        days = int(duration_seconds // 86400)
+        hours = int((duration_seconds % 86400) // 3600)
+        return f"{days}天{hours}小时"
+
+    def _position_to_trade_row(self, pos: Dict, idx: int, open_price_cache: Dict[tuple[str, int], Optional[float]]) -> Dict:
+        symbol = pos['symbol']
+        entry_time = pos['entry_time']
+        exit_time = pos['exit_time']
+        day_start_ms = self.get_utc_day_start(entry_time)
+        open_price = open_price_cache.get((symbol, day_start_ms))
+
+        entry_dt = datetime.fromtimestamp(entry_time / 1000, tz=UTC8)
+        exit_dt = datetime.fromtimestamp(exit_time / 1000, tz=UTC8)
+        duration_seconds = (exit_time - entry_time) / 1000
+        hold_time = self._format_holding_time_cn(duration_seconds)
+
+        base = symbol[:-4] if symbol.endswith('USDT') else symbol
+        entry_price = pos['entry_price']
+        qty = pos['qty']
+        pnl_net = round(pos['pnl'])
+        entry_amount = round(entry_price * qty)
+
+        if open_price and entry_price:
+            price_change_pct = (entry_price - open_price) / open_price
+        else:
+            price_change_pct = 0
+
+        close_type = '止盈' if pnl_net > 0 else '止损'
+        return_rate_raw = (pnl_net / entry_amount * 100) if entry_amount != 0 else 0
+
+        return {
+            'No': idx,
+            'Date': entry_dt.strftime('%Y%m%d'),
+            'Entry_Time': entry_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'Exit_Time': exit_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'Holding_Time': hold_time,
+            'Symbol': base,
+            'Side': pos['side'],
+            'Price_Change_Pct': price_change_pct,
+            'Entry_Amount': entry_amount,
+            'Entry_Price': entry_price,
+            'Exit_Price': pos['exit_price'],
+            'Qty': qty,
+            'Fees': round(pos.get('fees', 0)),
+            'PNL_Net': pnl_net,
+            'Close_Type': close_type,
+            'Return_Rate': f"{return_rate_raw:.2f}%",
+            'Open_Price': open_price if open_price else 0,
+            'PNL_Before_Fees': round(pos.get('pnl_before_fees', pos['pnl'])),
+            'Entry_Order_ID': pos['entry_order_id'],
+            'Exit_Order_ID': pos['exit_order_id'],
+        }
+
+    def _build_trades_dataframe(
+        self,
+        *,
+        all_positions: List[Dict],
+        open_price_cache: Dict[tuple[str, int], Optional[float]],
+    ) -> pd.DataFrame:
+        trades_data = []
+        for idx, pos in enumerate(all_positions, 1):
+            try:
+                trades_data.append(self._position_to_trade_row(pos=pos, idx=idx, open_price_cache=open_price_cache))
+                if idx % 20 == 0:
+                    logger.info(f"Processed {idx}/{len(all_positions)} positions...")
+            except Exception as e:
+                logger.error(f"Parse position failed: {e}")
+        return pd.DataFrame(trades_data)
 
     def merge_same_entry_positions(self, df: pd.DataFrame) -> pd.DataFrame:
         """Merge positions with same symbol and entry time"""
