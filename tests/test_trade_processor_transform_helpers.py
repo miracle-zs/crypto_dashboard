@@ -34,3 +34,23 @@ def test_position_to_trade_row_basic_mapping():
     assert row["Fees"] == -1
     assert row["Close_Type"] == "止盈"
     assert row["Open_Price"] == 90.0
+
+
+def test_fifo_helpers_trim_and_consume_entries():
+    processor = TradeDataProcessor.__new__(TradeDataProcessor)
+    entries = [
+        {"qty": 2.0, "price": 100.0, "time": 1_700_000_000_000, "order_id": 1},
+        {"qty": 3.0, "price": 101.0, "time": 1_700_000_100_000, "order_id": 2},
+    ]
+
+    processor._consume_fifo_entries(entries, 2.5)
+    assert len(entries) == 1
+    assert entries[0]["order_id"] == 2
+    assert entries[0]["qty"] == 2.5
+
+    processor._trim_entries_to_target_qty(entries, 1.0)
+    assert entries[0]["qty"] == 1.0
+
+    output = processor._build_open_position_output("BTCUSDT", "LONG", entries)
+    assert output[0]["symbol"] == "BTC"
+    assert output[0]["qty"] == 1.0

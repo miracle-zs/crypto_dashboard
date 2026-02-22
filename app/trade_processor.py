@@ -1100,6 +1100,51 @@ class TradeDataProcessor:
             logger.error(f"Failed to fetch position risk: {e}")
             return None
 
+    @staticmethod
+    def _consume_fifo_entries(entries: List[Dict], qty_to_close: float):
+        remaining = qty_to_close
+        while remaining > 0 and entries:
+            entry = entries[0]
+            close_qty = min(remaining, entry['qty'])
+            entry['qty'] -= close_qty
+            remaining -= close_qty
+            if entry['qty'] <= 0.0001:
+                entries.pop(0)
+
+    @staticmethod
+    def _trim_entries_to_target_qty(entries: List[Dict], target_qty: float):
+        calculated_qty = sum(e['qty'] for e in entries)
+        if calculated_qty <= target_qty:
+            return
+        diff = calculated_qty - target_qty
+        while diff > 0.0001 and entries:
+            entry = entries[0]
+            if entry['qty'] > diff:
+                entry['qty'] -= diff
+                diff = 0
+            else:
+                diff -= entry['qty']
+                entries.pop(0)
+
+    @staticmethod
+    def _build_open_position_output(symbol: str, side_str: str, entries: List[Dict]) -> List[Dict]:
+        base = symbol[:-4] if symbol.endswith('USDT') else symbol
+        output = []
+        for entry in entries:
+            if entry['qty'] > 0.0001:
+                dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
+                output.append({
+                    'date': dt.strftime('%Y%m%d'),
+                    'symbol': base,
+                    'side': side_str,
+                    'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    'entry_price': entry['price'],
+                    'qty': entry['qty'],
+                    'entry_amount': round(entry['price'] * entry['qty']),
+                    'order_id': entry['order_id']
+                })
+        return output
+
     def _extract_open_positions_for_symbol(
         self,
         symbol: str,
@@ -1145,15 +1190,7 @@ class TradeDataProcessor:
                 })
             elif (position_side == 'LONG' and side == 'SELL') or \
                     (position_side == 'BOTH' and side == 'SELL'):
-                # FIFO Close
-                remaining = qty
-                while remaining > 0 and long_entries:
-                    entry = long_entries[0]
-                    close_qty = min(remaining, entry['qty'])
-                    entry['qty'] -= close_qty
-                    remaining -= close_qty
-                    if entry['qty'] <= 0.0001:
-                        long_entries.pop(0)
+                self._consume_fifo_entries(long_entries, qty)
 
             # SHORT
             if position_side == 'SHORT' and side == 'SELL':
@@ -1161,14 +1198,7 @@ class TradeDataProcessor:
                     'price': price, 'qty': qty, 'time': order_time, 'order_id': order_id
                 })
             elif position_side == 'SHORT' and side == 'BUY':
-                remaining = qty
-                while remaining > 0 and short_entries:
-                    entry = short_entries[0]
-                    close_qty = min(remaining, entry['qty'])
-                    entry['qty'] -= close_qty
-                    remaining -= close_qty
-                    if entry['qty'] <= 0.0001:
-                        short_entries.pop(0)
+                self._consume_fifo_entries(short_entries, qty)
 
         # Sync with Real Position
         # We trust real_net_qty. If local calculation differs, we adjust.
@@ -1185,15 +1215,7 @@ class TradeDataProcessor:
                 # If we have TOO MANY locals, it means we missed some sells.
                 # Trim from HEAD (FIFO) to match real qty.
                 if calculated_qty > real_net_qty:
-                    diff = calculated_qty - real_net_qty
-                    while diff > 0.0001 and long_entries:
-                        entry = long_entries[0]  # Oldest entry
-                        if entry['qty'] > diff:
-                            entry['qty'] -= diff
-                            diff = 0
-                        else:
-                            diff -= entry['qty']
-                            long_entries.pop(0)
+                    self._trim_entries_to_target_qty(long_entries, real_net_qty)
                 else:
                     # Calculated < Real: We missed some BUYS or started monitoring late.
                     # Can't invent history, so we just show what we have.
@@ -1209,36 +1231,12 @@ class TradeDataProcessor:
                 logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc=-{calculated_qty}. Adjusting to Real.")
 
                 if calculated_qty > abs_real_qty:
-                    diff = calculated_qty - abs_real_qty
-                    while diff > 0.0001 and short_entries:
-                        entry = short_entries[0]
-                        if entry['qty'] > diff:
-                            entry['qty'] -= diff
-                            diff = 0
-                        else:
-                            diff -= entry['qty']
-                            short_entries.pop(0)
+                    self._trim_entries_to_target_qty(short_entries, abs_real_qty)
 
             final_entries = short_entries
 
-        # Add to results
-        base = symbol[:-4] if symbol.endswith('USDT') else symbol
         side_str = 'LONG' if real_net_qty > 0 else 'SHORT'
-
-        output = []
-        for entry in final_entries:
-            if entry['qty'] > 0.0001:
-                dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
-                output.append({
-                    'date': dt.strftime('%Y%m%d'),
-                    'symbol': base,
-                    'side': side_str,
-                    'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
-                    'entry_price': entry['price'],
-                    'qty': entry['qty'],
-                    'entry_amount': round(entry['price'] * entry['qty']),
-                    'order_id': entry['order_id']
-                })
+        output = self._build_open_position_output(symbol, side_str, final_entries)
         return output, time.perf_counter() - started_at
 
     def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> Optional[List[Dict]]:
