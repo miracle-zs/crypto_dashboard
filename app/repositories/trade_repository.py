@@ -279,6 +279,21 @@ class TradeRepository:
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_transfer_timeline(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT timestamp, amount
+            FROM transfers
+            WHERE (type != 'auto') OR (source_uid IS NOT NULL)
+            ORDER BY timestamp ASC
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
         conn = self.db._get_connection()
         cursor = conn.cursor()

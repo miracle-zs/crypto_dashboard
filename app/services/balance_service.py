@@ -29,7 +29,7 @@ class BalanceService:
         if not history_data:
             return []
 
-        transfers = await run_in_thread(trade_repo.get_transfers)
+        transfers = await run_in_thread(trade_repo.get_transfer_timeline)
 
         sorted_transfers = []
         for t in transfers:

@@ -448,6 +448,19 @@ class TradeDataProcessor:
 
         return fee_totals
 
+    @staticmethod
+    def _summarize_income_records(records: List[Dict]) -> Tuple[List[str], Dict[str, float]]:
+        symbols = set()
+        fee_totals: Dict[str, float] = {}
+        for record in records:
+            symbol = record.get('symbol')
+            if not symbol:
+                continue
+            symbols.add(symbol)
+            if record.get('incomeType') in ['COMMISSION', 'FUNDING_FEE']:
+                fee_totals[symbol] = fee_totals.get(symbol, 0.0) + float(record.get('income', 0.0))
+        return list(symbols), fee_totals
+
     def match_orders_to_positions(self, orders: List[Dict], symbol: str, fees_map: Dict[int, float] = None) -> List[Dict]:
         """Match orders to closed positions (handles partial fills)"""
 
@@ -678,8 +691,13 @@ class TradeDataProcessor:
         """Analyze orders and convert to DataFrame"""
 
         # 获取有交易记录的币种
+        prefetched_fee_totals = None
         if traded_symbols is None:
-            traded_symbols = self.get_traded_symbols(since, until)
+            income_records = self._fetch_income_history(since=since, until=until)
+            traded_symbols, prefetched_fee_totals = self._summarize_income_records(income_records)
+            logger.info(
+                f"Income prefetch: records={len(income_records)}, symbols={len(traded_symbols)}"
+            )
 
         if not traded_symbols:
             logger.warning("No trading history found in the specified period")
@@ -697,7 +715,11 @@ class TradeDataProcessor:
         success_symbols: List[str] = []
         failure_symbols: Dict[str, str] = {}
         fee_prefetch_started = time.perf_counter()
-        fee_totals_by_symbol = self.get_fee_totals_by_symbol(since=since, until=until)
+        fee_totals_by_symbol = (
+            prefetched_fee_totals
+            if prefetched_fee_totals is not None
+            else self.get_fee_totals_by_symbol(since=since, until=until)
+        )
         fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
         logger.info(
             f"Income fee cache: symbols={len(fee_totals_by_symbol)}, elapsed={fee_prefetch_elapsed:.2f}s"
