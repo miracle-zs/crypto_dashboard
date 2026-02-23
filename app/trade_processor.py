@@ -23,6 +23,12 @@ from app.core.trade_position_utils import (
     trim_entries_to_target_qty,
 )
 from app.core.trade_dataframe_utils import merge_same_entry_positions
+from app.services.trade_api_gateway import (
+    fetch_account_balance,
+    fetch_all_orders,
+    fetch_income_history,
+    fetch_real_positions,
+)
 
 # 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
@@ -136,35 +142,9 @@ class TradeDataProcessor:
         client: Optional[BinanceFuturesRestClient] = None,
         income_type: Optional[str] = None,
     ) -> List[Dict]:
-        """
-        Fetch income history once in a paginated way for a time window.
-        """
+        """Fetch income history once in a paginated way for a time window."""
         client = client or self.client
-        endpoint = '/fapi/v1/income'
-        records: List[Dict] = []
-        current_start = since
-
-        while True:
-            params = {
-                'startTime': current_start,
-                'endTime': until,
-                'limit': 1000
-            }
-            if income_type:
-                params['incomeType'] = income_type
-            batch = client.signed_get(endpoint, params)
-            if not batch:
-                break
-
-            records.extend(batch)
-            if len(batch) < 1000:
-                break
-
-            last_time = int(batch[-1]['time'])
-            current_start = last_time + 1
-            time.sleep(0.2)
-
-        return records
+        return fetch_income_history(client=client, since=since, until=until, income_type=income_type)
 
     def get_transfer_income_records(self, start_time: int, end_time: Optional[int] = None) -> List[Dict]:
         """
@@ -230,17 +210,7 @@ class TradeDataProcessor:
 
     def get_account_balance(self) -> Dict[str, float]:
         """Get USD-M Futures account balance (Margin & Wallet)."""
-        endpoint = '/fapi/v2/account'
-        account_info = self.client.signed_get(endpoint)
-
-        if account_info:
-            return {
-                'margin_balance': float(account_info.get('totalMarginBalance', 0)),
-                'wallet_balance': float(account_info.get('totalWalletBalance', 0))
-            }
-        else:
-            logger.warning("Could not retrieve account balance.")
-            return None
+        return fetch_account_balance(client=self.client)
 
     def get_all_orders(
         self,
@@ -253,82 +223,14 @@ class TradeDataProcessor:
     ) -> List[Dict]:
         """Get all orders for a symbol"""
         client = client or self.client
-        endpoint = '/fapi/v1/allOrders'
-        params = {
-            'symbol': symbol,
-            'limit': limit
-        }
-
-        # No time filter: one-shot fetch (Binance default window)
-        if start_time is None and end_time is None:
-            result = client.signed_get(endpoint, params)
-            if result is None:
-                if fail_on_error:
-                    raise RuntimeError(f"allOrders request failed for {symbol}")
-                logger.warning(f"API request failed for {symbol}")
-            elif isinstance(result, list) and len(result) == 0:
-                logger.debug(f"No orders in time range for {symbol}")
-            return result if result else []
-
-        # Ensure time range
-        if start_time is None and end_time is not None:
-            # fallback to last 7 days window
-            start_time = end_time - (7 * 24 * 60 * 60 * 1000) + 1
-        if end_time is None and start_time is not None:
-            end_time = int(time.time() * 1000)
-
-        max_window_ms = (7 * 24 * 60 * 60 * 1000) - 1
-        current_start = start_time
-        all_orders: List[Dict] = []
-        seen_order_ids = set()
-
-        while current_start <= end_time:
-            current_end = min(end_time, current_start + max_window_ms)
-            window_start = current_start
-
-            while True:
-                params = {
-                    'symbol': symbol,
-                    'limit': limit,
-                    'startTime': window_start,
-                    'endTime': current_end
-                }
-
-                batch = client.signed_get(endpoint, params)
-                if batch is None:
-                    if fail_on_error:
-                        raise RuntimeError(
-                            f"allOrders request failed for {symbol}, window=[{window_start},{current_end}]"
-                        )
-                    batch = []
-                if not batch:
-                    break
-
-                for order in batch:
-                    order_id = order.get('orderId')
-                    if order_id in seen_order_ids:
-                        continue
-                    seen_order_ids.add(order_id)
-                    all_orders.append(order)
-
-                if len(batch) < limit:
-                    break
-
-                last_update = int(batch[-1].get('updateTime', window_start))
-                if last_update <= window_start:
-                    window_start += 1
-                else:
-                    window_start = last_update + 1
-
-                if window_start > current_end:
-                    break
-
-            current_start = current_end + 1
-
-        if not all_orders:
-            logger.debug(f"No orders in time range for {symbol}")
-
-        return all_orders
+        return fetch_all_orders(
+            client=client,
+            symbol=symbol,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time,
+            fail_on_error=fail_on_error,
+        )
 
     def get_exchange_info(self, client: Optional[BinanceFuturesRestClient] = None) -> dict:
         """Get exchange information"""
@@ -972,23 +874,7 @@ class TradeDataProcessor:
     def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Optional[Dict[str, float]]:
         """Get actual open positions from Binance (Symbol -> NetQty)"""
         client = client or self.client
-        endpoint = '/fapi/v2/positionRisk'
-        try:
-            positions = client.signed_get(endpoint)
-            if positions is None:
-                logger.warning("PositionRisk request failed, returning None")
-                return None
-            # Filter for non-zero positions
-            real_pos = {}
-            if positions:
-                for p in positions:
-                    amt = float(p.get('positionAmt', 0))
-                    if abs(amt) > 0:
-                        real_pos[p['symbol']] = amt
-            return real_pos
-        except Exception as e:
-            logger.error(f"Failed to fetch position risk: {e}")
-            return None
+        return fetch_real_positions(client=client)
 
     @staticmethod
     def _consume_fifo_entries(entries: List[Dict], qty_to_close: float):
