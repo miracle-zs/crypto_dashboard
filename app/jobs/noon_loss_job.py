@@ -320,8 +320,16 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
 
         review_rows.sort(key=lambda x: abs(float(x.get("delta_loss", 0.0))), reverse=True)
 
+        if delta_loss_total > 0:
+            summary_text = f"结论：今晚看，不砍仓更差，午间止损更优（Delta {delta_loss_total:+.2f} U）。"
+        elif delta_loss_total < 0:
+            summary_text = f"结论：今晚看，不砍仓更优（PnL更高，Delta {delta_loss_total:+.2f} U），但仍需遵守纪律。"
+        else:
+            summary_text = "结论：两种处理结果接近。"
+
         title = f"🌙 午间止损复盘: {evaluated_count}个币种"
         content = (
+            f"{summary_text}\n\n"
             f"北京时间 {now.strftime('%H:%M')} 复盘结果（{snapshot_date}）\n\n"
             f"- 午间止损PnL: {noon_cut_loss_total:+.2f} U\n"
             f"- 持有到夜间PnL: {hold_loss_total:+.2f} U\n"
@@ -336,13 +344,6 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
                 f"- 午间止损PnL: {row['noon_loss']:+.2f} U\n"
                 f"- Delta PnL: {row['delta_loss']:+.2f} U\n\n"
             )
-
-        if delta_loss_total > 0:
-            content += "结论：今晚看，不砍仓更差，午间止损更优。"
-        elif delta_loss_total < 0:
-            content += "结论：今晚看，不砍仓更优（PnL更高），但仍需遵守纪律。"
-        else:
-            content += "结论：两种处理结果接近。"
 
         if send_notification:
             send_server_chan_notification(title, content)
