@@ -33,6 +33,7 @@ from app.jobs.scheduler_startup_jobs import register_scheduler_jobs
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
+from app.core.scheduler_runtime import get_scheduler_singleton, should_start_scheduler_runtime
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
 from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
@@ -601,40 +602,10 @@ class TradeDataScheduler:
         return None
 
 
-# 全局实例
-scheduler_instance = None
-
-
-def _env_is_truthy(value: str | None) -> bool:
-    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _resolve_worker_count() -> int:
-    raw = os.getenv("WEB_CONCURRENCY") or os.getenv("UVICORN_WORKERS") or "1"
-    try:
-        count = int(raw)
-    except (TypeError, ValueError):
-        count = 1
-    return max(1, count)
-
-
 def should_start_scheduler() -> tuple[bool, str]:
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET")
-    if not api_key or not api_secret:
-        return False, "missing_api_keys"
-
-    worker_count = _resolve_worker_count()
-    allow_multi_worker = _env_is_truthy(os.getenv("SCHEDULER_ALLOW_MULTI_WORKER"))
-    if worker_count > 1 and not allow_multi_worker:
-        return False, "multi_worker_unsupported"
-
-    return True, "ok"
+    return should_start_scheduler_runtime()
 
 
 def get_scheduler() -> TradeDataScheduler:
     """获取调度器单例"""
-    global scheduler_instance
-    if scheduler_instance is None:
-        scheduler_instance = TradeDataScheduler()
-    return scheduler_instance
+    return get_scheduler_singleton(TradeDataScheduler)
