@@ -14,8 +14,8 @@ from app.api.rebound_api import router as rebound_api_router
 from app.api.system_api import router as system_api_router
 from app.api.trades_api import router as trades_api_router
 from app.api.watchnotes_api import router as watchnotes_api_router
+from app.core.deps import get_db_singleton
 from app.core.metrics import log_api_metric, measure_ms
-from app.database import Database
 from app.logger import logger
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.system import router as system_router
@@ -39,14 +39,16 @@ async def lifespan(app: FastAPI):
         scheduler = get_scheduler()
         scheduler.start()
         app.state.scheduler = scheduler
+        app.state.db = get_db_singleton()
         logger.info("定时任务调度器已启动")
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
         if enable_user_stream:
-            user_stream = BinanceUserDataStream(api_key=api_key, db=Database())
+            user_stream = BinanceUserDataStream(api_key=api_key, db=app.state.db)
             user_stream.start()
     else:
         app.state.scheduler = None
+        app.state.db = get_db_singleton()
         if reason == "missing_api_keys":
             logger.warning("未配置API密钥，定时任务未启动")
         elif reason == "multi_worker_unsupported":
@@ -65,12 +67,14 @@ async def lifespan(app: FastAPI):
         app.state.scheduler = None
         if user_stream:
             user_stream.stop()
+        app.state.db = None
 
 
 app = FastAPI(title="Zero Gravity Dashboard", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.state.scheduler = None
+app.state.db = None
 
 
 @app.middleware("http")

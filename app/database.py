@@ -5,11 +5,14 @@ import sqlite3
 import pandas as pd
 import os
 from pathlib import Path
+import threading
 from app.logger import logger
 
 
 class Database:
     """SQLite数据库管理类"""
+    _init_lock = threading.Lock()
+    _initialized_db_paths = set()
 
     def __init__(self, db_path: str = None):
         if db_path is None:
@@ -17,13 +20,26 @@ class Database:
             project_root = Path(__file__).parent.parent
             db_path = project_root / "data" / "trades.db"
 
-        self.db_path = db_path
+        self.db_path = str(db_path)
 
         # 确保数据目录存在
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
-        # 初始化数据库
-        self._init_database()
+        # 初始化数据库（同一路径仅执行一次）
+        self._init_database_once()
+
+    def _db_identity(self) -> str:
+        return str(Path(self.db_path).expanduser().resolve())
+
+    def _init_database_once(self):
+        identity = self._db_identity()
+        if identity in self._initialized_db_paths:
+            return
+        with self._init_lock:
+            if identity in self._initialized_db_paths:
+                return
+            self._init_database()
+            self._initialized_db_paths.add(identity)
 
     def _get_connection(self):
         """获取数据库连接"""

@@ -20,7 +20,7 @@ from app.jobs.risk_jobs import run_long_held_positions_check, run_sleep_risk_che
 from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremental
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
-from app.core.scheduler_config import read_float_env, read_int_env
+from app.core.scheduler_config import load_scheduler_config
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
 from app.notifier import send_server_chan_notification
@@ -39,7 +39,8 @@ class TradeDataScheduler:
     """交易数据定时更新调度器"""
 
     def __init__(self):
-        scheduler_tz = os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')
+        config = load_scheduler_config()
+        scheduler_tz = config.scheduler_timezone
         try:
             self.scheduler = BackgroundScheduler(timezone=ZoneInfo(scheduler_tz))
         except Exception as exc:
@@ -61,77 +62,57 @@ class TradeDataScheduler:
         else:
             self.processor = TradeDataProcessor(api_key, api_secret)
 
-        self.days_to_fetch = read_int_env('DAYS_TO_FETCH', 30, minimum=1)
-        self.update_interval_minutes = read_int_env('UPDATE_INTERVAL_MINUTES', 10, minimum=1)
-        self.open_positions_update_interval_minutes = read_int_env(
-            'OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES',
-            self.update_interval_minutes,
-            minimum=1
-        )
-        self.start_date = os.getenv('START_DATE')  # 自定义起始日期
-        self.end_date = os.getenv('END_DATE')      # 自定义结束日期
-        self.sync_lookback_minutes = read_int_env('SYNC_LOOKBACK_MINUTES', 1440, minimum=1)
-        self.symbol_sync_overlap_minutes = read_int_env('SYMBOL_SYNC_OVERLAP_MINUTES', 1440, minimum=1)
-        self.open_positions_lookback_days = read_int_env('OPEN_POSITIONS_LOOKBACK_DAYS', 60, minimum=1)
-        self.enable_daily_full_sync = os.getenv('ENABLE_DAILY_FULL_SYNC', '1').lower() in ('1', 'true', 'yes')
-        self.daily_full_sync_hour = read_int_env('DAILY_FULL_SYNC_HOUR', 3, minimum=0)
-        self.daily_full_sync_minute = read_int_env('DAILY_FULL_SYNC_MINUTE', 30, minimum=0)
-        self.use_time_filter = os.getenv('SYNC_USE_TIME_FILTER', '1').lower() in ('1', 'true', 'yes')
-        self.enable_user_stream = os.getenv('ENABLE_USER_STREAM', '0').lower() in ('1', 'true', 'yes')
-        self.force_full_sync = os.getenv('FORCE_FULL_SYNC', '0').lower() in ('1', 'true', 'yes')
-        self.enable_leaderboard_alert = os.getenv('ENABLE_LEADERBOARD_ALERT', '1').lower() in ('1', 'true', 'yes')
-        self.leaderboard_top_n = read_int_env('LEADERBOARD_TOP_N', 10, minimum=1)
-        self.leaderboard_min_quote_volume = read_float_env('LEADERBOARD_MIN_QUOTE_VOLUME', 50_000_000, minimum=0.0)
-        self.leaderboard_max_symbols = read_int_env('LEADERBOARD_MAX_SYMBOLS', 120, minimum=0)
-        self.leaderboard_kline_workers = read_int_env('LEADERBOARD_KLINE_WORKERS', 6, minimum=1)
-        self.leaderboard_weight_budget_per_minute = read_int_env('LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
-        self.leaderboard_alert_hour = read_int_env('LEADERBOARD_ALERT_HOUR', 7, minimum=0)
-        self.leaderboard_alert_minute = read_int_env('LEADERBOARD_ALERT_MINUTE', 40, minimum=0)
-        self.leaderboard_guard_before_minutes = read_int_env('LEADERBOARD_GUARD_BEFORE_MINUTES', 2, minimum=0)
-        self.leaderboard_guard_after_minutes = read_int_env('LEADERBOARD_GUARD_AFTER_MINUTES', 5, minimum=0)
-        self.enable_rebound_7d_snapshot = os.getenv('ENABLE_REBOUND_7D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
-        self.rebound_7d_top_n = read_int_env('REBOUND_7D_TOP_N', 10, minimum=1)
-        self.rebound_7d_kline_workers = read_int_env('REBOUND_7D_KLINE_WORKERS', 6, minimum=1)
-        self.rebound_7d_weight_budget_per_minute = read_int_env('REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE', 900, minimum=60)
-        self.rebound_7d_hour = read_int_env('REBOUND_7D_HOUR', 7, minimum=0)
-        self.rebound_7d_minute = read_int_env('REBOUND_7D_MINUTE', 30, minimum=0)
-        self.enable_rebound_30d_snapshot = os.getenv('ENABLE_REBOUND_30D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
-        self.rebound_30d_top_n = read_int_env('REBOUND_30D_TOP_N', 10, minimum=1)
-        self.rebound_30d_kline_workers = read_int_env('REBOUND_30D_KLINE_WORKERS', self.rebound_7d_kline_workers, minimum=1)
-        self.rebound_30d_weight_budget_per_minute = read_int_env(
-            'REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE', self.rebound_7d_weight_budget_per_minute, minimum=60
-        )
-        self.rebound_30d_hour = read_int_env('REBOUND_30D_HOUR', self.rebound_7d_hour, minimum=0)
-        self.rebound_30d_minute = read_int_env('REBOUND_30D_MINUTE', self.rebound_7d_minute + 2, minimum=0)
-        self.enable_rebound_60d_snapshot = os.getenv('ENABLE_REBOUND_60D_SNAPSHOT', '1').lower() in ('1', 'true', 'yes')
-        self.rebound_60d_top_n = read_int_env('REBOUND_60D_TOP_N', 10, minimum=1)
-        self.rebound_60d_kline_workers = read_int_env('REBOUND_60D_KLINE_WORKERS', self.rebound_7d_kline_workers, minimum=1)
-        self.rebound_60d_weight_budget_per_minute = read_int_env(
-            'REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE', self.rebound_7d_weight_budget_per_minute, minimum=60
-        )
-        self.rebound_60d_hour = read_int_env('REBOUND_60D_HOUR', self.rebound_7d_hour, minimum=0)
-        self.rebound_60d_minute = read_int_env('REBOUND_60D_MINUTE', self.rebound_7d_minute + 4, minimum=0)
-        self.noon_loss_check_hour = read_int_env('NOON_LOSS_CHECK_HOUR', 11, minimum=0)
-        self.noon_loss_check_minute = read_int_env('NOON_LOSS_CHECK_MINUTE', 50, minimum=0)
-        self.noon_review_hour = read_int_env('NOON_REVIEW_HOUR', 23, minimum=0)
-        self.noon_review_minute = read_int_env('NOON_REVIEW_MINUTE', 2, minimum=0)
-        self.noon_review_target_day_offset = read_int_env('NOON_REVIEW_TARGET_DAY_OFFSET', 0)
-        self.enable_profit_alert = os.getenv('ENABLE_PROFIT_ALERT', '1').lower() in ('1', 'true', 'yes')
-        self.enable_reentry_alert = os.getenv('ENABLE_REENTRY_ALERT', '1').lower() in ('1', 'true', 'yes')
-        self.profit_alert_threshold_pct = read_float_env('PROFIT_ALERT_THRESHOLD_PCT', 20.0, minimum=0.0)
-        self.leaderboard_alert_hour %= 24
-        self.leaderboard_alert_minute %= 60
-        self.rebound_7d_hour %= 24
-        self.rebound_7d_minute %= 60
-        self.rebound_30d_hour %= 24
-        self.rebound_30d_minute %= 60
-        self.rebound_60d_hour %= 24
-        self.rebound_60d_minute %= 60
-        self.noon_loss_check_hour %= 24
-        self.noon_loss_check_minute %= 60
-        self.noon_review_hour %= 24
-        self.noon_review_minute %= 60
-        self.api_job_lock_wait_seconds = read_int_env('API_JOB_LOCK_WAIT_SECONDS', 8, minimum=0)
+        self.days_to_fetch = config.days_to_fetch
+        self.update_interval_minutes = config.update_interval_minutes
+        self.open_positions_update_interval_minutes = config.open_positions_update_interval_minutes
+        self.start_date = config.start_date
+        self.end_date = config.end_date
+        self.sync_lookback_minutes = config.sync_lookback_minutes
+        self.symbol_sync_overlap_minutes = config.symbol_sync_overlap_minutes
+        self.open_positions_lookback_days = config.open_positions_lookback_days
+        self.enable_daily_full_sync = config.enable_daily_full_sync
+        self.daily_full_sync_hour = config.daily_full_sync_hour
+        self.daily_full_sync_minute = config.daily_full_sync_minute
+        self.use_time_filter = config.use_time_filter
+        self.enable_user_stream = config.enable_user_stream
+        self.force_full_sync = config.force_full_sync
+        self.enable_leaderboard_alert = config.enable_leaderboard_alert
+        self.leaderboard_top_n = config.leaderboard_top_n
+        self.leaderboard_min_quote_volume = config.leaderboard_min_quote_volume
+        self.leaderboard_max_symbols = config.leaderboard_max_symbols
+        self.leaderboard_kline_workers = config.leaderboard_kline_workers
+        self.leaderboard_weight_budget_per_minute = config.leaderboard_weight_budget_per_minute
+        self.leaderboard_alert_hour = config.leaderboard_alert_hour
+        self.leaderboard_alert_minute = config.leaderboard_alert_minute
+        self.leaderboard_guard_before_minutes = config.leaderboard_guard_before_minutes
+        self.leaderboard_guard_after_minutes = config.leaderboard_guard_after_minutes
+        self.enable_rebound_7d_snapshot = config.enable_rebound_7d_snapshot
+        self.rebound_7d_top_n = config.rebound_7d_top_n
+        self.rebound_7d_kline_workers = config.rebound_7d_kline_workers
+        self.rebound_7d_weight_budget_per_minute = config.rebound_7d_weight_budget_per_minute
+        self.rebound_7d_hour = config.rebound_7d_hour
+        self.rebound_7d_minute = config.rebound_7d_minute
+        self.enable_rebound_30d_snapshot = config.enable_rebound_30d_snapshot
+        self.rebound_30d_top_n = config.rebound_30d_top_n
+        self.rebound_30d_kline_workers = config.rebound_30d_kline_workers
+        self.rebound_30d_weight_budget_per_minute = config.rebound_30d_weight_budget_per_minute
+        self.rebound_30d_hour = config.rebound_30d_hour
+        self.rebound_30d_minute = config.rebound_30d_minute
+        self.enable_rebound_60d_snapshot = config.enable_rebound_60d_snapshot
+        self.rebound_60d_top_n = config.rebound_60d_top_n
+        self.rebound_60d_kline_workers = config.rebound_60d_kline_workers
+        self.rebound_60d_weight_budget_per_minute = config.rebound_60d_weight_budget_per_minute
+        self.rebound_60d_hour = config.rebound_60d_hour
+        self.rebound_60d_minute = config.rebound_60d_minute
+        self.noon_loss_check_hour = config.noon_loss_check_hour
+        self.noon_loss_check_minute = config.noon_loss_check_minute
+        self.noon_review_hour = config.noon_review_hour
+        self.noon_review_minute = config.noon_review_minute
+        self.noon_review_target_day_offset = config.noon_review_target_day_offset
+        self.enable_profit_alert = config.enable_profit_alert
+        self.enable_reentry_alert = config.enable_reentry_alert
+        self.profit_alert_threshold_pct = config.profit_alert_threshold_pct
+        self.api_job_lock_wait_seconds = config.api_job_lock_wait_seconds
         self.runtime_controller = JobRuntimeController(lock_wait_seconds=self.api_job_lock_wait_seconds)
 
     def _is_api_cooldown_active(self, source: str) -> bool:
