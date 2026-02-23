@@ -2,13 +2,10 @@
 定时任务调度器 - 自动更新交易数据
 """
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import os
 import time
-from functools import partial
 from dotenv import load_dotenv
 import pandas as pd
 
@@ -31,6 +28,8 @@ from app.jobs.sync_pipeline_jobs import (
     persist_closed_trades_and_watermarks,
     resolve_sync_window,
 )
+from app.jobs.balance_sync_job import run_balance_sync_job
+from app.jobs.scheduler_startup_jobs import register_scheduler_jobs
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
@@ -572,81 +571,10 @@ class TradeDataScheduler:
 
     def sync_balance_data(self):
         """同步账户余额数据到数据库"""
-        status = "success"
         with measure_ms("scheduler.sync_balance_data") as metric:
+            status = "success"
             try:
-                if not self.processor:
-                    return  # 如果没有配置API密钥，则不执行
-                if self._is_api_cooldown_active(source='余额同步'):
-                    return
-                if not self._try_enter_api_job_slot(source='余额同步'):
-                    return
-
-                try:
-                    logger.info("开始同步账户余额...")
-                    # balance_info returns {'margin_balance': float, 'wallet_balance': float}
-                    balance_info = self.processor.get_account_balance()
-
-                    if balance_info:
-                        current_margin = balance_info['margin_balance']
-                        current_wallet = balance_info['wallet_balance']
-
-                        # --- 通过 Binance income API 直接同步出入金 ---
-                        try:
-                            latest_event_time_ms = self.sync_repo.get_latest_transfer_event_time()
-                            if latest_event_time_ms is None:
-                                lookback_days_raw = os.getenv('TRANSFER_SYNC_LOOKBACK_DAYS', '90')
-                                try:
-                                    lookback_days = max(1, int(lookback_days_raw))
-                                except ValueError:
-                                    logger.warning(
-                                        f"TRANSFER_SYNC_LOOKBACK_DAYS={lookback_days_raw} 非法，回退为 90"
-                                    )
-                                    lookback_days = 90
-                                start_time_ms = int(
-                                    (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp() * 1000
-                                )
-                            else:
-                                # 往前回看1分钟做边界保护，落库侧会按 source_uid 去重
-                                start_time_ms = max(0, latest_event_time_ms - 60_000)
-
-                            end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                            transfer_rows = self.processor.get_transfer_income_records(
-                                start_time=start_time_ms,
-                                end_time=end_time_ms
-                            )
-
-                            inserted_count = 0
-                            for row in transfer_rows:
-                                inserted = self.sync_repo.save_transfer_income(
-                                    amount=row['amount'],
-                                    event_time=row['event_time_ms'],
-                                    asset=row.get('asset') or 'USDT',
-                                    income_type=row.get('income_type') or 'TRANSFER',
-                                    source_uid=row.get('source_uid'),
-                                    description=row.get('description')
-                                )
-                                if inserted:
-                                    inserted_count += 1
-
-                            logger.info(
-                                "出入金同步完成: "
-                                f"fetched={len(transfer_rows)}, inserted={inserted_count}, "
-                                f"window={self._format_window_with_ms(start_time_ms, end_time_ms)}"
-                            )
-                        except Exception as e:
-                            logger.warning(f"出入金同步出错: {e}")
-
-                        # 保存当前状态
-                        self.trade_repo.save_balance_history(current_margin, current_wallet)
-                        logger.info(f"余额已更新: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
-                    else:
-                        logger.warning("获取余额失败，balance为 None")
-                except Exception as e:
-                    status = "error"
-                    logger.error(f"同步余额失败: {str(e)}")
-                finally:
-                    self._release_api_job_slot()
+                status = run_balance_sync_job(self)
             finally:
                 log_job_metric(job_name="sync_balance_data", status=status, snapshot=metric)
 
@@ -655,224 +583,7 @@ class TradeDataScheduler:
         if not self.processor:
             logger.warning("定时任务未启动: API密钥未配置")
             return
-
-        # 立即执行一次同步
-        logger.info("立即执行首次数据同步...")
-        self.scheduler.add_job(partial(run_sync_trades_incremental, self), 'date')
-        self.scheduler.add_job(partial(run_sync_open_positions, self), 'date')
-        self.scheduler.add_job(self.sync_balance_data, 'date')
-
-        # 增量同步任务 - 每隔N分钟执行一次
-        self.scheduler.add_job(
-            func=partial(run_sync_trades_incremental, self),
-            trigger=IntervalTrigger(minutes=self.update_interval_minutes),
-            id='sync_trades_incremental',
-            name='同步交易数据(增量)',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=120,
-            replace_existing=True
-        )
-
-        # 未平仓同步任务 - 与闭仓ETL解耦
-        self.scheduler.add_job(
-            func=partial(run_sync_open_positions, self),
-            trigger=IntervalTrigger(minutes=self.open_positions_update_interval_minutes),
-            id='sync_open_positions',
-            name='同步未平仓订单',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=120,
-            replace_existing=True
-        )
-
-        # 每日全量同步任务 - 默认每天 03:30 (UTC+8)
-        if self.enable_daily_full_sync:
-            self.scheduler.add_job(
-                func=self.sync_trades_full,
-                trigger=CronTrigger(
-                    hour=self.daily_full_sync_hour,
-                    minute=self.daily_full_sync_minute,
-                    timezone=UTC8
-                ),
-                id='sync_trades_full_daily',
-                name='同步交易数据(全量)',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=600,
-                replace_existing=True
-            )
-            logger.info(
-                "全量同步任务已启动: "
-                f"每天 {self.daily_full_sync_hour:02d}:{self.daily_full_sync_minute:02d} 执行"
-            )
-        else:
-            logger.info("全量同步任务未启用: ENABLE_DAILY_FULL_SYNC=0")
-
-        if not self.enable_user_stream:
-            # 添加余额同步任务 - 每分钟执行一次
-            self.scheduler.add_job(
-                func=self.sync_balance_data,
-                trigger=IntervalTrigger(minutes=1),
-                id='sync_balance',
-                name='同步账户余额',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=60,
-                replace_existing=True
-            )
-        else:
-            logger.info("已启用用户数据流，跳过轮询余额同步任务")
-
-        # 添加睡前风控检查任务 - 每天 23:00 (UTC+8) 执行
-        self.scheduler.add_job(
-            func=self.check_risk_before_sleep,
-            trigger=CronTrigger(hour=23, minute=0, timezone=UTC8),
-            id='risk_check_sleep',
-            name='睡前风控检查',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True
-        )
-
-        # 添加午间止损复盘任务 - 每天 23:02 (UTC+8) 执行（默认）
-        self.scheduler.add_job(
-            func=self.review_noon_loss_at_night,
-            trigger=CronTrigger(
-                hour=self.noon_review_hour,
-                minute=self.noon_review_minute,
-                timezone=UTC8
-            ),
-            id='review_noon_loss_night',
-            name='午间止损夜间复盘',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True
-        )
-
-        # 添加午间浮亏检查任务 - 默认每天 11:50 (UTC+8) 执行
-        self.scheduler.add_job(
-            func=partial(run_noon_loss_check, self),
-            trigger=CronTrigger(
-                hour=self.noon_loss_check_hour,
-                minute=self.noon_loss_check_minute,
-                timezone=UTC8
-            ),
-            id='check_losses_noon',
-            name='午间浮亏检查',
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True
-        )
-
-        if self.enable_leaderboard_alert:
-            self.scheduler.add_job(
-                func=self.send_morning_top_gainers,
-                trigger=CronTrigger(
-                    hour=self.leaderboard_alert_hour,
-                    minute=self.leaderboard_alert_minute,
-                    timezone=UTC8
-                ),
-                id='send_morning_top_gainers',
-                name='晨间涨幅榜',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=300,
-                replace_existing=True
-            )
-            logger.info(
-                "晨间涨幅榜任务已启动: "
-                f"每天 {self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d} 执行"
-            )
-        else:
-            logger.info("晨间涨幅榜任务未启用: ENABLE_LEADERBOARD_ALERT=0")
-
-        if self.enable_rebound_7d_snapshot:
-            self.scheduler.add_job(
-                func=self.snapshot_morning_rebound_7d,
-                trigger=CronTrigger(
-                    hour=self.rebound_7d_hour,
-                    minute=self.rebound_7d_minute,
-                    timezone=UTC8
-                ),
-                id='snapshot_morning_rebound_7d',
-                name='晨间14D反弹榜',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=300,
-                replace_existing=True
-            )
-            logger.info(
-                "晨间14D反弹榜任务已启动: "
-                f"每天 {self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d} 执行"
-            )
-        else:
-            logger.info("晨间14D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
-
-        if self.enable_rebound_30d_snapshot:
-            self.scheduler.add_job(
-                func=self.snapshot_morning_rebound_30d,
-                trigger=CronTrigger(
-                    hour=self.rebound_30d_hour,
-                    minute=self.rebound_30d_minute,
-                    timezone=UTC8
-                ),
-                id='snapshot_morning_rebound_30d',
-                name='晨间30D反弹榜',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=300,
-                replace_existing=True
-            )
-            logger.info(
-                "晨间30D反弹榜任务已启动: "
-                f"每天 {self.rebound_30d_hour:02d}:{self.rebound_30d_minute:02d} 执行"
-            )
-        else:
-            logger.info("晨间30D反弹榜任务未启用: ENABLE_REBOUND_30D_SNAPSHOT=0")
-
-        if self.enable_rebound_60d_snapshot:
-            self.scheduler.add_job(
-                func=self.snapshot_morning_rebound_60d,
-                trigger=CronTrigger(
-                    hour=self.rebound_60d_hour,
-                    minute=self.rebound_60d_minute,
-                    timezone=UTC8
-                ),
-                id='snapshot_morning_rebound_60d',
-                name='晨间60D反弹榜',
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=300,
-                replace_existing=True
-            )
-            logger.info(
-                "晨间60D反弹榜任务已启动: "
-                f"每天 {self.rebound_60d_hour:02d}:{self.rebound_60d_minute:02d} 执行"
-            )
-        else:
-            logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
-
-        self.scheduler.start()
-        logger.info(f"增量交易同步任务已启动: 每 {self.update_interval_minutes} 分钟自动更新一次")
-        logger.info(
-            f"未平仓同步任务已启动: 每 {self.open_positions_update_interval_minutes} 分钟自动更新一次 "
-            f"(lookback_days={self.open_positions_lookback_days})"
-        )
-        logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
-        logger.info("睡前风控检查已启动: 每天 23:00 执行")
-        logger.info(
-            "午间浮亏检查已启动: "
-            f"每天 {self.noon_loss_check_hour:02d}:{self.noon_loss_check_minute:02d} 执行"
-        )
-        logger.info(
-            "午间止损夜间复盘已启动: "
-            f"每天 {self.noon_review_hour:02d}:{self.noon_review_minute:02d} 执行, "
-            f"target_day_offset={self.noon_review_target_day_offset}"
-        )
+        register_scheduler_jobs(self, utc8=UTC8)
 
     def stop(self):
         """停止定时任务"""
