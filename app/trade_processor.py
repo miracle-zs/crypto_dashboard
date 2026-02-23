@@ -15,6 +15,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from app.logger import logger
 from app.binance_client import BinanceFuturesRestClient
+from app.core.trade_position_utils import (
+    build_open_position_output,
+    consume_fifo_entries,
+    format_holding_time_cn,
+    position_to_trade_row,
+    trim_entries_to_target_qty,
+)
+from app.core.trade_dataframe_utils import merge_same_entry_positions
 
 # 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
@@ -873,68 +881,16 @@ class TradeDataProcessor:
 
     @staticmethod
     def _format_holding_time_cn(duration_seconds: float) -> str:
-        if duration_seconds < 60:
-            return f"{int(duration_seconds)}秒"
-        if duration_seconds < 3600:
-            minutes = int(duration_seconds // 60)
-            seconds = int(duration_seconds % 60)
-            return f"{minutes}分{seconds}秒"
-        if duration_seconds < 86400:
-            hours = int(duration_seconds // 3600)
-            minutes = int((duration_seconds % 3600) // 60)
-            return f"{hours}小时{minutes}分"
-        days = int(duration_seconds // 86400)
-        hours = int((duration_seconds % 86400) // 3600)
-        return f"{days}天{hours}小时"
+        return format_holding_time_cn(duration_seconds)
 
     def _position_to_trade_row(self, pos: Dict, idx: int, open_price_cache: Dict[tuple[str, int], Optional[float]]) -> Dict:
-        symbol = pos['symbol']
-        entry_time = pos['entry_time']
-        exit_time = pos['exit_time']
-        day_start_ms = self.get_utc_day_start(entry_time)
-        open_price = open_price_cache.get((symbol, day_start_ms))
-
-        entry_dt = datetime.fromtimestamp(entry_time / 1000, tz=UTC8)
-        exit_dt = datetime.fromtimestamp(exit_time / 1000, tz=UTC8)
-        duration_seconds = (exit_time - entry_time) / 1000
-        hold_time = self._format_holding_time_cn(duration_seconds)
-
-        base = symbol[:-4] if symbol.endswith('USDT') else symbol
-        entry_price = pos['entry_price']
-        qty = pos['qty']
-        pnl_net = round(pos['pnl'])
-        entry_amount = round(entry_price * qty)
-
-        if open_price and entry_price:
-            price_change_pct = (entry_price - open_price) / open_price
-        else:
-            price_change_pct = 0
-
-        close_type = '止盈' if pnl_net > 0 else '止损'
-        return_rate_raw = (pnl_net / entry_amount * 100) if entry_amount != 0 else 0
-
-        return {
-            'No': idx,
-            'Date': entry_dt.strftime('%Y%m%d'),
-            'Entry_Time': entry_dt.strftime('%Y-%m-%d %H:%M:%S'),
-            'Exit_Time': exit_dt.strftime('%Y-%m-%d %H:%M:%S'),
-            'Holding_Time': hold_time,
-            'Symbol': base,
-            'Side': pos['side'],
-            'Price_Change_Pct': price_change_pct,
-            'Entry_Amount': entry_amount,
-            'Entry_Price': entry_price,
-            'Exit_Price': pos['exit_price'],
-            'Qty': qty,
-            'Fees': round(pos.get('fees', 0)),
-            'PNL_Net': pnl_net,
-            'Close_Type': close_type,
-            'Return_Rate': f"{return_rate_raw:.2f}%",
-            'Open_Price': open_price if open_price else 0,
-            'PNL_Before_Fees': round(pos.get('pnl_before_fees', pos['pnl'])),
-            'Entry_Order_ID': pos['entry_order_id'],
-            'Exit_Order_ID': pos['exit_order_id'],
-        }
+        return position_to_trade_row(
+            pos=pos,
+            idx=idx,
+            open_price_cache=open_price_cache,
+            utc8=UTC8,
+            get_utc_day_start=self.get_utc_day_start,
+        )
 
     def _build_trades_dataframe(
         self,
@@ -953,73 +909,7 @@ class TradeDataProcessor:
         return pd.DataFrame(trades_data)
 
     def merge_same_entry_positions(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Merge positions with same symbol and entry time"""
-        if df.empty:
-            return df
-
-        # Group by Symbol, Side, and Entry Time (round to minute)
-        df['Entry_Time_Key'] = pd.to_datetime(df['Entry_Time']).dt.floor('min')  # Use 'min' instead of 'T' for pandas 3.0+
-
-        merged_data = []
-
-        for (symbol, side, entry_time_key), group in df.groupby(['Symbol', 'Side', 'Entry_Time_Key']):
-            if len(group) == 1:
-                # No need to merge, keep as is
-                row = group.iloc[0].to_dict()
-                merged_data.append(row)
-            else:
-                # Merge multiple positions
-                total_qty = group['Qty'].sum()
-                weighted_entry_price = (group['Entry_Price'] * group['Qty']).sum() / total_qty
-                weighted_exit_price = (group['Exit_Price'] * group['Qty']).sum() / total_qty
-
-                pnl_net_merged = round(group['PNL_Net'].sum())
-                entry_amount_merged = round(weighted_entry_price * total_qty)
-
-                # 判断合并后记录的平仓类型：不管LONG还是SHORT，只要PNL_Net为正就是止盈
-                close_type_merged = '止盈' if pnl_net_merged > 0 else '止损'
-
-                # 计算合并后记录的收益率并格式化为保留2位小数的百分比字符串
-                return_rate_raw_merged = (pnl_net_merged / entry_amount_merged * 100) if entry_amount_merged != 0 else 0
-                return_rate_merged = f"{return_rate_raw_merged:.2f}%"
-
-                merged_row = {
-                    'No': group.iloc[0]['No'],  # Keep first number
-                    'Date': group.iloc[0]['Date'],
-                    'Entry_Time': group.iloc[0]['Entry_Time'],
-                    'Exit_Time': group.iloc[0]['Exit_Time'],
-                    'Holding_Time': group.iloc[0]['Holding_Time'],
-                    'Symbol': symbol,
-                    'Side': side,
-                    'Price_Change_Pct': group.iloc[0]['Price_Change_Pct'],  # Keep first
-                    'Entry_Amount': entry_amount_merged,
-                    'Entry_Price': weighted_entry_price,
-                    'Exit_Price': weighted_exit_price,
-                    'Qty': total_qty,
-                    'Fees': round(group['Fees'].sum()),
-                    'PNL_Net': pnl_net_merged,
-                    'Close_Type': close_type_merged,
-                    'Return_Rate': return_rate_merged,
-                    'Open_Price': group.iloc[0]['Open_Price'],  # Keep first (same for all)
-                    'PNL_Before_Fees': round(group['PNL_Before_Fees'].sum()),
-                    'Entry_Order_ID': group.iloc[0]['Entry_Order_ID'],  # Keep first
-                    'Exit_Order_ID': ','.join(group['Exit_Order_ID'].astype(str).unique()),  # Combine all
-                    'Entry_Time_Key': entry_time_key
-                }
-                merged_data.append(merged_row)
-
-        # Create new dataframe
-        merged_df = pd.DataFrame(merged_data)
-
-        # Drop the temporary key column
-        if 'Entry_Time_Key' in merged_df.columns:
-            merged_df = merged_df.drop('Entry_Time_Key', axis=1)
-
-        # Re-number
-        merged_df = merged_df.sort_values('Entry_Time', ascending=True).reset_index(drop=True)
-        merged_df['No'] = range(1, len(merged_df) + 1)
-
-        return merged_df
+        return merge_same_entry_positions(df)
 
     def export_to_excel(self, df: pd.DataFrame, filename: str = None):
         """Export to Excel file"""
@@ -1102,48 +992,15 @@ class TradeDataProcessor:
 
     @staticmethod
     def _consume_fifo_entries(entries: List[Dict], qty_to_close: float):
-        remaining = qty_to_close
-        while remaining > 0 and entries:
-            entry = entries[0]
-            close_qty = min(remaining, entry['qty'])
-            entry['qty'] -= close_qty
-            remaining -= close_qty
-            if entry['qty'] <= 0.0001:
-                entries.pop(0)
+        consume_fifo_entries(entries, qty_to_close)
 
     @staticmethod
     def _trim_entries_to_target_qty(entries: List[Dict], target_qty: float):
-        calculated_qty = sum(e['qty'] for e in entries)
-        if calculated_qty <= target_qty:
-            return
-        diff = calculated_qty - target_qty
-        while diff > 0.0001 and entries:
-            entry = entries[0]
-            if entry['qty'] > diff:
-                entry['qty'] -= diff
-                diff = 0
-            else:
-                diff -= entry['qty']
-                entries.pop(0)
+        trim_entries_to_target_qty(entries, target_qty)
 
     @staticmethod
     def _build_open_position_output(symbol: str, side_str: str, entries: List[Dict]) -> List[Dict]:
-        base = symbol[:-4] if symbol.endswith('USDT') else symbol
-        output = []
-        for entry in entries:
-            if entry['qty'] > 0.0001:
-                dt = datetime.fromtimestamp(entry['time'] / 1000, tz=UTC8)
-                output.append({
-                    'date': dt.strftime('%Y%m%d'),
-                    'symbol': base,
-                    'side': side_str,
-                    'entry_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
-                    'entry_price': entry['price'],
-                    'qty': entry['qty'],
-                    'entry_amount': round(entry['price'] * entry['qty']),
-                    'order_id': entry['order_id']
-                })
-        return output
+        return build_open_position_output(symbol, side_str, entries, utc8=UTC8)
 
     def _extract_open_positions_for_symbol(
         self,

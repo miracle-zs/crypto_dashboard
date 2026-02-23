@@ -18,14 +18,20 @@ from app.jobs.alert_jobs import run_profit_alert_check, run_reentry_alert_check
 from app.jobs.noon_loss_job import run_noon_loss_check, run_noon_loss_review
 from app.jobs.risk_jobs import run_long_held_positions_check, run_sleep_risk_check
 from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremental
+from app.jobs.market_snapshot_jobs import (
+    build_rebound_snapshot_job,
+    build_top_gainers_snapshot_job,
+    get_rebound_snapshot_job,
+    get_top_gainers_snapshot_job,
+    send_morning_top_gainers_job,
+    snapshot_morning_rebound_job,
+)
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
-from app.notifier import send_server_chan_notification
 from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
-from app.services.market_snapshot_service import build_rebound_snapshot, build_top_gainers_snapshot
 from app.services.market_price_service import MarketPriceService
 from app.services.sync_planning_service import build_symbol_since_map
 
@@ -533,110 +539,20 @@ class TradeDataScheduler:
         self.review_noon_loss_at_night(snapshot_date=snapshot_date, send_notification=send_notification)
 
     def _build_top_gainers_snapshot(self):
-        return build_top_gainers_snapshot(self, UTC8)
+        return build_top_gainers_snapshot_job(self, UTC8)
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
         """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
-        if not self.processor:
-            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
-        if self._is_api_cooldown_active(source=source):
-            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-        if not self._try_enter_api_job_slot(source=source):
-            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
-
-        try:
-            snapshot = self._build_top_gainers_snapshot()
-            if snapshot["top"] <= 0:
-                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
-            return {"ok": True, **snapshot}
-        except Exception as e:
-            logger.error(f"{source}失败: {e}")
-            return {"ok": False, "reason": "exception", "message": str(e)}
-        finally:
-            self._release_api_job_slot()
+        return get_top_gainers_snapshot_job(self, source=source, utc8=UTC8)
 
     def send_morning_top_gainers(self):
         """每天早上发送币安合约涨跌幅榜（按UTC当日开盘到当前涨跌幅）"""
-        started_at = time.perf_counter()
-        logger.info(
-            "晨间涨幅榜任务开始执行: "
-            f"schedule={self.leaderboard_alert_hour:02d}:{self.leaderboard_alert_minute:02d}"
-        )
-        result = self.get_top_gainers_snapshot(source="晨间涨幅榜")
-        logger.info(
-            "晨间涨幅榜快照结果: "
-            f"ok={result.get('ok')}, "
-            f"reason={result.get('reason', '')}, "
-            f"candidates={result.get('candidates', 0)}, "
-            f"effective={result.get('effective', 0)}, "
-            f"top={result.get('top', 0)}"
-        )
-        if not result.get("ok"):
-            logger.warning(
-                f"晨间涨幅榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
-            )
-            return
-
-        try:
-            self.snapshot_repo.save_leaderboard_snapshot(result)
-            logger.info(
-                f"涨幅榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
-            )
-        except Exception as e:
-            logger.error(f"保存涨幅榜快照失败: {e}")
-
-        try:
-            metrics_payload = self.snapshot_repo.upsert_leaderboard_daily_metrics_for_date(
-                str(result.get("snapshot_date"))
-            )
-            if metrics_payload:
-                logger.info(
-                    "涨跌幅指标已保存: "
-                    f"date={result.get('snapshot_date')}, "
-                    f"m1={metrics_payload.get('metric1', {}).get('probability_pct')}, "
-                    f"m2={metrics_payload.get('metric2', {}).get('probability_pct')}, "
-                    f"m3_eval={metrics_payload.get('metric3', {}).get('evaluated_count')}"
-                )
-        except Exception as e:
-            logger.error(f"保存涨跌幅指标失败: {e}")
-
-        title = f"【币安合约市场涨跌幅榜 Top {result['top']}】"
-        content = (
-            "### 币安合约市场晨间涨跌幅榜\n\n"
-            f"**更新时间:** {result['snapshot_time']} (UTC+8)\n"
-            f"**计算区间:** {result['window_start_utc']} UTC 至当前\n\n"
-            "#### 涨幅榜 Top10\n\n"
-            "| 排名 | 币种 | 涨幅 | 24h成交额 |\n"
-            "|:---:|:---:|:---:|:---:|\n"
-        )
-
-        for i, row in enumerate(result["rows"], start=1):
-            symbol = row['symbol']
-            change = f"{row['change']:.2f}%"
-            volume = f"{int(row['volume'] / 1_000_000)}M"
-            content += f"| {i} | {symbol} | {change} | {volume} |\n"
-
-        losers_rows = result.get("losers_rows", [])
-        if losers_rows:
-            content += (
-                "\n#### 跌幅榜 Top10\n\n"
-                "| 排名 | 币种 | 跌幅 | 24h成交额 |\n"
-                "|:---:|:---:|:---:|:---:|\n"
-            )
-            for i, row in enumerate(losers_rows, start=1):
-                symbol = row['symbol']
-                change = f"{row['change']:.2f}%"
-                volume = f"{int(row['volume'] / 1_000_000)}M"
-                content += f"| {i} | {symbol} | {change} | {volume} |\n"
-
-        send_server_chan_notification(title, content)
-        logger.info(
-            "晨间涨幅榜已发送: "
-            f"candidates={result['candidates']}, "
-            f"effective={result['effective']}, "
-            f"top={result['top']}, "
-            f"losers_top={len(result.get('losers_rows', []))}, "
-            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        return send_morning_top_gainers_job(
+            self,
+            source="晨间涨幅榜",
+            schedule_hour=self.leaderboard_alert_hour,
+            schedule_minute=self.leaderboard_alert_minute,
+            utc8=UTC8,
         )
 
     def _build_rebound_snapshot(
@@ -648,7 +564,7 @@ class TradeDataScheduler:
         weight_budget_per_minute: int,
         label: str
     ):
-        return build_rebound_snapshot(
+        return build_rebound_snapshot_job(
             self,
             utc8=UTC8,
             window_days=window_days,
@@ -690,167 +606,50 @@ class TradeDataScheduler:
 
     def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
         """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        if not self.processor:
-            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
-        if self._is_api_cooldown_active(source=source):
-            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-        if not self._try_enter_api_job_slot(source=source):
-            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
-
-        try:
-            snapshot = self._build_rebound_7d_snapshot()
-            if snapshot["top"] <= 0:
-                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
-            return {"ok": True, **snapshot}
-        except Exception as e:
-            logger.error(f"{source}失败: {e}")
-            return {"ok": False, "reason": "exception", "message": str(e)}
-        finally:
-            self._release_api_job_slot()
+        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_7d_snapshot)
 
     def snapshot_morning_rebound_7d(self):
         """每天早上07:30生成14D反弹幅度Top榜快照并入库。"""
-        started_at = time.perf_counter()
-        logger.info(
-            "晨间14D反弹榜任务开始执行: "
-            f"schedule={self.rebound_7d_hour:02d}:{self.rebound_7d_minute:02d}"
-        )
-        result = self.get_rebound_7d_snapshot(source="晨间14D反弹榜")
-        logger.info(
-            "晨间14D反弹榜快照结果: "
-            f"ok={result.get('ok')}, "
-            f"reason={result.get('reason', '')}, "
-            f"candidates={result.get('candidates', 0)}, "
-            f"effective={result.get('effective', 0)}, "
-            f"top={result.get('top', 0)}"
-        )
-        if not result.get("ok"):
-            logger.warning(
-                f"晨间14D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
-            )
-            return
-
-        try:
-            self.snapshot_repo.save_rebound_7d_snapshot(result)
-            logger.info(
-                f"14D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
-            )
-        except Exception as e:
-            logger.error(f"保存14D反弹榜快照失败: {e}")
-
-        logger.info(
-            "晨间14D反弹榜任务完成: "
-            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        return snapshot_morning_rebound_job(
+            self,
+            source="晨间14D反弹榜",
+            label="14D反弹榜",
+            schedule_hour=self.rebound_7d_hour,
+            schedule_minute=self.rebound_7d_minute,
+            get_snapshot=self.get_rebound_7d_snapshot,
+            save_snapshot=self.snapshot_repo.save_rebound_7d_snapshot,
         )
 
     def get_rebound_30d_snapshot(self, source: str = "30D反弹榜接口"):
         """获取30D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        if not self.processor:
-            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
-        if self._is_api_cooldown_active(source=source):
-            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-        if not self._try_enter_api_job_slot(source=source):
-            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
-
-        try:
-            snapshot = self._build_rebound_30d_snapshot()
-            if snapshot["top"] <= 0:
-                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
-            return {"ok": True, **snapshot}
-        except Exception as e:
-            logger.error(f"{source}失败: {e}")
-            return {"ok": False, "reason": "exception", "message": str(e)}
-        finally:
-            self._release_api_job_slot()
+        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_30d_snapshot)
 
     def snapshot_morning_rebound_30d(self):
         """每天早上生成30D反弹幅度Top榜快照并入库。"""
-        started_at = time.perf_counter()
-        logger.info(
-            "晨间30D反弹榜任务开始执行: "
-            f"schedule={self.rebound_30d_hour:02d}:{self.rebound_30d_minute:02d}"
-        )
-        result = self.get_rebound_30d_snapshot(source="晨间30D反弹榜")
-        logger.info(
-            "晨间30D反弹榜快照结果: "
-            f"ok={result.get('ok')}, "
-            f"reason={result.get('reason', '')}, "
-            f"candidates={result.get('candidates', 0)}, "
-            f"effective={result.get('effective', 0)}, "
-            f"top={result.get('top', 0)}"
-        )
-        if not result.get("ok"):
-            logger.warning(
-                f"晨间30D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
-            )
-            return
-
-        try:
-            self.snapshot_repo.save_rebound_30d_snapshot(result)
-            logger.info(
-                f"30D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
-            )
-        except Exception as e:
-            logger.error(f"保存30D反弹榜快照失败: {e}")
-
-        logger.info(
-            "晨间30D反弹榜任务完成: "
-            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        return snapshot_morning_rebound_job(
+            self,
+            source="晨间30D反弹榜",
+            label="30D反弹榜",
+            schedule_hour=self.rebound_30d_hour,
+            schedule_minute=self.rebound_30d_minute,
+            get_snapshot=self.get_rebound_30d_snapshot,
+            save_snapshot=self.snapshot_repo.save_rebound_30d_snapshot,
         )
 
     def get_rebound_60d_snapshot(self, source: str = "60D反弹榜接口"):
         """获取60D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        if not self.processor:
-            return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
-        if self._is_api_cooldown_active(source=source):
-            return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-        if not self._try_enter_api_job_slot(source=source):
-            return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
-
-        try:
-            snapshot = self._build_rebound_60d_snapshot()
-            if snapshot["top"] <= 0:
-                return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
-            return {"ok": True, **snapshot}
-        except Exception as e:
-            logger.error(f"{source}失败: {e}")
-            return {"ok": False, "reason": "exception", "message": str(e)}
-        finally:
-            self._release_api_job_slot()
+        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_60d_snapshot)
 
     def snapshot_morning_rebound_60d(self):
         """每天早上生成60D反弹幅度Top榜快照并入库。"""
-        started_at = time.perf_counter()
-        logger.info(
-            "晨间60D反弹榜任务开始执行: "
-            f"schedule={self.rebound_60d_hour:02d}:{self.rebound_60d_minute:02d}"
-        )
-        result = self.get_rebound_60d_snapshot(source="晨间60D反弹榜")
-        logger.info(
-            "晨间60D反弹榜快照结果: "
-            f"ok={result.get('ok')}, "
-            f"reason={result.get('reason', '')}, "
-            f"candidates={result.get('candidates', 0)}, "
-            f"effective={result.get('effective', 0)}, "
-            f"top={result.get('top', 0)}"
-        )
-        if not result.get("ok"):
-            logger.warning(
-                f"晨间60D反弹榜任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
-            )
-            return
-
-        try:
-            self.snapshot_repo.save_rebound_60d_snapshot(result)
-            logger.info(
-                f"60D反弹榜快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
-            )
-        except Exception as e:
-            logger.error(f"保存60D反弹榜快照失败: {e}")
-
-        logger.info(
-            "晨间60D反弹榜任务完成: "
-            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        return snapshot_morning_rebound_job(
+            self,
+            source="晨间60D反弹榜",
+            label="60D反弹榜",
+            schedule_hour=self.rebound_60d_hour,
+            schedule_minute=self.rebound_60d_minute,
+            get_snapshot=self.get_rebound_60d_snapshot,
+            save_snapshot=self.snapshot_repo.save_rebound_60d_snapshot,
         )
 
     @staticmethod
