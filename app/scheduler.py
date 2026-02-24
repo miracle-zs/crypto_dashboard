@@ -418,16 +418,26 @@ class TradeDataScheduler:
     ):
         if not self.enable_triggered_trades_compensation:
             return
-        normalized = sorted({str(symbol).upper() for symbol in symbols if symbol})
+        normalized = sorted({self._normalize_futures_symbol(symbol) for symbol in symbols if symbol})
         if not normalized:
             return
+        normalized_since_map = {}
+        if symbol_since_ms:
+            for raw_symbol, raw_since in symbol_since_ms.items():
+                if not raw_symbol or raw_since is None:
+                    continue
+                symbol = self._normalize_futures_symbol(raw_symbol)
+                previous = normalized_since_map.get(symbol)
+                normalized_since_map[symbol] = (
+                    int(raw_since) if previous is None else min(int(raw_since), previous)
+                )
         for symbol in normalized:
             fallback_since = int(datetime.now(UTC8).timestamp() * 1000) - int(
                 self.trades_compensation_lookback_minutes
             ) * 60 * 1000
             requested_since = (
-                int(symbol_since_ms[symbol])
-                if symbol_since_ms and symbol in symbol_since_ms and symbol_since_ms[symbol] is not None
+                int(normalized_since_map[symbol])
+                if symbol in normalized_since_map
                 else fallback_since
             )
             previous = self._pending_compensation_since_ms.get(symbol)

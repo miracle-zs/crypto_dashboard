@@ -350,3 +350,20 @@ def test_request_trades_compensation_merges_symbols_with_earliest_since(monkeypa
     assert "BTCUSDT" in scheduler._pending_compensation_since_ms
     assert "ETHUSDT" in scheduler._pending_compensation_since_ms
     assert scheduler._pending_compensation_since_ms["BTCUSDT"] <= now_ms - 3 * 60 * 60 * 1000
+
+
+def test_request_trades_compensation_normalizes_base_symbols(monkeypatch):
+    from app.scheduler import TradeDataScheduler, UTC8
+    from datetime import datetime
+
+    scheduler = TradeDataScheduler()
+    scheduler.scheduler.add_job = lambda *args, **kwargs: None
+    now_ms = int(datetime.now(UTC8).timestamp() * 1000)
+
+    scheduler.request_trades_compensation(
+        ["PIPPIN"],
+        reason="test",
+        symbol_since_ms={"PIPPIN": now_ms - 5 * 60 * 60 * 1000},
+    )
+
+    assert "PIPPINUSDT" in scheduler._pending_compensation_since_ms
