@@ -46,10 +46,15 @@ class LeaderboardService:
             snapshot = await run_in_thread(snapshot_repo.get_latest_leaderboard_snapshot)
 
         if not snapshot:
+            leaderboard_hour = int(os.getenv("LEADERBOARD_ALERT_HOUR", "7"))
+            leaderboard_minute = int(os.getenv("LEADERBOARD_ALERT_MINUTE", "40"))
             return {
                 "ok": False,
                 "reason": "no_snapshot",
-                "message": "暂无快照数据，请等待下一次07:40定时任务生成"
+                "message": (
+                    "暂无快照数据，请等待下一次"
+                    f"{leaderboard_hour:02d}:{leaderboard_minute:02d}定时任务生成"
+                ),
             }
 
         open_symbols = await run_in_thread(trade_repo.get_open_position_symbols)

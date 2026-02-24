@@ -18,6 +18,16 @@ class ReboundService:
     def _normalize_symbol(symbol: str) -> str:
         return normalize_futures_symbol(symbol)
 
+    @staticmethod
+    def _read_int_env(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
     async def get_snapshot_response(
         self,
         *,
@@ -56,10 +66,26 @@ class ReboundService:
             snapshot = await run_in_thread(latest)
 
         if not snapshot:
+            rebound_time_map = {
+                "7d": (
+                    self._read_int_env("REBOUND_7D_HOUR", 7),
+                    self._read_int_env("REBOUND_7D_MINUTE", 30),
+                ),
+                "30d": (
+                    self._read_int_env("REBOUND_30D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
+                    self._read_int_env("REBOUND_30D_MINUTE", 32),
+                ),
+                "60d": (
+                    self._read_int_env("REBOUND_60D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
+                    self._read_int_env("REBOUND_60D_MINUTE", 34),
+                ),
+            }
+            r_hour, r_minute = rebound_time_map[window]
+            time_label = f"{r_hour % 24:02d}:{r_minute % 60:02d}"
             msg = {
-                "7d": "暂无快照数据，请等待下一次07:30定时任务生成（14D）",
-                "30d": "暂无快照数据，请等待下一次07:30定时任务生成（30D）",
-                "60d": "暂无快照数据，请等待下一次07:30定时任务生成（60D）",
+                "7d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（14D）",
+                "30d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（30D）",
+                "60d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（60D）",
             }[window]
             return {"ok": False, "reason": "no_snapshot", "message": msg}
 

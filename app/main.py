@@ -30,6 +30,18 @@ user_stream = None
 API_METRIC_LOG_ENABLED = os.getenv("ENABLE_API_METRIC_LOG", "0").strip().lower() in ("1", "true", "yes")
 
 
+def _time_label(hour_env: str, minute_env: str, default_hour: int, default_minute: int) -> str:
+    try:
+        hour = int(os.getenv(hour_env, str(default_hour)))
+    except ValueError:
+        hour = default_hour
+    try:
+        minute = int(os.getenv(minute_env, str(default_minute)))
+    except ValueError:
+        minute = default_minute
+    return f"{hour % 24:02d}:{minute % 60:02d}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global scheduler, user_stream
@@ -114,12 +126,25 @@ app.include_router(balance_api_router)
 
 @app.get("/live-monitor", response_class=HTMLResponse)
 async def read_live_monitor(request: Request):
-    return templates.TemplateResponse(request, "live_monitor.html")
+    return templates.TemplateResponse(
+        request,
+        "live_monitor.html",
+        {
+            "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
+            "noon_review_time_label": _time_label("NOON_REVIEW_HOUR", "NOON_REVIEW_MINUTE", 23, 2),
+        },
+    )
 
 
 @app.get("/metrics", response_class=HTMLResponse)
 async def read_metrics(request: Request):
-    return templates.TemplateResponse(request, "metrics.html")
+    return templates.TemplateResponse(
+        request,
+        "metrics.html",
+        {
+            "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
+        },
+    )
 
 
 @app.get("/logs", response_class=HTMLResponse)
