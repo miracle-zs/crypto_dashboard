@@ -1,10 +1,18 @@
 def test_scheduler_job_modules_exist():
     from app.jobs.noon_loss_job import run_noon_loss_check
     from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremental
+    from app.jobs.trades_compensation_jobs import (
+        request_trades_compensation_job,
+        run_pending_trades_compensation_job,
+        sync_trades_compensation_job,
+    )
 
     assert callable(run_noon_loss_check)
     assert callable(run_sync_trades_incremental)
     assert callable(run_sync_open_positions)
+    assert callable(request_trades_compensation_job)
+    assert callable(run_pending_trades_compensation_job)
+    assert callable(sync_trades_compensation_job)
 
 
 def test_scheduler_still_registers_existing_job_ids(monkeypatch):
@@ -181,6 +189,37 @@ def test_scheduler_alert_methods_delegate_to_job_module(monkeypatch):
     assert scheduler.check_same_symbol_reentry_alert() == "reentry-ok"
     assert scheduler.check_open_positions_profit_alert(25.0) == "profit-ok:25.0"
     assert calls == {"reentry": 1, "profit": 1}
+
+
+def test_scheduler_compensation_methods_delegate_to_job_module(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+    calls = {"request": 0, "pending": 0, "sync": 0}
+
+    def fake_request(s, symbols, reason="open_positions_change", symbol_since_ms=None):
+        calls["request"] += 1
+        assert s is scheduler
+        return ("request", symbols, reason, symbol_since_ms)
+
+    def fake_pending(s):
+        calls["pending"] += 1
+        assert s is scheduler
+        return "pending-ok"
+
+    def fake_sync(s, symbols, reason="triggered", symbol_since_ms=None):
+        calls["sync"] += 1
+        assert s is scheduler
+        return ("sync", symbols, reason, symbol_since_ms)
+
+    monkeypatch.setattr("app.scheduler.request_trades_compensation_job", fake_request)
+    monkeypatch.setattr("app.scheduler.run_pending_trades_compensation_job", fake_pending)
+    monkeypatch.setattr("app.scheduler.sync_trades_compensation_job", fake_sync)
+
+    assert scheduler.request_trades_compensation(["BTC"], reason="x") == ("request", ["BTC"], "x", None)
+    assert scheduler._run_pending_trades_compensation() == "pending-ok"
+    assert scheduler.sync_trades_compensation(symbols=["ETH"], reason="y") == ("sync", ["ETH"], "y", None)
+    assert calls == {"request": 1, "pending": 1, "sync": 1}
 
 
 def test_sync_trades_data_handles_empty_symbol_list(monkeypatch):
