@@ -79,6 +79,9 @@ app.state.db = None
 
 @app.middleware("http")
 async def request_metrics_middleware(request: Request, call_next):
+    if request.url.path == "/api/logs":
+        return await call_next(request)
+
     response = None
     with measure_ms("api.request", path=request.url.path, method=request.method) as snapshot:
         try:

@@ -56,7 +56,7 @@ def run_balance_sync_job(scheduler) -> str:
                 logger.info(
                     "出入金同步完成: "
                     f"fetched={len(transfer_rows)}, inserted={inserted_count}, "
-                    f"window={scheduler._format_window_with_ms(start_time_ms, end_time_ms)}"
+                    f"window=[{scheduler._format_ms_to_utc8(start_time_ms)} ~ {scheduler._format_ms_to_utc8(end_time_ms)}]"
                 )
             except Exception as exc:
                 logger.warning(f"出入金同步出错: {exc}")
