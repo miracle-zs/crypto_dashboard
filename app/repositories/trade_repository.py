@@ -100,6 +100,9 @@ class TradeRepository:
                 worst_loss_streak = streak
 
         max_single_loss = float(np.min(pnl_values))
+        running_peak = np.maximum.accumulate(np.array(equity_curve, dtype=float))
+        drawdown_curve = np.array(equity_curve, dtype=float) - running_peak
+        max_drawdown = float(np.min(drawdown_curve)) if len(drawdown_curve) > 0 else 0.0
         total_wins = float(np.sum(pnl_values[pnl_values > 0]))
         total_losses = abs(float(np.sum(pnl_values[pnl_values < 0])))
         profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
@@ -133,7 +136,7 @@ class TradeRepository:
             "best_win_streak": best_win_streak,
             "worst_loss_streak": worst_loss_streak,
             "max_single_loss": max_single_loss,
-            "max_drawdown": max_single_loss,
+            "max_drawdown": max_drawdown,
             "profit_factor": profit_factor,
             "kelly_criterion": kelly_criterion,
             "sqn": float(sqn),

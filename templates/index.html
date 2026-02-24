@@ -954,7 +954,8 @@
             applyMood(stats);
 
             // 资金与盈亏
-            const balance = stats.equity_curve[stats.equity_curve.length - 1];
+            const equityCurve = Array.isArray(stats.equity_curve) ? stats.equity_curve : [];
+            const balance = Number(equityCurve.length ? equityCurve[equityCurve.length - 1] : 0) || 0;
             document.getElementById('disp-balance').innerText = `$${balance.toLocaleString()}`;
 
             const pnlEl = document.getElementById('disp-pnl');

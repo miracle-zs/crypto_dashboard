@@ -27,6 +27,7 @@ class TradeReadRepository:
                 current_streak,
                 best_win_streak,
                 worst_loss_streak,
+                max_single_loss,
                 max_drawdown,
                 profit_factor,
                 kelly_criterion,
@@ -53,7 +54,14 @@ class TradeReadRepository:
                 data["equity_curve"] = []
         else:
             data["equity_curve"] = []
-        data["max_single_loss"] = float(data.get("max_drawdown", 0.0) or 0.0)
+        max_single_loss = data.get("max_single_loss")
+        max_drawdown = data.get("max_drawdown")
+        if max_single_loss is None:
+            max_single_loss = max_drawdown
+        if max_drawdown is None:
+            max_drawdown = max_single_loss
+        data["max_single_loss"] = float(max_single_loss or 0.0)
+        data["max_drawdown"] = float(max_drawdown or 0.0)
         return data
 
     def get_statistics(self):
@@ -298,6 +306,41 @@ class TradeReadRepository:
     def get_trade_aggregates(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS trades_count,
+                COALESCE(MAX(updated_at), '') AS latest_trade_updated_at
+            FROM trades
+            """
+        )
+        source_row = cursor.fetchone()
+        source_trades_count = int(source_row["trades_count"] or 0) if source_row else 0
+        source_latest_updated_at = str(source_row["latest_trade_updated_at"] or "")
+
+        cursor.execute(
+            """
+            SELECT trades_count, latest_trade_updated_at, payload_json
+            FROM trade_aggregates_cache
+            WHERE id = 1
+            """
+        )
+        cache_row = cursor.fetchone()
+        if cache_row:
+            cached_payload = cache_row["payload_json"]
+            cache_trades_count = int(cache_row["trades_count"] or 0)
+            cache_latest_updated_at = str(cache_row["latest_trade_updated_at"] or "")
+            if (
+                cached_payload
+                and cache_trades_count == source_trades_count
+                and cache_latest_updated_at == source_latest_updated_at
+            ):
+                try:
+                    payload = json.loads(cached_payload)
+                    conn.close()
+                    return payload
+                except Exception:
+                    pass
 
         # Hourly net pnl (0-23)
         hourly_pnl = [0.0] * 24
@@ -401,7 +444,6 @@ class TradeReadRepository:
             """
         )
         rows = cursor.fetchall()
-        conn.close()
 
         symbol_rows = []
         total_abs_pnl = 0.0
@@ -435,7 +477,7 @@ class TradeReadRepository:
             key=lambda x: x["pnl"],
         )[:5]
 
-        return {
+        payload = {
             "duration_buckets": [bucket_map[label] for label in duration_labels],
             "duration_points": duration_points,
             "hourly_pnl": hourly_pnl,
@@ -444,3 +486,23 @@ class TradeReadRepository:
                 "losers": losers,
             },
         }
+        cursor.execute(
+            """
+            INSERT INTO trade_aggregates_cache (
+                id, trades_count, latest_trade_updated_at, payload_json, updated_at
+            ) VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                trades_count = excluded.trades_count,
+                latest_trade_updated_at = excluded.latest_trade_updated_at,
+                payload_json = excluded.payload_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                source_trades_count,
+                source_latest_updated_at,
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return payload

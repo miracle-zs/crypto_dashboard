@@ -347,6 +347,7 @@ def init_database_schema(conn, logger):
                 current_streak INTEGER,
                 best_win_streak INTEGER,
                 worst_loss_streak INTEGER,
+                max_single_loss REAL,
                 max_drawdown REAL,
                 profit_factor REAL,
                 kelly_criterion REAL,
@@ -360,6 +361,39 @@ def init_database_schema(conn, logger):
             INSERT OR IGNORE INTO trade_summary (id)
             VALUES (1)
         """)
+        try:
+            cursor.execute("SELECT max_single_loss FROM trade_summary LIMIT 1")
+        except sqlite3.OperationalError:
+            logger.info("正在迁移数据库: 添加 max_single_loss 列...")
+            try:
+                cursor.execute("ALTER TABLE trade_summary ADD COLUMN max_single_loss REAL DEFAULT 0.0")
+                cursor.execute(
+                    """
+                    UPDATE trade_summary
+                    SET max_single_loss = COALESCE(max_single_loss, max_drawdown, 0.0)
+                    """
+                )
+            except Exception as e:
+                logger.warning(f"列添加失败(可能已存在): {e}")
+
+        # 交易聚合缓存（用于首页图表/榜单聚合接口提速）
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trade_aggregates_cache (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                trades_count INTEGER DEFAULT 0,
+                latest_trade_updated_at TEXT,
+                payload_json TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO trade_aggregates_cache (id, trades_count)
+            VALUES (1, 0)
+            """
+        )
 
         # 涨幅榜历史快照表（每天07:40记录一次）
         cursor.execute("""

@@ -63,3 +63,72 @@ def test_get_trade_aggregates_returns_expected_shape_and_values(tmp_path):
     assert winners[0]["pnl"] == 12.0
     assert losers[0]["symbol"] == "ETH"
     assert losers[0]["pnl"] == -5.0
+
+
+def test_get_trade_aggregates_uses_cache_and_invalidates_on_data_change(tmp_path):
+    db = Database(db_path=str(tmp_path / "trade_aggregates_cache.db"))
+    repo = TradeRepository(db)
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO trades (
+            no, date, entry_time, exit_time, holding_time, symbol, side,
+            price_change_pct, entry_amount, entry_price, exit_price, qty,
+            fees, pnl_net, close_type, return_rate, open_price,
+            pnl_before_fees, entry_order_id, exit_order_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1, "20260224", "2026-02-24 01:00:00", "2026-02-24 01:03:00", "3m",
+            "BTC", "LONG", 0.1, 100.0, 100.0, 101.0, 1.0,
+            0.1, 10.0, "tp", "10.00%", 99.0, 10.1, 101, "201",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    payload = repo.get_trade_aggregates()
+    assert payload["hourly_pnl"][1] == 10.0
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE trade_aggregates_cache
+        SET payload_json = ?
+        WHERE id = 1
+        """,
+        ('{"hourly_pnl":[999],"duration_buckets":[],"duration_points":[],"symbol_rank":{"winners":[],"losers":[]}}',),
+    )
+    conn.commit()
+    conn.close()
+
+    cached_payload = repo.get_trade_aggregates()
+    assert cached_payload["hourly_pnl"] == [999]
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO trades (
+            no, date, entry_time, exit_time, holding_time, symbol, side,
+            price_change_pct, entry_amount, entry_price, exit_price, qty,
+            fees, pnl_net, close_type, return_rate, open_price,
+            pnl_before_fees, entry_order_id, exit_order_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            2, "20260224", "2026-02-24 02:00:00", "2026-02-24 02:10:00", "10m",
+            "ETH", "SHORT", -0.1, 120.0, 120.0, 118.0, 1.0,
+            0.1, -3.0, "sl", "-2.50%", 121.0, -2.9, 102, "202",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    refreshed_payload = repo.get_trade_aggregates()
+    assert len(refreshed_payload["hourly_pnl"]) == 24
+    assert refreshed_payload["hourly_pnl"][1] == 10.0
+    assert refreshed_payload["hourly_pnl"][2] == -3.0

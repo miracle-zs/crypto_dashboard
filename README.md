@@ -129,8 +129,15 @@ BINANCE_API_KEY=your_api_key_here
 BINANCE_API_SECRET=your_api_secret_here
 
 # 系统配置 (可选)
-# 交易同步间隔 (分钟), 建议设为 1 以获得最佳实时性
+# 交易增量同步基础间隔 (分钟)
+# 当 ENABLE_TRIGGERED_TRADES_COMPENSATION=0 时生效
 UPDATE_INTERVAL_MINUTES=1
+# 启用“未平仓变化触发的闭仓补偿同步”（默认开启）
+ENABLE_TRIGGERED_TRADES_COMPENSATION=1
+# 启用触发补偿时，增量兜底任务间隔（分钟，默认1440=每天一次）
+TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES=1440
+# 触发补偿默认回补窗口（分钟，默认1440=1天）
+TRADES_COMPENSATION_LOOKBACK_MINUTES=1440
 # 同步回溯天数
 DAYS_TO_FETCH=90
 # 调度器时区（建议 Asia/Shanghai，对应 UTC+8）
@@ -189,7 +196,8 @@ API_JOB_LOCK_WAIT_SECONDS=8
 - `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
 - `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；新增 `REBOUND_30D_*`、`REBOUND_60D_*` 用于多周期快照。
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
-- 如果你只关心每天 07:40 的快照，可适当调大 `UPDATE_INTERVAL_MINUTES`，减少高频同步压力。
+- 启用 `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 后，交易增量会采用“低频兜底 + 触发补偿”模式，建议将 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 设为 `1440`（每天一次）。
+- `TRADES_COMPENSATION_LOOKBACK_MINUTES` 仅在触发补偿未提供 symbol 级精确起点时生效。
 - 可选设置 `DASHBOARD_ADMIN_TOKEN` 为写接口开启鉴权；开启后需在请求头传 `X-Admin-Token`。
 
 ### 3. 运行
@@ -236,7 +244,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/api/noon-loss-review-history?limit=7`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
 
 ### 5. 内置调度任务（默认）
-- `sync_trades`：每 `UPDATE_INTERVAL_MINUTES` 分钟同步交易
+- `sync_trades_incremental`：
+  - `ENABLE_TRIGGERED_TRADES_COMPENSATION=0` 时，每 `UPDATE_INTERVAL_MINUTES` 分钟执行
+  - `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 时，每 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 分钟执行（通常设为每天一次兜底）
+- `sync_trades_compensation_pending`：当未平仓减少（检测到可能平仓）时触发补偿同步
 - `sync_balance`：每 1 分钟同步余额（启用用户数据流时跳过）
 - `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
 - `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）

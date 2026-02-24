@@ -54,3 +54,59 @@ def test_recompute_trade_summary_matches_expected_metrics(tmp_path):
     assert summary["best_win_streak"] == 1
     assert summary["worst_loss_streak"] == -1
     assert summary["max_single_loss"] == -5.0
+    assert summary["max_drawdown"] == -5.0
+
+
+def test_recompute_trade_summary_drawdown_differs_from_single_loss(tmp_path):
+    db = Database(db_path=str(tmp_path / "trade_summary_drawdown.db"))
+    repo = TradeRepository(db)
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    pnls = [4.0, -2.0, -2.0, -2.0]
+    rows = []
+    for idx, pnl in enumerate(pnls, start=1):
+        hour = 9 + idx
+        rows.append(
+            (
+                idx,
+                "20260221",
+                f"2026-02-21 {hour:02d}:00:00",
+                f"2026-02-21 {hour:02d}:05:00",
+                "5m",
+                f"S{idx}",
+                "LONG",
+                0.0,
+                100.0,
+                100.0,
+                100.0,
+                1.0,
+                0.0,
+                pnl,
+                "tp",
+                "0.00%",
+                100.0,
+                pnl,
+                1000 + idx,
+                str(2000 + idx),
+            )
+        )
+
+    cur.executemany(
+        """
+        INSERT INTO trades (
+            no, date, entry_time, exit_time, holding_time, symbol, side,
+            price_change_pct, entry_amount, entry_price, exit_price, qty,
+            fees, pnl_net, close_type, return_rate, open_price,
+            pnl_before_fees, entry_order_id, exit_order_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    summary = repo.recompute_trade_summary()
+
+    assert summary["max_single_loss"] == -2.0
+    assert summary["max_drawdown"] == -6.0

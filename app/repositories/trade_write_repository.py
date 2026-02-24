@@ -50,10 +50,10 @@ class TradeWriteRepository:
             INSERT INTO trade_summary (
                 id, total_pnl, total_fees, win_rate, win_count, loss_count,
                 total_trades, equity_curve, current_streak, best_win_streak,
-                worst_loss_streak, max_drawdown, profit_factor, kelly_criterion,
+                worst_loss_streak, max_single_loss, max_drawdown, profit_factor, kelly_criterion,
                 sqn, expected_value, risk_reward_ratio, updated_at
             ) VALUES (
-                1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
             )
             ON CONFLICT(id) DO UPDATE SET
                 total_pnl = excluded.total_pnl,
@@ -66,6 +66,7 @@ class TradeWriteRepository:
                 current_streak = excluded.current_streak,
                 best_win_streak = excluded.best_win_streak,
                 worst_loss_streak = excluded.worst_loss_streak,
+                max_single_loss = excluded.max_single_loss,
                 max_drawdown = excluded.max_drawdown,
                 profit_factor = excluded.profit_factor,
                 kelly_criterion = excluded.kelly_criterion,
@@ -85,7 +86,8 @@ class TradeWriteRepository:
                 int(summary.get("current_streak", 0)),
                 int(summary.get("best_win_streak", 0)),
                 int(summary.get("worst_loss_streak", 0)),
-                float(summary.get("max_single_loss", summary.get("max_drawdown", 0.0))),
+                float(summary.get("max_single_loss", 0.0)),
+                float(summary.get("max_drawdown", summary.get("max_single_loss", 0.0))),
                 float(summary.get("profit_factor", 0.0)),
                 float(summary.get("kelly_criterion", 0.0)),
                 float(summary.get("sqn", 0.0)),
