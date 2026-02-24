@@ -812,7 +812,7 @@
                     </div>
                     <div class="glass-panel rounded-xl p-4 panel-reveal">
                         <div class="metric-label flex items-center justify-between mb-2">
-                            <span>复盘对比（最近7天）</span>
+                            <span>复盘对比（最近14天）</span>
                             <div class="flex items-baseline whitespace-nowrap">
                                 <span id="daily-review-delta-sum" class="text-[10px] tracking-tight text-gray-500">Σ Delta(All) --</span>
                             </div>
@@ -2133,7 +2133,7 @@
 
         async function fetchNoonReviewHistory() {
             try {
-                const response = await fetch('/api/noon-loss-review-history?limit=7');
+                const response = await fetch('/api/noon-loss-review-history?limit=14');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
