@@ -1,3 +1,5 @@
+from typing import Optional
+
 from app.core.async_utils import run_in_thread
 from app.repositories import SettingsRepository, TradeRepository
 from app.services.trade_query_service import TradeQueryService
@@ -8,7 +10,7 @@ class TradesApiService:
         service = TradeQueryService(db=db)
         return await run_in_thread(service.get_summary)
 
-    async def get_trades(self, *, db, limit: int, offset: int):
+    async def get_trades(self, *, db, limit: Optional[int], offset: int):
         service = TradeQueryService(db=db)
         return await run_in_thread(service.get_trades_list, limit, offset)
 

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import get_db
@@ -16,7 +18,7 @@ async def get_summary(db=Depends(get_db)):
 
 @router.get("/api/trades", response_model=list[Trade])
 async def get_trades(
-    limit: int = Query(1000, ge=1, le=5000, description="Maximum trades to return"),
+    limit: Optional[int] = Query(None, ge=1, le=5000, description="Maximum trades to return"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db=Depends(get_db),
 ):

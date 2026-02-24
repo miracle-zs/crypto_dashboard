@@ -775,6 +775,7 @@
         const TRADE_PAGE_SIZE = 20;
         let warnedConfig = false;
         let latestTrades = [];
+        let analyticsTrades = [];
         let tradeLogMobileExpanded = false;
         let tradePageOffset = 0;
         let tradePageHasNext = false;
@@ -820,11 +821,13 @@
         async function fetchDashboardData() {
             try {
                 const tradesUrl = `/api/trades?limit=${TRADE_PAGE_SIZE + 1}&offset=${tradePageOffset}`;
+                const analyticsTradesUrl = '/api/trades';
                 // Parallel fetching for performance
-                const [statusRes, summaryRes, tradesRes, dailyStatsRes] = await Promise.all([
+                const [statusRes, summaryRes, tradesRes, analyticsTradesRes, dailyStatsRes] = await Promise.all([
                     fetch('/api/status'),
                     fetch('/api/summary'),
                     fetch(tradesUrl),
+                    fetch(analyticsTradesUrl),
                     fetch('/api/daily-stats')
                 ]);
 
@@ -852,9 +855,11 @@
                     tradePageHasNext = false;
                     return fetchDashboardData();
                 }
+                const analyticsRaw = await analyticsTradesRes.json();
+                const analyticsData = Array.isArray(analyticsRaw) ? analyticsRaw : [];
                 const dailyStatsData = await dailyStatsRes.json();
 
-                updateUI(summaryData, tradesData, dailyStatsData);
+                updateUI(summaryData, tradesData, dailyStatsData, analyticsData);
                 updateLastUpdated();
 
             } catch (error) {
@@ -866,8 +871,9 @@
         // ============================================
         // 2. UI 更新逻辑
         // ============================================
-        function updateUI(stats, trades, dailyStats) {
+        function updateUI(stats, trades, dailyStats, allTrades) {
             latestTrades = Array.isArray(trades) ? trades : [];
+            analyticsTrades = Array.isArray(allTrades) ? allTrades : latestTrades;
             applyMood(stats);
 
             // 资金与盈亏
@@ -939,13 +945,13 @@
             ) || 0;
             document.getElementById('metric-mdd').innerText = `-$${Math.abs(maxSingleLoss)}`;
 
-            renderChart(stats.equity_curve, trades);
-            renderDurationChart(trades);
-            renderHourlyChart(trades);
+            renderChart(stats.equity_curve, analyticsTrades);
+            renderDurationChart(analyticsTrades);
+            renderHourlyChart(analyticsTrades);
             renderDailyTradesChart(dailyStats);
             renderTable(latestTrades);
             updateTradePagination(latestTrades.length);
-            renderSymbolLeaderboard(trades);
+            renderSymbolLeaderboard(analyticsTrades);
             initKpiFocus();
         }
 
