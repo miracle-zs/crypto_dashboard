@@ -1,3 +1,5 @@
+import pytest
+
 from app.database import Database
 from app.repositories.sync_repository import SyncRepository
 
@@ -204,3 +206,25 @@ def test_sync_repository_get_open_position_symbols_returns_distinct_symbols(tmp_
 
     symbols = sorted(repo.get_open_position_symbols())
     assert symbols == ["BTC", "ETH"]
+
+
+def test_save_open_positions_raises_when_state_load_fails(tmp_path):
+    db = Database(db_path=str(tmp_path / "positions_state_error.db"))
+    repo = SyncRepository(db)
+    repo._write._open_positions_state_columns = ("symbol", "order_id", "missing_col")
+
+    rows = [
+        {
+            "date": "20260221",
+            "symbol": "BTC",
+            "side": "LONG",
+            "entry_time": "2026-02-21 10:00:00",
+            "entry_price": 100.0,
+            "qty": 1.0,
+            "entry_amount": 100.0,
+            "order_id": 1,
+        }
+    ]
+
+    with pytest.raises(RuntimeError, match="加载 open_positions 历史状态失败"):
+        repo.save_open_positions(rows)

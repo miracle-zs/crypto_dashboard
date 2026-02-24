@@ -8,9 +8,9 @@ class TradesApiService:
         service = TradeQueryService(db=db)
         return await run_in_thread(service.get_summary)
 
-    async def get_trades(self, *, db):
+    async def get_trades(self, *, db, limit: int, offset: int):
         service = TradeQueryService(db=db)
-        return await run_in_thread(service.get_trades_list)
+        return await run_in_thread(service.get_trades_list, limit, offset)
 
     async def get_daily_stats(self, *, db):
         repo = TradeRepository(db)

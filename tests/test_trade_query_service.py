@@ -5,7 +5,7 @@ from app.services.trade_query_service import TradeQueryService
 
 def test_get_trades_list_parses_rows_and_duration():
     class FakeRepo:
-        def get_all_trades(self):
+        def get_all_trades(self, limit=None, offset=0):
             return pd.DataFrame(
                 [
                     {
@@ -63,6 +63,24 @@ def test_get_trades_list_parses_rows_and_duration():
     assert len(trades) == 2
     assert trades[0].duration_minutes == 15.0
     assert trades[1].duration_minutes == 0.0
+
+
+def test_get_trades_list_forwards_limit_and_offset():
+    captured = {}
+
+    class FakeRepo:
+        def get_all_trades(self, limit=None, offset=0):
+            captured["limit"] = limit
+            captured["offset"] = offset
+            return pd.DataFrame([])
+
+    service = TradeQueryService.__new__(TradeQueryService)
+    service.repo = FakeRepo()
+
+    trades = service.get_trades_list(limit=50, offset=100)
+
+    assert trades == []
+    assert captured == {"limit": 50, "offset": 100}
 
 
 def test_get_summary_prefers_cached_total_count_fast_path():

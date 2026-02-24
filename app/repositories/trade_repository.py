@@ -143,8 +143,8 @@ class TradeRepository:
         self._write.save_trade_summary(summary)
         return summary
 
-    def get_all_trades(self, limit: int = None):
-        return self._read.get_all_trades(limit=limit)
+    def get_all_trades(self, limit: int = None, offset: int = 0):
+        return self._read.get_all_trades(limit=limit, offset=offset)
 
     def get_open_positions(self):
         return self._read.get_open_positions()

@@ -89,20 +89,37 @@ class TradeReadRepository:
             return None
         return int(row["total_trades"])
 
-    def get_all_trades(self, limit: int = None):
+    def get_all_trades(self, limit: int = None, offset: int = 0):
         conn = self.db._get_connection()
-        query = """
+        base_select = """
             SELECT no, date, entry_time, exit_time, holding_time, symbol, side,
                    price_change_pct, entry_amount, entry_price, exit_price, qty,
                    fees, pnl_net, close_type, return_rate, open_price,
                    pnl_before_fees, entry_order_id, exit_order_id
-            FROM trades
-            ORDER BY entry_time ASC
         """
         params = []
-        if limit:
-            query += " LIMIT ?"
+        if limit is not None:
+            query = f"""
+                SELECT *
+                FROM (
+                    {base_select}
+                    FROM trades
+                    ORDER BY entry_time DESC
+                    LIMIT ?
+                """
             params.append(int(limit))
+            if offset > 0:
+                query += " OFFSET ?"
+                params.append(int(offset))
+            query += """
+                ) recent
+                ORDER BY entry_time ASC
+            """
+        elif offset > 0:
+            query = f"{base_select} FROM trades ORDER BY entry_time ASC LIMIT -1 OFFSET ?"
+            params.append(int(offset))
+        else:
+            query = f"{base_select} FROM trades ORDER BY entry_time ASC"
 
         df = pd.read_sql_query(query, conn, params=params)
         conn.close()

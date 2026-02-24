@@ -15,8 +15,12 @@ async def get_summary(db=Depends(get_db)):
 
 
 @router.get("/api/trades", response_model=list[Trade])
-async def get_trades(db=Depends(get_db)):
-    return await service.get_trades(db=db)
+async def get_trades(
+    limit: int = Query(1000, ge=1, le=5000, description="Maximum trades to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db=Depends(get_db),
+):
+    return await service.get_trades(db=db, limit=limit, offset=offset)
 
 
 @router.get("/api/daily-stats", response_model=list[DailyStats])

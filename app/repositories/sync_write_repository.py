@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from app.logger import logger
+
 
 class SyncWriteRepository:
     def __init__(self, db):
@@ -251,8 +253,10 @@ class SyncWriteRepository:
                 if "is_long_term" in columns:
                     state_data["is_long_term"] = row["is_long_term"]
                 state_map[key] = state_data
-        except Exception:
-            pass
+        except Exception as exc:
+            conn.close()
+            logger.error(f"加载 open_positions 历史状态失败: {exc}")
+            raise RuntimeError("加载 open_positions 历史状态失败") from exc
 
         if not rows:
             cursor.execute("DELETE FROM open_positions")

@@ -33,9 +33,9 @@ class TradeQueryService:
         summary = self.repo.recompute_trade_summary()
         return TradeSummary(**summary)
 
-    def get_trades_list(self) -> List[Trade]:
+    def get_trades_list(self, limit: Optional[int] = None, offset: int = 0) -> List[Trade]:
         """获取交易记录列表"""
-        df = self.repo.get_all_trades()
+        df = self.repo.get_all_trades(limit=limit, offset=offset)
 
         if df.empty:
             return []
