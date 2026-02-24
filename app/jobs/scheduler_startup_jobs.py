@@ -15,9 +15,15 @@ def register_scheduler_jobs(scheduler, *, utc8):
     if not scheduler.enable_user_stream:
         scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
 
+    trades_interval_minutes = (
+        scheduler.trades_incremental_fallback_interval_minutes
+        if scheduler.enable_triggered_trades_compensation
+        else scheduler.update_interval_minutes
+    )
+
     scheduler.scheduler.add_job(
         func=partial(run_sync_trades_incremental, scheduler),
-        trigger=IntervalTrigger(minutes=scheduler.update_interval_minutes),
+        trigger=IntervalTrigger(minutes=trades_interval_minutes),
         id="sync_trades_incremental",
         name="同步交易数据(增量)",
         max_instances=1,
@@ -242,7 +248,11 @@ def register_scheduler_jobs(scheduler, *, utc8):
         logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
 
     scheduler.scheduler.start()
-    logger.info(f"增量交易同步任务已启动: 每 {scheduler.update_interval_minutes} 分钟自动更新一次")
+    logger.info(
+        "增量交易同步任务已启动: "
+        f"每 {trades_interval_minutes} 分钟自动更新一次 "
+        f"(triggered_compensation={'on' if scheduler.enable_triggered_trades_compensation else 'off'})"
+    )
     logger.info(
         f"未平仓同步任务已启动: 每 {scheduler.open_positions_update_interval_minutes} 分钟自动更新一次 "
         f"(lookback_days={scheduler.open_positions_lookback_days})"

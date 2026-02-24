@@ -51,6 +51,7 @@ class SchedulerConfig:
     scheduler_timezone: str
     days_to_fetch: int
     update_interval_minutes: int
+    trades_incremental_fallback_interval_minutes: int
     open_positions_update_interval_minutes: int
     start_date: str | None
     end_date: str | None
@@ -104,10 +105,17 @@ class SchedulerConfig:
     enable_reentry_alert: bool
     profit_alert_threshold_pct: float
     api_job_lock_wait_seconds: int
+    enable_triggered_trades_compensation: bool
+    trades_compensation_lookback_minutes: int
 
 
 def load_scheduler_config() -> SchedulerConfig:
     update_interval_minutes = _env_int("UPDATE_INTERVAL_MINUTES", 10, minimum=1)
+    trades_incremental_fallback_interval_minutes = _env_int(
+        "TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES",
+        1440,
+        minimum=1,
+    )
     daily_full_sync_hour = _env_int("DAILY_FULL_SYNC_HOUR", 3, minimum=0) % 24
     daily_full_sync_minute = _env_int("DAILY_FULL_SYNC_MINUTE", 30, minimum=0) % 60
     open_positions_full_default_minute = (daily_full_sync_minute + 20) % 60
@@ -123,6 +131,7 @@ def load_scheduler_config() -> SchedulerConfig:
         scheduler_timezone=os.getenv("SCHEDULER_TIMEZONE", "Asia/Shanghai"),
         days_to_fetch=_env_int("DAYS_TO_FETCH", 30, minimum=1),
         update_interval_minutes=update_interval_minutes,
+        trades_incremental_fallback_interval_minutes=trades_incremental_fallback_interval_minutes,
         open_positions_update_interval_minutes=_env_int(
             "OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES",
             update_interval_minutes,
@@ -196,4 +205,6 @@ def load_scheduler_config() -> SchedulerConfig:
         enable_reentry_alert=_env_bool("ENABLE_REENTRY_ALERT", True),
         profit_alert_threshold_pct=_env_float("PROFIT_ALERT_THRESHOLD_PCT", 20.0, minimum=0.0),
         api_job_lock_wait_seconds=_env_int("API_JOB_LOCK_WAIT_SECONDS", 8, minimum=0),
+        enable_triggered_trades_compensation=_env_bool("ENABLE_TRIGGERED_TRADES_COMPENSATION", True),
+        trades_compensation_lookback_minutes=_env_int("TRADES_COMPENSATION_LOOKBACK_MINUTES", 1440, minimum=1),
     )

@@ -27,6 +27,52 @@ def test_scheduler_still_registers_existing_job_ids(monkeypatch):
     assert "check_losses_noon" in calls
 
 
+def test_scheduler_trades_incremental_uses_fallback_interval_when_triggered_enabled(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_TRIGGERED_TRADES_COMPENSATION", "1")
+    monkeypatch.setenv("TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES", "45")
+    monkeypatch.setenv("UPDATE_INTERVAL_MINUTES", "5")
+
+    scheduler = TradeDataScheduler()
+    captured = {}
+
+    def fake_add_job(*args, **kwargs):
+        if kwargs.get("id") == "sync_trades_incremental":
+            captured["trigger"] = kwargs.get("trigger")
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+    scheduler.start()
+
+    assert int(captured["trigger"].interval.total_seconds() // 60) == 45
+
+
+def test_scheduler_trades_incremental_uses_update_interval_when_triggered_disabled(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_TRIGGERED_TRADES_COMPENSATION", "0")
+    monkeypatch.setenv("TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES", "45")
+    monkeypatch.setenv("UPDATE_INTERVAL_MINUTES", "7")
+
+    scheduler = TradeDataScheduler()
+    captured = {}
+
+    def fake_add_job(*args, **kwargs):
+        if kwargs.get("id") == "sync_trades_incremental":
+            captured["trigger"] = kwargs.get("trigger")
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+    scheduler.start()
+
+    assert int(captured["trigger"].interval.total_seconds() // 60) == 7
+
+
 def test_scheduler_user_stream_mode_skips_balance_job_registration(monkeypatch):
     from app.scheduler import TradeDataScheduler
 
@@ -273,3 +319,34 @@ def test_sync_trades_data_prefers_single_income_pass_api(monkeypatch):
     monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
 
     assert scheduler._sync_trades_data_impl(force_full=False) is True
+
+
+def test_request_trades_compensation_merges_symbols_with_earliest_since(monkeypatch):
+    from app.scheduler import TradeDataScheduler, UTC8
+    from datetime import datetime
+
+    scheduler = TradeDataScheduler()
+    added = {"count": 0}
+
+    def fake_add_job(*args, **kwargs):
+        added["count"] += 1
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+
+    now_ms = int(datetime.now(UTC8).timestamp() * 1000)
+    scheduler.request_trades_compensation(
+        ["BTCUSDT"],
+        reason="test",
+        symbol_since_ms={"BTCUSDT": now_ms - 3 * 60 * 60 * 1000},
+    )
+    scheduler.request_trades_compensation(
+        ["BTCUSDT", "ETHUSDT"],
+        reason="test",
+        symbol_since_ms={"BTCUSDT": now_ms - 60 * 60 * 1000, "ETHUSDT": now_ms - 2 * 60 * 60 * 1000},
+    )
+
+    assert added["count"] == 2
+    assert "BTCUSDT" in scheduler._pending_compensation_since_ms
+    assert "ETHUSDT" in scheduler._pending_compensation_since_ms
+    assert scheduler._pending_compensation_since_ms["BTCUSDT"] <= now_ms - 3 * 60 * 60 * 1000

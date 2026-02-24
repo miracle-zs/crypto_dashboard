@@ -12,7 +12,10 @@ def test_scheduler_config_defaults(monkeypatch):
     config = load_scheduler_config()
 
     assert config.update_interval_minutes == 10
+    assert config.trades_incremental_fallback_interval_minutes == 1440
     assert config.open_positions_update_interval_minutes == 10
+    assert config.enable_triggered_trades_compensation is True
+    assert config.trades_compensation_lookback_minutes == 1440
     assert config.leaderboard_alert_hour == 7
     assert config.leaderboard_alert_minute == 40
     assert config.noon_loss_check_hour == 11
