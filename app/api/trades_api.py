@@ -30,6 +30,11 @@ async def get_daily_stats(db=Depends(get_db)):
     return await service.get_daily_stats(db=db)
 
 
+@router.get("/api/trades-aggregates")
+async def get_trades_aggregates(db=Depends(get_db)):
+    return await service.get_trade_aggregates(db=db)
+
+
 @router.get("/api/monthly-progress")
 async def get_monthly_progress(db=Depends(get_db)):
     return await service.get_monthly_progress(db=db)

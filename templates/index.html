@@ -775,7 +775,6 @@
         const TRADE_PAGE_SIZE = 20;
         let warnedConfig = false;
         let latestTrades = [];
-        let analyticsTrades = [];
         let tradeLogMobileExpanded = false;
         let tradePageOffset = 0;
         let tradePageHasNext = false;
@@ -821,13 +820,12 @@
         async function fetchDashboardData() {
             try {
                 const tradesUrl = `/api/trades?limit=${TRADE_PAGE_SIZE + 1}&offset=${tradePageOffset}`;
-                const analyticsTradesUrl = '/api/trades';
                 // Parallel fetching for performance
-                const [statusRes, summaryRes, tradesRes, analyticsTradesRes, dailyStatsRes] = await Promise.all([
+                const [statusRes, summaryRes, tradesRes, aggregatesRes, dailyStatsRes] = await Promise.all([
                     fetch('/api/status'),
                     fetch('/api/summary'),
                     fetch(tradesUrl),
-                    fetch(analyticsTradesUrl),
+                    fetch('/api/trades-aggregates'),
                     fetch('/api/daily-stats')
                 ]);
 
@@ -855,11 +853,10 @@
                     tradePageHasNext = false;
                     return fetchDashboardData();
                 }
-                const analyticsRaw = await analyticsTradesRes.json();
-                const analyticsData = Array.isArray(analyticsRaw) ? analyticsRaw : [];
+                const aggregatesData = await aggregatesRes.json();
                 const dailyStatsData = await dailyStatsRes.json();
 
-                updateUI(summaryData, tradesData, dailyStatsData, analyticsData);
+                updateUI(summaryData, tradesData, dailyStatsData, aggregatesData);
                 updateLastUpdated();
 
             } catch (error) {
@@ -871,9 +868,9 @@
         // ============================================
         // 2. UI 更新逻辑
         // ============================================
-        function updateUI(stats, trades, dailyStats, allTrades) {
+        function updateUI(stats, trades, dailyStats, aggregates) {
             latestTrades = Array.isArray(trades) ? trades : [];
-            analyticsTrades = Array.isArray(allTrades) ? allTrades : latestTrades;
+            const tradeAggregates = aggregates || {};
             applyMood(stats);
 
             // 资金与盈亏
@@ -945,13 +942,13 @@
             ) || 0;
             document.getElementById('metric-mdd').innerText = `-$${Math.abs(maxSingleLoss)}`;
 
-            renderChart(stats.equity_curve, analyticsTrades);
-            renderDurationChart(analyticsTrades);
-            renderHourlyChart(analyticsTrades);
+            renderChart(stats.equity_curve);
+            renderDurationChart(tradeAggregates.duration_buckets || []);
+            renderHourlyChart(tradeAggregates.hourly_pnl || []);
             renderDailyTradesChart(dailyStats);
             renderTable(latestTrades);
             updateTradePagination(latestTrades.length);
-            renderSymbolLeaderboard(analyticsTrades);
+            renderSymbolLeaderboard(tradeAggregates.symbol_rank || { winners: [], losers: [] });
             initKpiFocus();
         }
 
@@ -979,10 +976,8 @@
         let hourlyChartInstance = null;
         let dailyTradesChartInstance = null;
 
-        function renderChart(dataPoints, trades) {
-            // Extract dates from trades for x-axis if possible, or just use indices
-            // Simplifying to match data points count
-            const categories = dataPoints.map((_, i) => i === 0 ? 'Start' : (trades[i-1] ? trades[i-1].date.substring(4) : i));
+        function renderChart(dataPoints) {
+            const categories = dataPoints.map((_, i) => i === 0 ? 'Start' : i);
 
             const options = {
                 chart: {
@@ -1029,68 +1024,49 @@
             equityChartInstance.render();
         }
 
-        function renderDurationChart(trades) {
-            // Prepare Data: [Duration(min), PnL($)]
-            const wins = [];
-            const losses = [];
-
-            trades.forEach(t => {
-                const duration = t.duration_minutes || 0;
-                // Add some jitter to x-axis to prevent total overlap
-                const xVal = parseFloat(duration.toFixed(1));
-                const yVal = t.pnl_net;
-
-                if (yVal >= 0) {
-                    wins.push({ x: xVal, y: yVal, symbol: t.symbol, time: t.holding_time });
-                } else {
-                    losses.push({ x: xVal, y: yVal, symbol: t.symbol, time: t.holding_time });
-                }
-            });
+        function renderDurationChart(durationBuckets) {
+            const categories = durationBuckets.map(item => item.label || '--');
+            const winPnL = durationBuckets.map(item => Number(item.win_pnl) || 0);
+            const lossPnL = durationBuckets.map(item => Number(item.loss_pnl) || 0);
 
             const options = {
                 chart: {
-                    type: 'scatter',
+                    type: 'bar',
                     height: 200,
                     toolbar: { show: false },
                     background: 'transparent',
-                    fontFamily: 'Share Tech Mono',
-                    zoom: { enabled: true, type: 'xy' }
+                    fontFamily: 'Share Tech Mono'
                 },
                 series: [
-                    { name: 'Wins', data: wins },
-                    { name: 'Losses', data: losses }
+                    { name: 'Win PnL', data: winPnL },
+                    { name: 'Loss PnL', data: lossPnL }
                 ],
                 colors: ['#10b981', '#ef4444'], // Green, Red
+                plotOptions: {
+                    bar: {
+                        borderRadius: 2,
+                        columnWidth: '55%',
+                    },
+                },
                 grid: {
                     borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0',
                     strokeDashArray: 4,
-                    xaxis: { lines: { show: true } },
                     yaxis: { lines: { show: true } },
                 },
                 xaxis: {
-                    type: 'numeric',
-                    tickAmount: 10,
-                    labels: {
-                        style: { colors: '#64748b' },
-                        formatter: (val) => { return val < 60 ? val.toFixed(0) + 'm' : (val/60).toFixed(1) + 'h' }
-                    },
+                    categories,
+                    labels: { style: { colors: '#64748b' } },
                     title: { text: 'Duration', style: { color: '#475569', fontSize: '11px' } }
                 },
                 yaxis: {
                     labels: { style: { colors: '#64748b' } },
                 },
-                markers: { size: 4, strokeWidth: 0, hover: { size: 6 } },
                 tooltip: {
                     theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
-                    custom: function({series, seriesIndex, dataPointIndex, w}) {
-                        const data = w.config.series[seriesIndex].data[dataPointIndex];
-                        return `
-                            <div class="px-2 py-1 bg-slate-800 border border-gray-700 text-xs">
-                                <div class="font-bold text-white">${data.symbol}</div>
-                                <div class="text-gray-400">Time: ${data.time}</div>
-                                <div class="${data.y >= 0 ? 'text-green-400' : 'text-red-400'}">PnL: $${data.y}</div>
-                            </div>
-                        `;
+                    y: {
+                        formatter: function(val) {
+                            return "$" + Number(val || 0).toLocaleString();
+                        }
                     }
                 }
             };
@@ -1102,21 +1078,8 @@
             durationChartInstance.render();
         }
 
-        function renderHourlyChart(trades) {
-            // 1. Aggregate Data by Hour (0-23)
-            const hourlyPnL = new Array(24).fill(0);
-
-            trades.forEach(t => {
-                if (!t.entry_time) return;
-                // Format matches "YYYY-MM-DD HH:MM:SS"
-                const timePart = t.entry_time.split(' ')[1];
-                if (timePart) {
-                    const hour = parseInt(timePart.split(':')[0], 10);
-                    if (hour >= 0 && hour < 24) {
-                        hourlyPnL[hour] += t.pnl_net;
-                    }
-                }
-            });
+        function renderHourlyChart(hourlyPnlRaw) {
+            const hourlyPnL = Array.from({ length: 24 }, (_, i) => Number(hourlyPnlRaw[i]) || 0);
 
             // 2. Configure Chart
             const options = {
@@ -1455,36 +1418,15 @@
             }
         }
 
-        function renderSymbolLeaderboard(tradeData) {
+        function renderSymbolLeaderboard(symbolRank) {
             const redEl = document.getElementById('redlist');
             const blackEl = document.getElementById('blacklist');
             if (!redEl || !blackEl) return;
+            const winners = Array.isArray(symbolRank?.winners) ? symbolRank.winners : [];
+            const losers = Array.isArray(symbolRank?.losers) ? symbolRank.losers : [];
 
-            const stats = {};
-            tradeData.forEach(t => {
-                const symbol = t.symbol || '--';
-                const pnl = Number(t.pnl_net) || 0;
-                if (!stats[symbol]) stats[symbol] = { pnl: 0, count: 0, win: 0, loss: 0 };
-                stats[symbol].pnl += pnl;
-                stats[symbol].count += 1;
-                if (pnl > 0) stats[symbol].win += 1;
-                if (pnl < 0) stats[symbol].loss += 1;
-            });
-
-            const totalAbsPnl = Object.values(stats).reduce((sum, s) => sum + Math.abs(s.pnl), 0) || 1;
-            const rows = Object.entries(stats).map(([symbol, s]) => ({
-                symbol,
-                pnl: s.pnl,
-                count: s.count,
-                win: s.win,
-                loss: s.loss
-            }));
-
-            const winners = rows.filter(r => r.pnl > 0).sort((a, b) => b.pnl - a.pnl).slice(0, 5);
-            const losers = rows.filter(r => r.pnl < 0).sort((a, b) => a.pnl - b.pnl).slice(0, 5);
-
-            const maxWinPnl = winners.length ? Math.max(...winners.map(r => r.pnl)) : 1;
-            const maxLossPnl = losers.length ? Math.min(...losers.map(r => r.pnl)) : -1;
+            const maxWinPnl = winners.length ? Math.max(...winners.map(r => Number(r.pnl) || 0)) : 1;
+            const maxLossPnl = losers.length ? Math.min(...losers.map(r => Number(r.pnl) || 0)) : -1;
 
             const renderList = (list, el, positive) => {
                 if (!list.length) {
@@ -1492,17 +1434,18 @@
                     return;
                 }
                 el.innerHTML = list.map(item => {
-                    const winRate = item.count > 0 ? Math.round((item.win / item.count) * 100) : 0;
-                    const contribution = Math.round((Math.abs(item.pnl) / totalAbsPnl) * 100);
+                    const winRate = Number(item.win_rate || 0).toFixed(0);
+                    const contribution = Number(item.share || 0).toFixed(0);
+                    const pnl = Number(item.pnl) || 0;
                     const denom = positive ? maxWinPnl : Math.abs(maxLossPnl);
-                    const barPct = denom > 0 ? Math.min((Math.abs(item.pnl) / denom) * 100, 100) : 0;
+                    const barPct = denom > 0 ? Math.min((Math.abs(pnl) / denom) * 100, 100) : 0;
                     return `
                         <div class="space-y-1">
                             <div class="grid grid-cols-[1fr_auto] items-center gap-2">
                                 <div class="text-white font-mono truncate">${item.symbol}</div>
                                 <div class="grid grid-cols-[7ch_6ch_6ch_6ch] gap-2 text-right font-mono tabular-nums">
-                                    <span class="${positive ? 'text-emerald-400' : 'text-red-400'} font-mono">${positive ? '+' : ''}${item.pnl.toFixed(0)}</span>
-                                    <span class="text-gray-500 font-mono">${item.count}</span>
+                                    <span class="${positive ? 'text-emerald-400' : 'text-red-400'} font-mono">${positive ? '+' : ''}${pnl.toFixed(0)}</span>
+                                    <span class="text-gray-500 font-mono">${Number(item.trade_count || 0)}</span>
                                     <span class="text-gray-500 font-mono">${winRate}%</span>
                                     <span class="text-gray-500 font-mono">${contribution}%</span>
                                 </div>

@@ -294,3 +294,124 @@ class TradeReadRepository:
         row = cursor.fetchone()
         conn.close()
         return float(row["monthly_pnl"]) if row else 0.0
+
+    def get_trade_aggregates(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+
+        # Hourly net pnl (0-23)
+        hourly_pnl = [0.0] * 24
+        cursor.execute(
+            """
+            SELECT CAST(strftime('%H', entry_time) AS INTEGER) AS hour, COALESCE(SUM(pnl_net), 0) AS total_pnl
+            FROM trades
+            WHERE entry_time IS NOT NULL
+            GROUP BY hour
+            """
+        )
+        for row in cursor.fetchall():
+            hour = row["hour"]
+            if hour is None:
+                continue
+            hour = int(hour)
+            if 0 <= hour <= 23:
+                hourly_pnl[hour] = float(row["total_pnl"] or 0.0)
+
+        # Duration buckets via SQL-calculated minutes.
+        duration_labels = ["0-5m", "5-15m", "15-30m", "30-60m", "1-2h", "2h+"]
+        bucket_map = {
+            label: {"label": label, "trade_count": 0, "win_pnl": 0.0, "loss_pnl": 0.0}
+            for label in duration_labels
+        }
+        cursor.execute(
+            """
+            SELECT
+                CASE
+                    WHEN duration_minutes < 5 THEN '0-5m'
+                    WHEN duration_minutes < 15 THEN '5-15m'
+                    WHEN duration_minutes < 30 THEN '15-30m'
+                    WHEN duration_minutes < 60 THEN '30-60m'
+                    WHEN duration_minutes < 120 THEN '1-2h'
+                    ELSE '2h+'
+                END AS bucket,
+                COUNT(*) AS trade_count,
+                COALESCE(SUM(CASE WHEN pnl_net >= 0 THEN pnl_net ELSE 0 END), 0) AS win_pnl,
+                COALESCE(SUM(CASE WHEN pnl_net < 0 THEN pnl_net ELSE 0 END), 0) AS loss_pnl
+            FROM (
+                SELECT
+                    pnl_net,
+                    MAX(
+                        0.0,
+                        (julianday(exit_time) - julianday(entry_time)) * 24.0 * 60.0
+                    ) AS duration_minutes
+                FROM trades
+                WHERE entry_time IS NOT NULL AND exit_time IS NOT NULL
+            ) t
+            GROUP BY bucket
+            """
+        )
+        for row in cursor.fetchall():
+            bucket = str(row["bucket"] or "")
+            if bucket not in bucket_map:
+                continue
+            bucket_map[bucket] = {
+                "label": bucket,
+                "trade_count": int(row["trade_count"] or 0),
+                "win_pnl": float(row["win_pnl"] or 0.0),
+                "loss_pnl": float(row["loss_pnl"] or 0.0),
+            }
+
+        cursor.execute(
+            """
+            SELECT
+                symbol,
+                COALESCE(SUM(pnl_net), 0) AS pnl,
+                COUNT(*) AS trade_count,
+                SUM(CASE WHEN pnl_net > 0 THEN 1 ELSE 0 END) AS win_count
+            FROM trades
+            GROUP BY symbol
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        symbol_rows = []
+        total_abs_pnl = 0.0
+        for row in rows:
+            symbol = str(row["symbol"] or "--")
+            pnl = float(row["pnl"] or 0.0)
+            trade_count = int(row["trade_count"] or 0)
+            win_count = int(row["win_count"] or 0)
+            win_rate = (win_count / trade_count * 100.0) if trade_count > 0 else 0.0
+            total_abs_pnl += abs(pnl)
+            symbol_rows.append(
+                {
+                    "symbol": symbol,
+                    "pnl": pnl,
+                    "trade_count": trade_count,
+                    "win_rate": round(win_rate, 1),
+                }
+            )
+
+        total_abs_pnl = total_abs_pnl or 1.0
+        for item in symbol_rows:
+            item["share"] = round(abs(item["pnl"]) / total_abs_pnl * 100.0, 1)
+
+        winners = sorted(
+            [row for row in symbol_rows if row["pnl"] > 0],
+            key=lambda x: x["pnl"],
+            reverse=True,
+        )[:5]
+        losers = sorted(
+            [row for row in symbol_rows if row["pnl"] < 0],
+            key=lambda x: x["pnl"],
+        )[:5]
+
+        return {
+            "duration_buckets": [bucket_map[label] for label in duration_labels],
+            "hourly_pnl": hourly_pnl,
+            "symbol_rank": {
+                "winners": winners,
+                "losers": losers,
+            },
+        }

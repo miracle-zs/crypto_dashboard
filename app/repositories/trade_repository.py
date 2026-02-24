@@ -178,3 +178,6 @@ class TradeRepository:
 
     def get_monthly_pnl(self):
         return self._read.get_monthly_pnl()
+
+    def get_trade_aggregates(self):
+        return self._read.get_trade_aggregates()
