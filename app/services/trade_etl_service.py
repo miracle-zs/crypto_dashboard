@@ -63,12 +63,13 @@ def analyze_orders(
     traded_symbols: Optional[List[str]] = None,
     use_time_filter: bool = True,
     symbol_since_map: Optional[Dict[str, int]] = None,
+    prefetched_fee_totals: Optional[Dict[str, float]] = None,
     return_symbol_status: bool = False,
 ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
-    prefetched_fee_totals = None
+    local_prefetched_fee_totals = prefetched_fee_totals
     if traded_symbols is None:
         income_records = processor._fetch_income_history(since=since, until=until)
-        traded_symbols, prefetched_fee_totals = processor._summarize_income_records(income_records)
+        traded_symbols, local_prefetched_fee_totals = processor._summarize_income_records(income_records)
         logger.info(f"Income prefetch: records={len(income_records)}, symbols={len(traded_symbols)}")
 
     if not traded_symbols:
@@ -92,8 +93,8 @@ def analyze_orders(
 
     fee_prefetch_started = time.perf_counter()
     fee_totals_by_symbol = (
-        prefetched_fee_totals
-        if prefetched_fee_totals is not None
+        local_prefetched_fee_totals
+        if local_prefetched_fee_totals is not None
         else processor.get_fee_totals_by_symbol(since=since, until=until)
     )
     fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
@@ -314,7 +315,12 @@ def get_open_positions(
     if not active_symbols:
         return []
 
-    worker_count = processor._resolve_workers(len(active_symbols))
+    open_positions_workers = getattr(
+        processor,
+        "max_open_positions_workers",
+        getattr(processor, "max_etl_workers", 1),
+    )
+    worker_count = processor._resolve_workers(len(active_symbols), max_workers=open_positions_workers)
     open_positions: List[Dict] = []
     success_count = 0
     failure_count = 0

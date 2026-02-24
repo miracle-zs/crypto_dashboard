@@ -48,6 +48,7 @@ class TradeDataProcessor:
         self.client = BinanceFuturesRestClient(api_key=api_key, api_secret=api_secret)
         self.max_etl_workers = self._load_max_workers()
         self.max_price_workers = self._load_price_workers()
+        self.max_open_positions_workers = self._load_open_positions_workers()
         self._exchange_info_cache = None
         self._exchange_info_expires_at = 0.0
         self._exchange_info_lock = threading.Lock()
@@ -74,6 +75,18 @@ class TradeDataProcessor:
         except Exception:
             logger.warning(f"Invalid ETL_PRICE_WORKERS={raw}, fallback to {self.max_etl_workers}")
             return self.max_etl_workers
+
+    def _load_open_positions_workers(self) -> int:
+        default_workers = max(1, self.max_etl_workers * 2)
+        raw = os.getenv('ETL_OPEN_POSITIONS_WORKERS', str(default_workers))
+        try:
+            workers = int(raw)
+            if workers < 1:
+                raise ValueError("must be >= 1")
+            return workers
+        except Exception:
+            logger.warning(f"Invalid ETL_OPEN_POSITIONS_WORKERS={raw}, fallback to {default_workers}")
+            return default_workers
 
     def _load_exchange_info_cache_ttl(self) -> float:
         raw = os.getenv('ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS', '300')
@@ -528,18 +541,32 @@ class TradeDataProcessor:
         until: int,
         client: Optional[BinanceFuturesRestClient] = None
     ) -> List[str]:
-        """Get symbols that have actual trades using income history"""
+        """Get symbols that have actual trades using income history."""
+        symbols_list, _fee_totals = self.get_traded_symbols_and_fee_totals(
+            since=since,
+            until=until,
+            client=client,
+        )
+        return symbols_list
+
+    def get_traded_symbols_and_fee_totals(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None
+    ) -> tuple[List[str], Dict[str, float]]:
+        """Fetch traded symbols and fee totals in one income-history pass."""
         client = client or self.client
         logger.info("Fetching traded symbols from income history...")
         result = self._fetch_income_history(since=since, until=until, client=client)
-        symbols_list, _fee_totals = self._summarize_income_records(result)
+        symbols_list, fee_totals = self._summarize_income_records(result)
 
         if symbols_list:
             logger.info(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")
         else:
             logger.warning("No symbols found in income history")
 
-        return symbols_list
+        return symbols_list, fee_totals
 
     def _extract_symbol_closed_positions(
         self,
@@ -566,6 +593,7 @@ class TradeDataProcessor:
         traded_symbols: Optional[List[str]] = None,
         use_time_filter: bool = True,
         symbol_since_map: Optional[Dict[str, int]] = None,
+        prefetched_fee_totals: Optional[Dict[str, float]] = None,
         return_symbol_status: bool = False,
     ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
         """Analyze orders and convert to DataFrame."""
@@ -576,6 +604,7 @@ class TradeDataProcessor:
             traded_symbols=traded_symbols,
             use_time_filter=use_time_filter,
             symbol_since_map=symbol_since_map,
+            prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=return_symbol_status,
         )
 

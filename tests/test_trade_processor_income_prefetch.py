@@ -50,3 +50,38 @@ def test_analyze_orders_return_symbol_status_with_no_symbols_returns_triplet():
     assert df.empty
     assert success_symbols == []
     assert failure_symbols == {}
+
+
+def test_analyze_orders_uses_prefetched_fee_totals_without_second_income_fetch():
+    processor = TradeDataProcessor.__new__(TradeDataProcessor)
+    processor.max_etl_workers = 1
+    processor.max_price_workers = 1
+    processor.max_open_positions_workers = 1
+    processor._resolve_workers = lambda task_count, max_workers=None: 1
+    processor._extract_symbol_closed_positions = (
+        lambda symbol, since, until, use_time_filter, fee_totals_by_symbol: ([], 0.0)
+    )
+
+    called = {"fee_totals": 0}
+
+    def fail_if_called(*args, **kwargs):
+        called["fee_totals"] += 1
+        raise AssertionError("get_fee_totals_by_symbol should not be called when prefetched_fee_totals is provided")
+
+    processor.get_fee_totals_by_symbol = fail_if_called
+
+    result = processor.analyze_orders(
+        since=1,
+        until=2,
+        traded_symbols=["BTCUSDT"],
+        use_time_filter=True,
+        prefetched_fee_totals={"BTCUSDT": -1.5},
+        return_symbol_status=True,
+    )
+
+    assert isinstance(result, tuple)
+    df, success_symbols, failure_symbols = result
+    assert df.empty
+    assert success_symbols == ["BTCUSDT"]
+    assert failure_symbols == {}
+    assert called["fee_totals"] == 0

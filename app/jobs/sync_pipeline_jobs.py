@@ -57,7 +57,11 @@ def fetch_and_analyze_closed_trades(
 ):
     logger.info("从Binance API抓取数据...")
     stage_started = time.perf_counter()
-    traded_symbols = scheduler.processor.get_traded_symbols(since, until)
+    prefetched_fee_totals = None
+    if hasattr(scheduler.processor, "get_traded_symbols_and_fee_totals"):
+        traded_symbols, prefetched_fee_totals = scheduler.processor.get_traded_symbols_and_fee_totals(since, until)
+    else:
+        traded_symbols = scheduler.processor.get_traded_symbols(since, until)
     symbols_elapsed = time.perf_counter() - stage_started
     symbol_count = len(traded_symbols)
     logger.info(f"拉取活跃交易币种完成: count={symbol_count}, elapsed={symbols_elapsed:.2f}s")
@@ -87,6 +91,7 @@ def fetch_and_analyze_closed_trades(
             traded_symbols=traded_symbols,
             use_time_filter=scheduler.use_time_filter,
             symbol_since_map=symbol_since_map,
+            prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=True,
         )
         if not isinstance(analysis_result, (tuple, list)) or len(analysis_result) != 3:
