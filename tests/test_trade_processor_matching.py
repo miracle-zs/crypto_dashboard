@@ -32,3 +32,32 @@ def test_match_orders_to_positions_presorted_matches_default():
     assert default_result == presorted_result
     assert len(default_result) == 1
     assert default_result[0]["symbol"] == "BTCUSDT"
+
+
+def test_match_orders_marks_liquidation_exit():
+    processor = TradeDataProcessor.__new__(TradeDataProcessor)
+    orders = [
+        {
+            "orderId": 1,
+            "side": "SELL",
+            "positionSide": "SHORT",
+            "executedQty": "10",
+            "avgPrice": "1.0",
+            "updateTime": 1000,
+            "clientOrderId": "manual-entry",
+        },
+        {
+            "orderId": 2,
+            "side": "BUY",
+            "positionSide": "SHORT",
+            "executedQty": "10",
+            "avgPrice": "1.2",
+            "updateTime": 2000,
+            "clientOrderId": "autoclose-12345",
+        },
+    ]
+
+    result = processor.match_orders_to_positions(orders, "TESTUSDT", fees_map={}, presorted=True)
+
+    assert len(result) == 1
+    assert result[0]["is_liquidation"] is True

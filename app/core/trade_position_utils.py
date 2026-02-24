@@ -40,15 +40,18 @@ def position_to_trade_row(
     base = symbol[:-4] if symbol.endswith("USDT") else symbol
     entry_price = pos["entry_price"]
     qty = pos["qty"]
-    pnl_net = round(pos["pnl"])
-    entry_amount = round(entry_price * qty)
+    pnl_net = round(pos["pnl"], 2)
+    entry_amount = round(entry_price * qty, 2)
 
     if open_price and entry_price:
         price_change_pct = (entry_price - open_price) / open_price
     else:
         price_change_pct = 0
 
-    close_type = "止盈" if pnl_net > 0 else "止损"
+    if bool(pos.get("is_liquidation")):
+        close_type = "爆仓"
+    else:
+        close_type = "止盈" if pnl_net > 0 else "止损"
     return_rate_raw = (pnl_net / entry_amount * 100) if entry_amount != 0 else 0
 
     return {
@@ -64,12 +67,12 @@ def position_to_trade_row(
         "Entry_Price": entry_price,
         "Exit_Price": pos["exit_price"],
         "Qty": qty,
-        "Fees": round(pos.get("fees", 0)),
+        "Fees": round(pos.get("fees", 0), 2),
         "PNL_Net": pnl_net,
         "Close_Type": close_type,
         "Return_Rate": f"{return_rate_raw:.2f}%",
         "Open_Price": open_price if open_price else 0,
-        "PNL_Before_Fees": round(pos.get("pnl_before_fees", pos["pnl"])),
+        "PNL_Before_Fees": round(pos.get("pnl_before_fees", pos["pnl"]), 2),
         "Entry_Order_ID": pos["entry_order_id"],
         "Exit_Order_ID": pos["exit_order_id"],
     }

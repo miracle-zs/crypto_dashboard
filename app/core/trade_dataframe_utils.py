@@ -20,9 +20,10 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
         weighted_entry_price = (group["Entry_Price"] * group["Qty"]).sum() / total_qty
         weighted_exit_price = (group["Exit_Price"] * group["Qty"]).sum() / total_qty
 
-        pnl_net_merged = round(group["PNL_Net"].sum())
-        entry_amount_merged = round(weighted_entry_price * total_qty)
-        close_type_merged = "止盈" if pnl_net_merged > 0 else "止损"
+        pnl_net_merged = round(group["PNL_Net"].sum(), 2)
+        entry_amount_merged = round(weighted_entry_price * total_qty, 2)
+        has_liquidation = any(str(v) == "爆仓" for v in group["Close_Type"].tolist())
+        close_type_merged = "爆仓" if has_liquidation else ("止盈" if pnl_net_merged > 0 else "止损")
         return_rate_raw_merged = (pnl_net_merged / entry_amount_merged * 100) if entry_amount_merged != 0 else 0
         return_rate_merged = f"{return_rate_raw_merged:.2f}%"
 
@@ -39,12 +40,12 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
             "Entry_Price": weighted_entry_price,
             "Exit_Price": weighted_exit_price,
             "Qty": total_qty,
-            "Fees": round(group["Fees"].sum()),
+            "Fees": round(group["Fees"].sum(), 2),
             "PNL_Net": pnl_net_merged,
             "Close_Type": close_type_merged,
             "Return_Rate": return_rate_merged,
             "Open_Price": group.iloc[0]["Open_Price"],
-            "PNL_Before_Fees": round(group["PNL_Before_Fees"].sum()),
+            "PNL_Before_Fees": round(group["PNL_Before_Fees"].sum(), 2),
             "Entry_Order_ID": group.iloc[0]["Entry_Order_ID"],
             "Exit_Order_ID": ",".join(group["Exit_Order_ID"].astype(str).unique()),
             "Entry_Time_Key": entry_time_key,

@@ -32,6 +32,24 @@ def test_analyze_orders_prefetches_income_once_when_symbols_not_provided():
     assert calls["income"] == 1
 
 
+def test_summarize_income_records_tracks_extra_loss_income_types():
+    records = [
+        {"symbol": "BTCUSDT", "incomeType": "COMMISSION", "income": "-1.0"},
+        {"symbol": "BTCUSDT", "incomeType": "INSURANCE_CLEAR", "income": "-9.5"},
+        {"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "-30.0"},
+        {"symbol": "ETHUSDT", "incomeType": "FUNDING_FEE", "income": "-0.2"},
+    ]
+
+    symbols, totals = TradeDataProcessor._summarize_income_records(
+        records,
+        extra_loss_income_types={"INSURANCE_CLEAR"},
+    )
+
+    assert set(symbols) == {"BTCUSDT", "ETHUSDT"}
+    assert totals["BTCUSDT"] == -10.5
+    assert totals["ETHUSDT"] == -0.2
+
+
 def test_analyze_orders_return_symbol_status_with_no_symbols_returns_triplet():
     processor = TradeDataProcessor.__new__(TradeDataProcessor)
     processor._fetch_income_history = lambda since, until, client=None, income_type=None: []

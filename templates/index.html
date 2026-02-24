@@ -916,7 +916,7 @@
                 const tradesWithProbe = Array.isArray(tradesRaw) ? tradesRaw : [];
                 tradePageHasNext = tradesWithProbe.length > TRADE_PAGE_SIZE;
                 const tradesData = tradePageHasNext
-                    ? tradesWithProbe.slice(0, TRADE_PAGE_SIZE)
+                    ? tradesWithProbe.slice(-TRADE_PAGE_SIZE)
                     : tradesWithProbe;
                 if (tradesData.length === 0 && tradePageOffset > 0) {
                     const attemptedOffset = tradePageOffset;

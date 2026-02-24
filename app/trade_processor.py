@@ -53,6 +53,7 @@ class TradeDataProcessor:
         self._exchange_info_expires_at = 0.0
         self._exchange_info_lock = threading.Lock()
         self._exchange_info_cache_ttl_seconds = self._load_exchange_info_cache_ttl()
+        self.extra_loss_income_types = self._load_extra_loss_income_types()
 
     def _load_max_workers(self) -> int:
         raw = os.getenv('ETL_MAX_WORKERS', '2')
@@ -96,6 +97,13 @@ class TradeDataProcessor:
         except Exception:
             logger.warning(f"Invalid ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS={raw}, fallback to 300")
             return 300.0
+
+    def _load_extra_loss_income_types(self) -> set[str]:
+        raw = os.getenv("EXTRA_LOSS_INCOME_TYPES", "INSURANCE_CLEAR")
+        parsed = {item.strip().upper() for item in raw.split(",") if item.strip()}
+        if not parsed:
+            return {"INSURANCE_CLEAR"}
+        return parsed
 
     def _resolve_workers(self, task_count: int, max_workers: Optional[int] = None) -> int:
         cap = self.max_etl_workers if max_workers is None else max_workers
@@ -364,12 +372,14 @@ class TradeDataProcessor:
         """
         records = self._fetch_income_history(since=since, until=until, client=client)
         fee_totals: Dict[str, float] = {}
+        extra_types = getattr(self, "extra_loss_income_types", {"INSURANCE_CLEAR"})
 
         for record in records:
             symbol = record.get('symbol')
             if not symbol:
                 continue
-            if record.get('incomeType') not in ['COMMISSION', 'FUNDING_FEE']:
+            income_type = str(record.get("incomeType") or "").upper()
+            if income_type not in {"COMMISSION", "FUNDING_FEE", *extra_types}:
                 continue
             income = float(record.get('income', 0.0))
             fee_totals[symbol] = fee_totals.get(symbol, 0.0) + income
@@ -377,17 +387,32 @@ class TradeDataProcessor:
         return fee_totals
 
     @staticmethod
-    def _summarize_income_records(records: List[Dict]) -> Tuple[List[str], Dict[str, float]]:
+    def _summarize_income_records(
+        records: List[Dict], extra_loss_income_types: Optional[set[str]] = None
+    ) -> Tuple[List[str], Dict[str, float]]:
         symbols = set()
         fee_totals: Dict[str, float] = {}
+        extra_types = {item.strip().upper() for item in (extra_loss_income_types or set()) if item}
+        tracked_cost_types = {"COMMISSION", "FUNDING_FEE", *extra_types}
         for record in records:
             symbol = record.get('symbol')
             if not symbol:
                 continue
             symbols.add(symbol)
-            if record.get('incomeType') in ['COMMISSION', 'FUNDING_FEE']:
+            income_type = str(record.get("incomeType") or "").upper()
+            if income_type in tracked_cost_types:
                 fee_totals[symbol] = fee_totals.get(symbol, 0.0) + float(record.get('income', 0.0))
         return list(symbols), fee_totals
+
+    @staticmethod
+    def _is_liquidation_order(order: Dict) -> bool:
+        client_order_id = str(order.get("clientOrderId") or "").lower()
+        order_type = str(order.get("type") or "").upper()
+        return (
+            client_order_id.startswith("autoclose-")
+            or "adl_autoclose" in client_order_id
+            or order_type == "LIQUIDATION"
+        )
 
     def match_orders_to_positions(
         self,
@@ -522,7 +547,8 @@ class TradeDataProcessor:
                         'pnl_before_fees': pnl_before_fees,
                         'weight': weight,  # Weight for proportional fee allocation
                         'entry_order_id': entry['order_id'],
-                        'exit_order_id': order['order_id']
+                        'exit_order_id': order['order_id'],
+                        'is_liquidation': self._is_liquidation_order(order),
                     })
 
                     # Update remaining quantities
@@ -559,7 +585,9 @@ class TradeDataProcessor:
         client = client or self.client
         logger.info("Fetching traded symbols from income history...")
         result = self._fetch_income_history(since=since, until=until, client=client)
-        symbols_list, fee_totals = self._summarize_income_records(result)
+        symbols_list, fee_totals = self._summarize_income_records(
+            result, extra_loss_income_types=self.extra_loss_income_types
+        )
 
         if symbols_list:
             logger.info(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")

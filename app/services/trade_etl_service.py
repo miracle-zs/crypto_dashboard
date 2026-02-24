@@ -69,7 +69,10 @@ def analyze_orders(
     local_prefetched_fee_totals = prefetched_fee_totals
     if traded_symbols is None:
         income_records = processor._fetch_income_history(since=since, until=until)
-        traded_symbols, local_prefetched_fee_totals = processor._summarize_income_records(income_records)
+        traded_symbols, local_prefetched_fee_totals = processor._summarize_income_records(
+            income_records,
+            extra_loss_income_types=getattr(processor, "extra_loss_income_types", None),
+        )
         logger.info(f"Income prefetch: records={len(income_records)}, symbols={len(traded_symbols)}")
 
     if not traded_symbols:
