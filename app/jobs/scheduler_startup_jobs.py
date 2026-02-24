@@ -59,6 +59,45 @@ def register_scheduler_jobs(scheduler, *, utc8):
     else:
         logger.info("全量同步任务未启用: ENABLE_DAILY_FULL_SYNC=0")
 
+    if scheduler.enable_daily_open_positions_full_sync:
+        open_full_hour = scheduler.open_positions_full_sync_hour
+        open_full_minute = scheduler.open_positions_full_sync_minute
+
+        if (
+            scheduler.enable_daily_full_sync
+            and open_full_hour == scheduler.daily_full_sync_hour
+            and open_full_minute == scheduler.daily_full_sync_minute
+        ):
+            shifted_total = (open_full_hour * 60 + open_full_minute + 20) % (24 * 60)
+            open_full_hour = shifted_total // 60
+            open_full_minute = shifted_total % 60
+            logger.warning(
+                "未平仓全量窗口任务与全量交易同步重叠，自动错开到 "
+                f"{open_full_hour:02d}:{open_full_minute:02d}"
+            )
+
+        scheduler.scheduler.add_job(
+            func=scheduler.sync_open_positions_full_window,
+            trigger=CronTrigger(
+                hour=open_full_hour,
+                minute=open_full_minute,
+                timezone=utc8,
+            ),
+            id="sync_open_positions_full_daily",
+            name="同步未平仓订单(全量窗口)",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+            replace_existing=True,
+        )
+        logger.info(
+            "未平仓全量窗口任务已启动: "
+            f"每天 {open_full_hour:02d}:{open_full_minute:02d} 执行 "
+            f"(lookback_days={scheduler.open_positions_full_lookback_days})"
+        )
+    else:
+        logger.info("未平仓全量窗口任务未启用: ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC=0")
+
     if not scheduler.enable_user_stream:
         scheduler.scheduler.add_job(
             func=scheduler.sync_balance_data,

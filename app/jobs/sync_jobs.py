@@ -11,7 +11,12 @@ def run_sync_trades_incremental(scheduler):
     return scheduler.sync_trades_incremental()
 
 
-def run_sync_open_positions(scheduler):
+def run_sync_open_positions(
+    scheduler,
+    *,
+    lookback_days: int | None = None,
+    mode: str = "incremental",
+):
     """独立同步未平仓订单，避免与闭仓ETL耦合"""
     if not scheduler.processor:
         logger.warning("无法同步未平仓: API密钥未配置")
@@ -23,11 +28,14 @@ def run_sync_open_positions(scheduler):
 
     started_at = time.perf_counter()
     try:
+        resolved_lookback_days = int(
+            lookback_days if lookback_days is not None else scheduler.open_positions_lookback_days
+        )
         until = int(datetime.now(UTC8).timestamp() * 1000)
-        open_since = max(0, until - scheduler.open_positions_lookback_days * 24 * 60 * 60 * 1000)
+        open_since = max(0, until - resolved_lookback_days * 24 * 60 * 60 * 1000)
         logger.info(
             "开始同步未平仓订单... "
-            f"lookback_days={scheduler.open_positions_lookback_days}, "
+            f"lookback_days={resolved_lookback_days}, "
             f"window={scheduler._format_window_with_ms(open_since, until)}"
         )
         open_positions = scheduler.processor.get_open_positions(open_since, until, traded_symbols=None)
@@ -35,7 +43,7 @@ def run_sync_open_positions(scheduler):
             logger.warning("未平仓同步跳过：PositionRisk请求失败，保留数据库现有持仓")
             scheduler.sync_repo.log_sync_run(
                 run_type="open_positions_sync",
-                mode="incremental",
+                mode=mode,
                 status="skipped",
                 symbol_count=0,
                 rows_count=0,
@@ -58,7 +66,7 @@ def run_sync_open_positions(scheduler):
         logger.info(f"未平仓同步完成: elapsed={elapsed:.2f}s")
         scheduler.sync_repo.log_sync_run(
             run_type="open_positions_sync",
-            mode="incremental",
+            mode=mode,
             status="success",
             symbol_count=0,
             rows_count=open_count,
@@ -70,7 +78,7 @@ def run_sync_open_positions(scheduler):
         logger.error(f"未平仓同步失败: {exc}")
         scheduler.sync_repo.log_sync_run(
             run_type="open_positions_sync",
-            mode="incremental",
+            mode=mode,
             status="error",
             symbol_count=0,
             rows_count=0,

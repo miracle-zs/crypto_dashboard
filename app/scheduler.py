@@ -57,6 +57,10 @@ class TradeDataScheduler:
         "sync_lookback_minutes",
         "symbol_sync_overlap_minutes",
         "open_positions_lookback_days",
+        "enable_daily_open_positions_full_sync",
+        "open_positions_full_lookback_days",
+        "open_positions_full_sync_hour",
+        "open_positions_full_sync_minute",
         "enable_daily_full_sync",
         "daily_full_sync_hour",
         "daily_full_sync_minute",
@@ -370,6 +374,21 @@ class TradeDataScheduler:
                 raise
             finally:
                 log_job_metric(job_name="sync_open_positions_data", status=status, snapshot=metric)
+
+    def sync_open_positions_full_window(self):
+        status = "success"
+        with measure_ms("scheduler.sync_open_positions_full_window") as metric:
+            try:
+                return run_sync_open_positions(
+                    self,
+                    lookback_days=self.open_positions_full_lookback_days,
+                    mode="full",
+                )
+            except Exception:
+                status = "error"
+                raise
+            finally:
+                log_job_metric(job_name="sync_open_positions_full_window", status=status, snapshot=metric)
 
     def sync_trades_incremental(self):
         """增量同步交易数据"""

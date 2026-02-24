@@ -57,6 +57,10 @@ class SchedulerConfig:
     sync_lookback_minutes: int
     symbol_sync_overlap_minutes: int
     open_positions_lookback_days: int
+    enable_daily_open_positions_full_sync: bool
+    open_positions_full_lookback_days: int
+    open_positions_full_sync_hour: int
+    open_positions_full_sync_minute: int
     enable_daily_full_sync: bool
     daily_full_sync_hour: int
     daily_full_sync_minute: int
@@ -104,6 +108,10 @@ class SchedulerConfig:
 
 def load_scheduler_config() -> SchedulerConfig:
     update_interval_minutes = _env_int("UPDATE_INTERVAL_MINUTES", 10, minimum=1)
+    daily_full_sync_hour = _env_int("DAILY_FULL_SYNC_HOUR", 3, minimum=0) % 24
+    daily_full_sync_minute = _env_int("DAILY_FULL_SYNC_MINUTE", 30, minimum=0) % 60
+    open_positions_full_default_minute = (daily_full_sync_minute + 20) % 60
+
     rebound_7d_kline_workers = _env_int("REBOUND_7D_KLINE_WORKERS", 6, minimum=1)
     rebound_7d_weight_budget_per_minute = _env_int(
         "REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE", 900, minimum=60
@@ -124,10 +132,22 @@ def load_scheduler_config() -> SchedulerConfig:
         end_date=os.getenv("END_DATE"),
         sync_lookback_minutes=_env_int("SYNC_LOOKBACK_MINUTES", 1440, minimum=1),
         symbol_sync_overlap_minutes=_env_int("SYMBOL_SYNC_OVERLAP_MINUTES", 1440, minimum=1),
-        open_positions_lookback_days=_env_int("OPEN_POSITIONS_LOOKBACK_DAYS", 60, minimum=1),
+        open_positions_lookback_days=_env_int("OPEN_POSITIONS_LOOKBACK_DAYS", 3, minimum=1),
+        enable_daily_open_positions_full_sync=_env_bool("ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC", True),
+        open_positions_full_lookback_days=_env_int("OPEN_POSITIONS_FULL_LOOKBACK_DAYS", 60, minimum=1),
+        open_positions_full_sync_hour=_env_int(
+            "OPEN_POSITIONS_FULL_SYNC_HOUR",
+            daily_full_sync_hour,
+            minimum=0,
+        ) % 24,
+        open_positions_full_sync_minute=_env_int(
+            "OPEN_POSITIONS_FULL_SYNC_MINUTE",
+            open_positions_full_default_minute,
+            minimum=0,
+        ) % 60,
         enable_daily_full_sync=_env_bool("ENABLE_DAILY_FULL_SYNC", True),
-        daily_full_sync_hour=_env_int("DAILY_FULL_SYNC_HOUR", 3, minimum=0),
-        daily_full_sync_minute=_env_int("DAILY_FULL_SYNC_MINUTE", 30, minimum=0),
+        daily_full_sync_hour=daily_full_sync_hour,
+        daily_full_sync_minute=daily_full_sync_minute,
         use_time_filter=_env_bool("SYNC_USE_TIME_FILTER", True),
         enable_user_stream=_env_bool("ENABLE_USER_STREAM", False),
         force_full_sync=_env_bool("FORCE_FULL_SYNC", False),
