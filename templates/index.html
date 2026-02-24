@@ -176,6 +176,31 @@
             box-shadow: 4px 4px 0 rgba(17, 24, 39, 0.9);
         }
 
+        .trade-page-btn {
+            border: 2px solid var(--border);
+            background: var(--panel);
+            color: var(--text);
+            font-weight: 700;
+            transition: all 0.2s ease;
+        }
+        .trade-page-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 3px 3px 0 rgba(17, 24, 39, 0.7);
+        }
+        .trade-page-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .trade-page-input {
+            width: 72px;
+            border: 2px solid var(--border);
+            background: var(--panel-strong);
+            color: var(--text);
+            font-family: 'Space Mono', monospace;
+            text-align: center;
+        }
+
         .cyber-panel {
             background: var(--panel);
             border: 2px solid var(--border);
@@ -701,22 +726,39 @@
                     </button>
                 </div>
                 <div class="px-4 pb-4 pt-2 border-t border-gray-800 flex items-center justify-between gap-3">
-                    <div id="trade-page-info" class="text-[11px] text-gray-500">第 1 页</div>
+                    <div id="trade-page-info" class="text-[11px] font-mono" style="color: var(--muted);">第 1 页</div>
                     <div class="flex items-center gap-2">
                         <button
                             id="trade-page-prev"
                             onclick="goToPrevTradePage()"
-                            class="rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            class="trade-page-btn rounded-lg px-3 py-1.5 text-xs"
                         >
                             上一页
                         </button>
                         <button
                             id="trade-page-next"
                             onclick="goToNextTradePage()"
-                            class="rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            class="trade-page-btn rounded-lg px-3 py-1.5 text-xs"
                         >
                             下一页
                         </button>
+                        <div class="flex items-center gap-1">
+                            <input
+                                id="trade-page-jump-input"
+                                type="number"
+                                min="1"
+                                step="1"
+                                placeholder="页码"
+                                class="trade-page-input rounded-md px-1.5 py-1 text-xs"
+                            />
+                            <button
+                                id="trade-page-jump-btn"
+                                onclick="jumpToTradePage()"
+                                class="trade-page-btn rounded-lg px-2.5 py-1.5 text-xs"
+                            >
+                                跳转
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -772,11 +814,12 @@
 
         const DASHBOARD_UPDATE_INTERVAL = 60000;
         const TRADE_LOG_MOBILE_COLLAPSE_LIMIT = 6;
-        const TRADE_PAGE_SIZE = 20;
+        const TRADE_PAGE_SIZE = 10;
         let warnedConfig = false;
         let latestTrades = [];
         let tradeLogMobileExpanded = false;
         let tradePageOffset = 0;
+        let lastValidTradePageOffset = 0;
         let tradePageHasNext = false;
 
         function toggleTradeLogMobile() {
@@ -798,6 +841,26 @@
             fetchDashboardData();
         }
 
+        function jumpToTradePage() {
+            const inputEl = document.getElementById('trade-page-jump-input');
+            if (!inputEl) return;
+            const page = parseInt(String(inputEl.value || '').trim(), 10);
+            if (!Number.isFinite(page) || page < 1) {
+                inputEl.value = '';
+                return;
+            }
+            tradePageOffset = (page - 1) * TRADE_PAGE_SIZE;
+            tradeLogMobileExpanded = false;
+            fetchDashboardData({ suppressOutOfRangeAlert: false });
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') return;
+            const inputEl = document.getElementById('trade-page-jump-input');
+            if (!inputEl || document.activeElement !== inputEl) return;
+            jumpToTradePage();
+        });
+
         function updateTradePagination(visibleCount) {
             const pageInfoEl = document.getElementById('trade-page-info');
             const prevBtn = document.getElementById('trade-page-prev');
@@ -817,7 +880,8 @@
             nextBtn.disabled = !tradePageHasNext;
         }
 
-        async function fetchDashboardData() {
+        async function fetchDashboardData(options = {}) {
+            const suppressOutOfRangeAlert = Boolean(options.suppressOutOfRangeAlert);
             try {
                 const tradesUrl = `/api/trades?limit=${TRADE_PAGE_SIZE + 1}&offset=${tradePageOffset}`;
                 // Parallel fetching for performance
@@ -849,9 +913,18 @@
                     ? tradesWithProbe.slice(0, TRADE_PAGE_SIZE)
                     : tradesWithProbe;
                 if (tradesData.length === 0 && tradePageOffset > 0) {
-                    tradePageOffset = Math.max(0, tradePageOffset - TRADE_PAGE_SIZE);
+                    const attemptedOffset = tradePageOffset;
+                    tradePageOffset = lastValidTradePageOffset;
                     tradePageHasNext = false;
-                    return fetchDashboardData();
+                    if (!suppressOutOfRangeAlert) {
+                        alert("页码超出范围，已返回最近可用页。");
+                    }
+                    if (attemptedOffset !== tradePageOffset) {
+                        return fetchDashboardData({ suppressOutOfRangeAlert: true });
+                    }
+                }
+                if (tradesData.length > 0 || tradePageOffset === 0) {
+                    lastValidTradePageOffset = tradePageOffset;
                 }
                 const aggregatesData = await aggregatesRes.json();
                 const dailyStatsData = await dailyStatsRes.json();
