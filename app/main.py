@@ -27,6 +27,7 @@ load_dotenv()
 
 scheduler = None
 user_stream = None
+API_METRIC_LOG_ENABLED = os.getenv("ENABLE_API_METRIC_LOG", "0").strip().lower() in ("1", "true", "yes")
 
 
 @asynccontextmanager
@@ -79,6 +80,9 @@ app.state.db = None
 
 @app.middleware("http")
 async def request_metrics_middleware(request: Request, call_next):
+    if not API_METRIC_LOG_ENABLED:
+        return await call_next(request)
+
     if request.url.path == "/api/logs":
         return await call_next(request)
 
