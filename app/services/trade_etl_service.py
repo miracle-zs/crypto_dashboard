@@ -73,7 +73,10 @@ def analyze_orders(
 
     if not traded_symbols:
         logger.warning("No trading history found in the specified period")
-        return pd.DataFrame()
+        empty_df = pd.DataFrame()
+        if return_symbol_status:
+            return empty_df, [], {}
+        return empty_df
 
     symbols = sorted(set(traded_symbols))
     logger.info(f"Analyzing {len(symbols)} symbols...")

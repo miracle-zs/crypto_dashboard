@@ -30,3 +30,23 @@ def test_analyze_orders_prefetches_income_once_when_symbols_not_provided():
 
     assert df.empty
     assert calls["income"] == 1
+
+
+def test_analyze_orders_return_symbol_status_with_no_symbols_returns_triplet():
+    processor = TradeDataProcessor.__new__(TradeDataProcessor)
+    processor._fetch_income_history = lambda since, until, client=None, income_type=None: []
+
+    result = processor.analyze_orders(
+        since=1,
+        until=2,
+        traded_symbols=None,
+        use_time_filter=True,
+        return_symbol_status=True,
+    )
+
+    assert isinstance(result, tuple)
+    assert len(result) == 3
+    df, success_symbols, failure_symbols = result
+    assert df.empty
+    assert success_symbols == []
+    assert failure_symbols == {}

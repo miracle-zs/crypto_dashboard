@@ -27,6 +27,27 @@ def test_scheduler_still_registers_existing_job_ids(monkeypatch):
     assert "check_losses_noon" in calls
 
 
+def test_scheduler_user_stream_mode_skips_balance_job_registration(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_USER_STREAM", "1")
+
+    scheduler = TradeDataScheduler()
+    calls = []
+
+    def fake_add_job(*args, **kwargs):
+        calls.append((args, kwargs))
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+    scheduler.start()
+
+    assert all(kwargs.get("id") != "sync_balance" for _args, kwargs in calls)
+    assert all(not args or args[0] is not scheduler.sync_balance_data for args, _kwargs in calls)
+
+
 def test_scheduler_noon_methods_delegate_to_job_module(monkeypatch):
     from app.scheduler import TradeDataScheduler
 

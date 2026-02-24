@@ -12,7 +12,8 @@ def register_scheduler_jobs(scheduler, *, utc8):
     logger.info("立即执行首次数据同步...")
     scheduler.scheduler.add_job(partial(run_sync_trades_incremental, scheduler), "date")
     scheduler.scheduler.add_job(partial(run_sync_open_positions, scheduler), "date")
-    scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
+    if not scheduler.enable_user_stream:
+        scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
 
     scheduler.scheduler.add_job(
         func=partial(run_sync_trades_incremental, scheduler),
@@ -207,7 +208,10 @@ def register_scheduler_jobs(scheduler, *, utc8):
         f"未平仓同步任务已启动: 每 {scheduler.open_positions_update_interval_minutes} 分钟自动更新一次 "
         f"(lookback_days={scheduler.open_positions_lookback_days})"
     )
-    logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
+    if not scheduler.enable_user_stream:
+        logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
+    else:
+        logger.info("余额监控任务由用户数据流接管")
     logger.info("睡前风控检查已启动: 每天 23:00 执行")
     logger.info(
         "午间浮亏检查已启动: "
