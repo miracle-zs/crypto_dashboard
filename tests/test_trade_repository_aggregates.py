@@ -41,7 +41,7 @@ def test_get_trade_aggregates_returns_expected_shape_and_values(tmp_path):
 
     payload = repo.get_trade_aggregates()
 
-    assert set(payload.keys()) == {"duration_buckets", "hourly_pnl", "symbol_rank"}
+    assert set(payload.keys()) == {"duration_buckets", "duration_points", "hourly_pnl", "symbol_rank"}
     assert len(payload["hourly_pnl"]) == 24
     assert payload["hourly_pnl"][1] == 12.0
     assert payload["hourly_pnl"][2] == -5.0
@@ -52,6 +52,10 @@ def test_get_trade_aggregates_returns_expected_shape_and_values(tmp_path):
     assert bucket_map["15-30m"]["trade_count"] == 1
     assert bucket_map["15-30m"]["loss_pnl"] == -5.0
     assert bucket_map["2h+"]["trade_count"] == 1
+
+    duration_points = payload["duration_points"]
+    assert len(duration_points) == 3
+    assert all(set(p.keys()) == {"x", "y", "symbol", "time"} for p in duration_points)
 
     winners = payload["symbol_rank"]["winners"]
     losers = payload["symbol_rank"]["losers"]

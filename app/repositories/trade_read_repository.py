@@ -361,6 +361,34 @@ class TradeReadRepository:
                 "loss_pnl": float(row["loss_pnl"] or 0.0),
             }
 
+        # Duration scatter points (sample recent records for rendering performance).
+        cursor.execute(
+            """
+            SELECT
+                symbol,
+                holding_time,
+                pnl_net,
+                MAX(
+                    0.0,
+                    (julianday(exit_time) - julianday(entry_time)) * 24.0 * 60.0
+                ) AS duration_minutes
+            FROM trades
+            WHERE entry_time IS NOT NULL
+              AND exit_time IS NOT NULL
+            ORDER BY entry_time DESC
+            LIMIT 1200
+            """
+        )
+        duration_points = [
+            {
+                "x": round(float(row["duration_minutes"] or 0.0), 1),
+                "y": float(row["pnl_net"] or 0.0),
+                "symbol": str(row["symbol"] or "--"),
+                "time": str(row["holding_time"] or "--"),
+            }
+            for row in cursor.fetchall()
+        ]
+
         cursor.execute(
             """
             SELECT
@@ -409,6 +437,7 @@ class TradeReadRepository:
 
         return {
             "duration_buckets": [bucket_map[label] for label in duration_labels],
+            "duration_points": duration_points,
             "hourly_pnl": hourly_pnl,
             "symbol_rank": {
                 "winners": winners,

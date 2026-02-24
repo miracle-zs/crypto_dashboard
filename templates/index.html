@@ -943,7 +943,7 @@
             document.getElementById('metric-mdd').innerText = `-$${Math.abs(maxSingleLoss)}`;
 
             renderChart(stats.equity_curve);
-            renderDurationChart(tradeAggregates.duration_buckets || []);
+            renderDurationChart(tradeAggregates.duration_points || []);
             renderHourlyChart(tradeAggregates.hourly_pnl || []);
             renderDailyTradesChart(dailyStats);
             renderTable(latestTrades);
@@ -1024,49 +1024,70 @@
             equityChartInstance.render();
         }
 
-        function renderDurationChart(durationBuckets) {
-            const categories = durationBuckets.map(item => item.label || '--');
-            const winPnL = durationBuckets.map(item => Number(item.win_pnl) || 0);
-            const lossPnL = durationBuckets.map(item => Number(item.loss_pnl) || 0);
+        function renderDurationChart(durationPoints) {
+            const wins = [];
+            const losses = [];
+
+            durationPoints.forEach(p => {
+                const xVal = Number(p.x) || 0;
+                const yVal = Number(p.y) || 0;
+                const payload = {
+                    x: xVal,
+                    y: yVal,
+                    symbol: p.symbol || '--',
+                    time: p.time || '--',
+                };
+                if (yVal >= 0) {
+                    wins.push(payload);
+                } else {
+                    losses.push(payload);
+                }
+            });
 
             const options = {
                 chart: {
-                    type: 'bar',
+                    type: 'scatter',
                     height: 200,
                     toolbar: { show: false },
                     background: 'transparent',
-                    fontFamily: 'Share Tech Mono'
+                    fontFamily: 'Share Tech Mono',
+                    zoom: { enabled: true, type: 'xy' }
                 },
                 series: [
-                    { name: 'Win PnL', data: winPnL },
-                    { name: 'Loss PnL', data: lossPnL }
+                    { name: 'Wins', data: wins },
+                    { name: 'Losses', data: losses }
                 ],
                 colors: ['#10b981', '#ef4444'], // Green, Red
-                plotOptions: {
-                    bar: {
-                        borderRadius: 2,
-                        columnWidth: '55%',
-                    },
-                },
                 grid: {
                     borderColor: document.body.classList.contains('dark-mode') ? '#334155' : '#e2e8f0',
                     strokeDashArray: 4,
+                    xaxis: { lines: { show: true } },
                     yaxis: { lines: { show: true } },
                 },
                 xaxis: {
-                    categories,
-                    labels: { style: { colors: '#64748b' } },
+                    type: 'numeric',
+                    tickAmount: 10,
+                    labels: {
+                        style: { colors: '#64748b' },
+                        formatter: (val) => { return val < 60 ? val.toFixed(0) + 'm' : (val / 60).toFixed(1) + 'h'; }
+                    },
                     title: { text: 'Duration', style: { color: '#475569', fontSize: '11px' } }
                 },
                 yaxis: {
                     labels: { style: { colors: '#64748b' } },
                 },
+                markers: { size: 4, strokeWidth: 0, hover: { size: 6 } },
                 tooltip: {
                     theme: document.body.classList.contains('dark-mode') ? 'dark' : 'light',
-                    y: {
-                        formatter: function(val) {
-                            return "$" + Number(val || 0).toLocaleString();
-                        }
+                    custom: function({series, seriesIndex, dataPointIndex, w}) {
+                        const data = w.config.series[seriesIndex].data[dataPointIndex];
+                        return `
+                            <div class="px-2 py-1 bg-slate-800 border border-gray-700 text-xs">
+                                <div class="font-bold text-white">${data.symbol}</div>
+                                <div class="text-gray-400">Time: ${data.time}</div>
+                                <div class="${data.y >= 0 ? 'text-green-400' : 'text-red-400'}">PnL: $${data.y}</div>
+                            </div>
+                        `;
                     }
                 }
             };
