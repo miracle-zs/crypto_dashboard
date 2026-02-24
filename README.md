@@ -242,6 +242,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - 午间浮亏与复盘接口：
   - `/api/open-positions`：返回午间快照与夜间复盘摘要（`summary.recent_loss_*`、`summary.noon_review_*`）
   - `/api/noon-loss-review-history?limit=7`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
+- 交易分析接口：
+  - `/api/summary`：交易汇总指标
+  - `/api/trades?limit=10&offset=0`：交易明细分页
+  - `/api/trades-aggregates?window=all|7d|30d`：图表/榜单聚合数据（默认 `all`）
 
 ### 5. 内置调度任务（默认）
 - `sync_trades_incremental`：

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from app.database import Database
 from app.repositories.trade_repository import TradeRepository
 
@@ -132,3 +134,53 @@ def test_get_trade_aggregates_uses_cache_and_invalidates_on_data_change(tmp_path
     assert len(refreshed_payload["hourly_pnl"]) == 24
     assert refreshed_payload["hourly_pnl"][1] == 10.0
     assert refreshed_payload["hourly_pnl"][2] == -3.0
+
+
+def test_get_trade_aggregates_window_filters_recent_data(tmp_path):
+    db = Database(db_path=str(tmp_path / "trade_aggregates_window.db"))
+    repo = TradeRepository(db)
+
+    utc8 = timezone(timedelta(hours=8))
+    now = datetime.now(utc8)
+    recent_entry = (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_exit = (now - timedelta(days=1) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    old_entry = (now - timedelta(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+    old_exit = (now - timedelta(days=40) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    rows = [
+        (
+            1, now.strftime("%Y%m%d"), recent_entry, recent_exit, "5m",
+            "BTC", "LONG", 0.1, 100.0, 100.0, 101.0, 1.0,
+            0.1, 10.0, "tp", "10.00%", 99.0, 10.1, 101, "201",
+        ),
+        (
+            2, (now - timedelta(days=40)).strftime("%Y%m%d"), old_entry, old_exit, "5m",
+            "ETH", "SHORT", -0.2, 120.0, 120.0, 118.0, 1.0,
+            0.2, -5.0, "sl", "-4.17%", 121.0, -4.8, 102, "202",
+        ),
+    ]
+    cur.executemany(
+        """
+        INSERT INTO trades (
+            no, date, entry_time, exit_time, holding_time, symbol, side,
+            price_change_pct, entry_amount, entry_price, exit_price, qty,
+            fees, pnl_net, close_type, return_rate, open_price,
+            pnl_before_fees, entry_order_id, exit_order_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    all_payload = repo.get_trade_aggregates(window="all")
+    d7_payload = repo.get_trade_aggregates(window="7d")
+
+    assert all_payload["hourly_pnl"] != d7_payload["hourly_pnl"]
+    all_symbols = {item["symbol"] for item in all_payload["symbol_rank"]["winners"] + all_payload["symbol_rank"]["losers"]}
+    d7_symbols = {item["symbol"] for item in d7_payload["symbol_rank"]["winners"] + d7_payload["symbol_rank"]["losers"]}
+    assert {"BTC", "ETH"}.issubset(all_symbols)
+    assert "BTC" in d7_symbols
+    assert "ETH" not in d7_symbols

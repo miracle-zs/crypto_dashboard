@@ -18,9 +18,9 @@ class TradesApiService:
         repo = TradeRepository(db)
         return await run_in_thread(repo.get_daily_stats)
 
-    async def get_trade_aggregates(self, *, db):
+    async def get_trade_aggregates(self, *, db, window: str = "all"):
         repo = TradeRepository(db)
-        return await run_in_thread(repo.get_trade_aggregates)
+        return await run_in_thread(repo.get_trade_aggregates, window)
 
     async def get_monthly_progress(self, *, db):
         repo = TradeRepository(db)

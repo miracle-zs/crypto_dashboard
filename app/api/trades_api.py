@@ -31,8 +31,11 @@ async def get_daily_stats(db=Depends(get_db)):
 
 
 @router.get("/api/trades-aggregates")
-async def get_trades_aggregates(db=Depends(get_db)):
-    return await service.get_trade_aggregates(db=db)
+async def get_trades_aggregates(
+    window: str = Query("all", pattern="^(all|7d|30d)$", description="Aggregate window: all/7d/30d"),
+    db=Depends(get_db),
+):
+    return await service.get_trade_aggregates(db=db, window=window)
 
 
 @router.get("/api/monthly-progress")
