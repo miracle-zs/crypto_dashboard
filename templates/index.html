@@ -192,13 +192,12 @@
             cursor: not-allowed;
         }
 
-        .trade-page-input {
-            width: 72px;
+        .trade-page-select {
+            width: 96px;
             border: 2px solid var(--border);
             background: var(--panel-strong);
             color: var(--text);
             font-family: 'Space Mono', monospace;
-            text-align: center;
         }
 
         .cyber-panel {
@@ -743,14 +742,10 @@
                             下一页
                         </button>
                         <div class="flex items-center gap-1">
-                            <input
-                                id="trade-page-jump-input"
-                                type="number"
-                                min="1"
-                                step="1"
-                                placeholder="页码"
-                                class="trade-page-input rounded-md px-1.5 py-1 text-xs"
-                            />
+                            <select
+                                id="trade-page-select"
+                                class="trade-page-select rounded-md px-1.5 py-1 text-xs"
+                            ></select>
                             <button
                                 id="trade-page-jump-btn"
                                 onclick="jumpToTradePage()"
@@ -821,6 +816,7 @@
         let tradePageOffset = 0;
         let lastValidTradePageOffset = 0;
         let tradePageHasNext = false;
+        let totalTradePages = 1;
 
         function toggleTradeLogMobile() {
             tradeLogMobileExpanded = !tradeLogMobileExpanded;
@@ -842,11 +838,10 @@
         }
 
         function jumpToTradePage() {
-            const inputEl = document.getElementById('trade-page-jump-input');
-            if (!inputEl) return;
-            const page = parseInt(String(inputEl.value || '').trim(), 10);
+            const selectEl = document.getElementById('trade-page-select');
+            if (!selectEl) return;
+            const page = parseInt(String(selectEl.value || '').trim(), 10);
             if (!Number.isFinite(page) || page < 1) {
-                inputEl.value = '';
                 return;
             }
             tradePageOffset = (page - 1) * TRADE_PAGE_SIZE;
@@ -854,12 +849,22 @@
             fetchDashboardData({ suppressOutOfRangeAlert: false });
         }
 
-        document.addEventListener('keydown', (event) => {
-            if (event.key !== 'Enter') return;
-            const inputEl = document.getElementById('trade-page-jump-input');
-            if (!inputEl || document.activeElement !== inputEl) return;
-            jumpToTradePage();
-        });
+        function renderTradePageOptions() {
+            const selectEl = document.getElementById('trade-page-select');
+            if (!selectEl) return;
+            const currentPage = Math.floor(tradePageOffset / TRADE_PAGE_SIZE) + 1;
+            const pages = Math.max(1, totalTradePages);
+            const existing = Number(selectEl.dataset.pageCount || 0);
+            if (existing !== pages) {
+                const options = [];
+                for (let i = 1; i <= pages; i++) {
+                    options.push(`<option value="${i}">第 ${i} 页</option>`);
+                }
+                selectEl.innerHTML = options.join('');
+                selectEl.dataset.pageCount = String(pages);
+            }
+            selectEl.value = String(Math.min(currentPage, pages));
+        }
 
         function updateTradePagination(visibleCount) {
             const pageInfoEl = document.getElementById('trade-page-info');
@@ -878,6 +883,7 @@
 
             prevBtn.disabled = tradePageOffset <= 0;
             nextBtn.disabled = !tradePageHasNext;
+            renderTradePageOptions();
         }
 
         async function fetchDashboardData(options = {}) {
@@ -944,6 +950,7 @@
         function updateUI(stats, trades, dailyStats, aggregates) {
             latestTrades = Array.isArray(trades) ? trades : [];
             const tradeAggregates = aggregates || {};
+            totalTradePages = Math.max(1, Math.ceil((Number(stats.total_trades) || 0) / TRADE_PAGE_SIZE));
             applyMood(stats);
 
             // 资金与盈亏
