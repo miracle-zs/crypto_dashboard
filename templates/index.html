@@ -700,6 +700,25 @@
                         展开全部
                     </button>
                 </div>
+                <div class="px-4 pb-4 pt-2 border-t border-gray-800 flex items-center justify-between gap-3">
+                    <div id="trade-page-info" class="text-[11px] text-gray-500">第 1 页</div>
+                    <div class="flex items-center gap-2">
+                        <button
+                            id="trade-page-prev"
+                            onclick="goToPrevTradePage()"
+                            class="rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            上一页
+                        </button>
+                        <button
+                            id="trade-page-next"
+                            onclick="goToNextTradePage()"
+                            class="rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-1.5 text-xs font-bold text-gray-300 hover:bg-gray-800/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            下一页
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="lg:col-span-4">
@@ -753,22 +772,59 @@
 
         const DASHBOARD_UPDATE_INTERVAL = 60000;
         const TRADE_LOG_MOBILE_COLLAPSE_LIMIT = 6;
+        const TRADE_PAGE_SIZE = 100;
         let warnedConfig = false;
         let latestTrades = [];
         let tradeLogMobileExpanded = false;
+        let tradePageOffset = 0;
+        let tradePageHasNext = false;
 
         function toggleTradeLogMobile() {
             tradeLogMobileExpanded = !tradeLogMobileExpanded;
             renderTable(latestTrades);
         }
 
+        function goToPrevTradePage() {
+            if (tradePageOffset <= 0) return;
+            tradePageOffset = Math.max(0, tradePageOffset - TRADE_PAGE_SIZE);
+            tradeLogMobileExpanded = false;
+            fetchDashboardData();
+        }
+
+        function goToNextTradePage() {
+            if (!tradePageHasNext) return;
+            tradePageOffset += TRADE_PAGE_SIZE;
+            tradeLogMobileExpanded = false;
+            fetchDashboardData();
+        }
+
+        function updateTradePagination(visibleCount) {
+            const pageInfoEl = document.getElementById('trade-page-info');
+            const prevBtn = document.getElementById('trade-page-prev');
+            const nextBtn = document.getElementById('trade-page-next');
+            if (!pageInfoEl || !prevBtn || !nextBtn) return;
+
+            const pageNumber = Math.floor(tradePageOffset / TRADE_PAGE_SIZE) + 1;
+            if (visibleCount > 0) {
+                const start = tradePageOffset + 1;
+                const end = tradePageOffset + visibleCount;
+                pageInfoEl.innerText = `第 ${pageNumber} 页 · ${start}-${end}`;
+            } else {
+                pageInfoEl.innerText = `第 ${pageNumber} 页 · 0 条`;
+            }
+
+            prevBtn.disabled = tradePageOffset <= 0;
+            nextBtn.disabled = !tradePageHasNext;
+        }
+
         async function fetchDashboardData() {
             try {
+                const tradesUrl = `/api/trades?limit=${TRADE_PAGE_SIZE + 1}&offset=${tradePageOffset}`;
                 // Parallel fetching for performance
                 const [statusRes, summaryRes, tradesRes, dailyStatsRes] = await Promise.all([
                     fetch('/api/status'),
                     fetch('/api/summary'),
-                    fetch('/api/trades'),
+                    fetch(tradesUrl),
                     fetch('/api/daily-stats')
                 ]);
 
@@ -785,7 +841,17 @@
 
                 // Process data
                 const summaryData = await summaryRes.json();
-                const tradesData = await tradesRes.json();
+                const tradesRaw = await tradesRes.json();
+                const tradesWithProbe = Array.isArray(tradesRaw) ? tradesRaw : [];
+                tradePageHasNext = tradesWithProbe.length > TRADE_PAGE_SIZE;
+                const tradesData = tradePageHasNext
+                    ? tradesWithProbe.slice(0, TRADE_PAGE_SIZE)
+                    : tradesWithProbe;
+                if (tradesData.length === 0 && tradePageOffset > 0) {
+                    tradePageOffset = Math.max(0, tradePageOffset - TRADE_PAGE_SIZE);
+                    tradePageHasNext = false;
+                    return fetchDashboardData();
+                }
                 const dailyStatsData = await dailyStatsRes.json();
 
                 updateUI(summaryData, tradesData, dailyStatsData);
@@ -878,6 +944,7 @@
             renderHourlyChart(trades);
             renderDailyTradesChart(dailyStats);
             renderTable(latestTrades);
+            updateTradePagination(latestTrades.length);
             renderSymbolLeaderboard(trades);
             initKpiFocus();
         }
