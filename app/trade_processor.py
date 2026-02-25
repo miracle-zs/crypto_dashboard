@@ -43,6 +43,12 @@ from app.services.trade_income_aggregation import (
     aggregate_fee_totals_by_symbol,
     summarize_income_records,
 )
+from app.services.trade_price_service import (
+    calc_utc_day_start,
+    fetch_open_price_for_key as fetch_open_price_for_key_service,
+    get_price_change_from_utc_start as get_price_change_from_utc_start_service,
+)
+from app.services.trade_export_service import export_to_excel_file
 
 # 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
@@ -128,22 +134,7 @@ class TradeDataProcessor:
         symbol: str,
         utc_day_start_ms: int
     ) -> tuple[str, int, Optional[float], float]:
-        started_at = time.perf_counter()
-        worker_client = self._create_worker_client()
-        try:
-            kline_start = self.get_kline_data(
-                symbol=symbol,
-                interval='1h',
-                start_time=utc_day_start_ms,
-                limit=1,
-                client=worker_client
-            )
-            if not kline_start:
-                return symbol, utc_day_start_ms, None, time.perf_counter() - started_at
-            open_price = float(kline_start[0][1])
-            return symbol, utc_day_start_ms, open_price, time.perf_counter() - started_at
-        except Exception:
-            return symbol, utc_day_start_ms, None, time.perf_counter() - started_at
+        return fetch_open_price_for_key_service(self, symbol=symbol, utc_day_start_ms=utc_day_start_ms)
 
     def get_recent_financial_flow(self, start_time: int) -> float:
         """
@@ -320,9 +311,7 @@ class TradeDataProcessor:
 
     def get_utc_day_start(self, timestamp: int) -> int:
         """Get UTC+0 00:00 timestamp for given timestamp"""
-        dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
-        day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        return int(day_start.timestamp() * 1000)
+        return calc_utc_day_start(timestamp)
 
     def get_price_change_from_utc_start(
         self,
@@ -335,18 +324,12 @@ class TradeDataProcessor:
         Returns:
             float: opening price or None if failed
         """
-        try:
-            day_start = self.get_utc_day_start(timestamp)
-
-            kline_start = self.get_kline_data(symbol, '1h', day_start, 1, client=client)
-            if not kline_start:
-                return None
-
-            open_price = float(kline_start[0][1])
-            return open_price
-
-        except Exception as e:
-            return None
+        return get_price_change_from_utc_start_service(
+            self,
+            symbol=symbol,
+            timestamp=timestamp,
+            client=client,
+        )
 
     def get_fees_for_symbol(
         self,
@@ -519,41 +502,9 @@ class TradeDataProcessor:
 
     def export_to_excel(self, df: pd.DataFrame, filename: str = None):
         """Export to Excel file"""
-        if filename is None:
-            filename = f"order_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
         try:
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Orders', index=False)
-
-                workbook = writer.book
-                worksheet = writer.sheets['Orders']
-
-                # Format Price_Change_Pct column as percentage
-                if 'Price_Change_Pct' in df.columns:
-                    col_idx = df.columns.get_loc('Price_Change_Pct')
-                    col_letter = chr(ord('A') + col_idx)
-                    for row in range(2, len(df) + 2):  # Data rows start from row 2 (1-indexed, header is row 1)
-                        cell = worksheet[f'{col_letter}{row}']
-                        cell.number_format = '0%'
-
-                last_row = len(df) + 2
-                worksheet[f'A{last_row}'] = 'Summary'
-
-                # Add summary for PNL columns
-                if 'PNL_Before_Fees' in df.columns:
-                    col_letter = chr(ord('A') + df.columns.get_loc('PNL_Before_Fees'))
-                    worksheet[f'{col_letter}{last_row}'] = df['PNL_Before_Fees'].sum()
-
-                if 'Fees' in df.columns:
-                    col_letter = chr(ord('A') + df.columns.get_loc('Fees'))
-                    worksheet[f'{col_letter}{last_row}'] = df['Fees'].sum()
-
-                if 'PNL_Net' in df.columns:
-                    col_letter = chr(ord('A') + df.columns.get_loc('PNL_Net'))
-                    worksheet[f'{col_letter}{last_row}'] = df['PNL_Net'].sum()
-
-            logger.info(f"Exported to: {filename}")
+            output_path = export_to_excel_file(df, filename=filename)
+            logger.info(f"Exported to: {output_path}")
             logger.info(f"Total records: {len(df)}")
 
             if 'PNL_Net' in df.columns:
