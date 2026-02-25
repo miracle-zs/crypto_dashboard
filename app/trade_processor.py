@@ -21,6 +21,11 @@ from app.core.trade_position_utils import (
     position_to_trade_row,
     trim_entries_to_target_qty,
 )
+from app.core.trade_matching import (
+    is_liquidation_order as is_liquidation_order_core,
+    match_orders_to_positions as match_orders_to_positions_core,
+    match_position_side as match_position_side_core,
+)
 from app.core.trade_dataframe_utils import merge_same_entry_positions
 from app.services.trade_api_gateway import (
     fetch_account_balance,
@@ -406,13 +411,7 @@ class TradeDataProcessor:
 
     @staticmethod
     def _is_liquidation_order(order: Dict) -> bool:
-        client_order_id = str(order.get("clientOrderId") or "").lower()
-        order_type = str(order.get("type") or "").upper()
-        return (
-            client_order_id.startswith("autoclose-")
-            or "adl_autoclose" in client_order_id
-            or order_type == "LIQUIDATION"
-        )
+        return is_liquidation_order_core(order)
 
     def match_orders_to_positions(
         self,
@@ -421,147 +420,15 @@ class TradeDataProcessor:
         fees_map: Dict[int, float] = None,
         presorted: bool = False,
     ) -> List[Dict]:
-        """Match orders to closed positions (handles partial fills)"""
-
-        if fees_map is None:
-            fees_map = {}
-
-        total_fees = sum(fees_map.values())
-
-        # Separate LONG and SHORT positions
-        long_positions = []
-        short_positions = []
-
-        iterable_orders = orders if presorted else sorted(orders, key=lambda x: x['updateTime'])
-        for order in iterable_orders:
-            if float(order['executedQty']) <= 0:
-                continue
-
-            side = order['side']
-            position_side = order['positionSide']
-            qty = float(order['executedQty'])
-            price = float(order['avgPrice'])
-            order_time = order['updateTime']
-
-            # Handle LONG positions
-            if (position_side == 'LONG' and side == 'BUY') or \
-               (position_side == 'BOTH' and side == 'BUY'):
-                long_positions.append({
-                    'type': 'entry',
-                    'price': price,
-                    'qty': qty,
-                    'time': order_time,
-                    'order_id': order['orderId']
-                })
-            elif (position_side == 'LONG' and side == 'SELL') or \
-                 (position_side == 'BOTH' and side == 'SELL'):
-                long_positions.append({
-                    'type': 'exit',
-                    'price': price,
-                    'qty': qty,
-                    'time': order_time,
-                    'order_id': order['orderId'],
-                    'is_liquidation': self._is_liquidation_order(order),
-                })
-
-            # Handle SHORT positions
-            if position_side == 'SHORT' and side == 'SELL':
-                short_positions.append({
-                    'type': 'entry',
-                    'price': price,
-                    'qty': qty,
-                    'time': order_time,
-                    'order_id': order['orderId']
-                })
-            elif position_side == 'SHORT' and side == 'BUY':
-                short_positions.append({
-                    'type': 'exit',
-                    'price': price,
-                    'qty': qty,
-                    'time': order_time,
-                    'order_id': order['orderId'],
-                    'is_liquidation': self._is_liquidation_order(order),
-                })
-
-        # Match LONG positions
-        long_positions_matched = self._match_position_side(long_positions, symbol, 'LONG')
-
-        # Match SHORT positions
-        short_positions_matched = self._match_position_side(short_positions, symbol, 'SHORT')
-
-        all_positions = long_positions_matched + short_positions_matched
-
-        # Allocate fees proportionally based on position weights
-        if all_positions:
-            # Calculate total weight
-            total_weight = sum(pos['weight'] for pos in all_positions)
-
-            if total_weight > 0:
-                for pos in all_positions:
-                    # Allocate fees proportionally
-                    fee_allocation = (pos['weight'] / total_weight) * total_fees
-                    pos['fees'] = fee_allocation
-                    pos['pnl'] = pos['pnl_before_fees'] + fee_allocation
-
-        return all_positions
+        return match_orders_to_positions_core(
+            orders=orders,
+            symbol=symbol,
+            fees_map=fees_map,
+            presorted=presorted,
+        )
 
     def _match_position_side(self, orders: List[Dict], symbol: str, side: str) -> List[Dict]:
-        """Match entry and exit orders for one position side"""
-        positions = []
-        open_positions = []  # Track multiple open positions with their entry prices
-
-        for order in orders:
-            if order['type'] == 'entry':
-                # Record each entry separately with its own price and quantity
-                open_positions.append({
-                    'price': order['price'],
-                    'qty': order['qty'],
-                    'time': order['time'],
-                    'order_id': order['order_id']
-                })
-
-            elif order['type'] == 'exit' and open_positions:
-                # Close position FIFO (First In First Out)
-                exit_qty_remaining = order['qty']
-
-                while exit_qty_remaining > 0 and open_positions:
-                    entry = open_positions[0]
-                    close_qty = min(exit_qty_remaining, entry['qty'])
-
-                    # Calculate PNL for this piece
-                    if side == 'LONG':
-                        pnl_before_fees = (order['price'] - entry['price']) * close_qty
-                    else:  # SHORT
-                        pnl_before_fees = (entry['price'] - order['price']) * close_qty
-
-                    # Calculate weight for fee allocation (qty * time_held)
-                    time_held = order['time'] - entry['time']
-                    weight = close_qty * time_held
-
-                    positions.append({
-                        'symbol': symbol,
-                        'side': side,
-                        'entry_price': entry['price'],  # Use actual entry price, not average
-                        'exit_price': order['price'],
-                        'entry_time': entry['time'],
-                        'exit_time': order['time'],
-                        'qty': close_qty,
-                        'pnl_before_fees': pnl_before_fees,
-                        'weight': weight,  # Weight for proportional fee allocation
-                        'entry_order_id': entry['order_id'],
-                        'exit_order_id': order['order_id'],
-                        'is_liquidation': bool(order.get('is_liquidation', False)),
-                    })
-
-                    # Update remaining quantities
-                    entry['qty'] -= close_qty
-                    exit_qty_remaining -= close_qty
-
-                    # Remove fully closed entry
-                    if entry['qty'] <= 0.0001:
-                        open_positions.pop(0)
-
-        return positions
+        return match_position_side_core(orders=orders, symbol=symbol, side=side)
 
     def get_traded_symbols(
         self,
