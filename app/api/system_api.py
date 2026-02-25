@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.core.deps import get_db
+from app.models import LogsResponse, NoonLossReviewHistoryResponse, SyncRunsResponse
 from app.security import require_admin_token
 from app.services import SystemApiService
 
@@ -8,12 +9,12 @@ router = APIRouter()
 service = SystemApiService()
 
 
-@router.get("/api/logs")
+@router.get("/api/logs", response_model=LogsResponse)
 async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
     return await service.get_logs(lines=lines)
 
 
-@router.get("/api/noon-loss-review-history")
+@router.get("/api/noon-loss-review-history", response_model=NoonLossReviewHistoryResponse)
 async def get_noon_loss_review_history(
     limit: int = Query(7, ge=1, le=90),
     db=Depends(get_db)
@@ -21,7 +22,7 @@ async def get_noon_loss_review_history(
     return await service.get_noon_loss_review_history(db=db, limit=limit)
 
 
-@router.get("/api/sync-runs")
+@router.get("/api/sync-runs", response_model=SyncRunsResponse)
 async def get_sync_runs(
     limit: int = Query(100, ge=1, le=500),
     db=Depends(get_db)

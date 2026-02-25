@@ -223,7 +223,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/metrics`：指标文档（METRICS）
   - `/logs`：系统日志（LOGS）
 - `MONITOR` 页面复盘入口：
-  - 左侧新增 `Daily Stop-Loss Review Comparison` 对比表（近7天默认）。
+  - 左侧新增 `Daily Stop-Loss Review Comparison` 对比表（近14天默认）。
   - 点击某一日期行可展开当日逐币种明细（`Symbol / Noon Loss / Night Loss / Delta`）。
   - 右侧 `Daily Stats` 保留当日摘要提示，详细复盘以左侧表格为准。
 - 涨幅榜相关接口：
@@ -244,7 +244,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `/api/rebound-60d/dates`：读取可选快照日期列表（倒序）
 - 午间浮亏与复盘接口：
   - `/api/open-positions`：返回午间快照与夜间复盘摘要（`summary.recent_loss_*`、`summary.noon_review_*`）
-  - `/api/noon-loss-review-history?limit=7`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
+  - `/api/noon-loss-review-history?limit=14`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
 - 交易分析接口：
   - `/api/summary`：交易汇总指标
   - `/api/trades?limit=10&offset=0`：交易明细分页

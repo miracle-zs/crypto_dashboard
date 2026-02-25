@@ -2,6 +2,8 @@
 
 import sqlite3
 
+CURRENT_SCHEMA_VERSION = 1
+
 
 def init_database_schema(conn, logger):
         """初始化数据库表结构"""
@@ -10,6 +12,12 @@ def init_database_schema(conn, logger):
         conn.execute("PRAGMA journal_mode=WAL;")
 
         cursor = conn.cursor()
+        cursor.execute("PRAGMA user_version")
+        user_version_row = cursor.fetchone()
+        current_version = int(user_version_row[0]) if user_version_row else 0
+        if current_version >= CURRENT_SCHEMA_VERSION:
+            conn.close()
+            return
 
         # 创建交易记录表
         cursor.execute("""
@@ -226,14 +234,6 @@ def init_database_schema(conn, logger):
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_open_positions_symbol ON open_positions(symbol)
         """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_open_positions_profit_alerted_entry
-            ON open_positions(profit_alerted, entry_time DESC)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_open_positions_alerted_last_alert
-            ON open_positions(alerted, last_alert_time)
-        """)
 
         # 检查是否需要迁移 alerted 列
         try:
@@ -304,6 +304,14 @@ def init_database_schema(conn, logger):
                 cursor.execute("ALTER TABLE open_positions ADD COLUMN reentry_alert_time TIMESTAMP")
             except Exception as e:
                 logger.warning(f"列添加失败(可能已存在): {e}")
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_profit_alerted_entry
+            ON open_positions(profit_alerted, entry_time DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_open_positions_alerted_last_alert
+            ON open_positions(alerted, last_alert_time)
+        """)
 
         # 明日观察列表（仅记录 symbol 与自动时间）
         cursor.execute("""
@@ -563,5 +571,6 @@ def init_database_schema(conn, logger):
             CREATE INDEX IF NOT EXISTS idx_noon_loss_review_snapshot_date ON noon_loss_review_snapshots(snapshot_date DESC)
         """)
 
+        cursor.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         conn.commit()
         conn.close()

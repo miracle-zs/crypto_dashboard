@@ -7,6 +7,20 @@ from app.logger import logger
 UTC8 = ZoneInfo("Asia/Shanghai")
 
 
+def _filter_supported_symbols(scheduler, symbols: list[str]) -> tuple[list[str], list[str]]:
+    if not symbols:
+        return [], []
+    try:
+        supported = {str(item or "").upper() for item in (scheduler.processor.get_all_symbols() or []) if item}
+    except Exception as exc:
+        logger.warning(f"拉取交易对列表失败，跳过补偿symbol过滤: {exc}")
+        return symbols, []
+
+    filtered = [symbol for symbol in symbols if symbol in supported]
+    dropped = [symbol for symbol in symbols if symbol not in supported]
+    return filtered, dropped
+
+
 def request_trades_compensation_job(
     scheduler,
     symbols: list[str],
@@ -81,19 +95,40 @@ def sync_trades_compensation_job(
     success_symbols = []
     failure_symbols = {}
     try:
+        filtered_symbols, dropped_symbols = _filter_supported_symbols(scheduler, symbols)
+        if dropped_symbols:
+            logger.warning(
+                "触发式补偿跳过不支持symbol: "
+                f"dropped={len(dropped_symbols)}, symbols={dropped_symbols}"
+            )
+        if not filtered_symbols:
+            logger.info("触发式补偿跳过: 无有效symbol")
+            scheduler.sync_repo.log_sync_run(
+                run_type="trades_compensation",
+                mode="triggered",
+                status="skipped",
+                symbol_count=0,
+                rows_count=0,
+                trades_saved=0,
+                open_saved=0,
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                error_message="unsupported_symbols",
+            )
+            return True
+
         until = int(datetime.now(UTC8).timestamp() * 1000)
         fallback_since = max(0, until - int(scheduler.trades_compensation_lookback_minutes) * 60 * 1000)
         logger.info(
             "开始触发式补偿同步... "
-            f"reason={reason}, symbols={len(symbols)}, "
+            f"reason={reason}, symbols={len(filtered_symbols)}, "
             f"lookback_minutes={scheduler.trades_compensation_lookback_minutes}, "
             f"window={scheduler._format_window_with_ms(fallback_since, until)}"
         )
 
-        watermarks = scheduler.sync_repo.get_symbol_sync_watermarks(symbols)
+        watermarks = scheduler.sync_repo.get_symbol_sync_watermarks(filtered_symbols)
         overlap_ms = int(scheduler.symbol_sync_overlap_minutes) * 60 * 1000
         symbol_since_map = {}
-        for symbol in symbols:
+        for symbol in filtered_symbols:
             requested_since = (
                 int(symbol_since_ms[symbol])
                 if symbol_since_ms and symbol in symbol_since_ms and symbol_since_ms[symbol] is not None
@@ -109,7 +144,7 @@ def sync_trades_compensation_job(
         result = scheduler.processor.analyze_orders(
             since=since,
             until=until,
-            traded_symbols=symbols,
+            traded_symbols=filtered_symbols,
             use_time_filter=scheduler.use_time_filter,
             symbol_since_map=symbol_since_map,
             return_symbol_status=True,
@@ -130,7 +165,7 @@ def sync_trades_compensation_job(
             run_type="trades_compensation",
             mode="triggered",
             status="success",
-            symbol_count=len(symbols),
+            symbol_count=len(filtered_symbols),
             rows_count=len(df),
             trades_saved=trades_saved,
             open_saved=0,
@@ -138,7 +173,7 @@ def sync_trades_compensation_job(
         )
         logger.info(
             "触发式补偿同步完成: "
-            f"symbols={len(symbols)}, rows={len(df)}, saved={trades_saved}, "
+            f"symbols={len(filtered_symbols)}, rows={len(df)}, saved={trades_saved}, "
             f"save_elapsed={save_elapsed:.2f}s, total_elapsed={elapsed:.2f}s"
         )
         return True

@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import get_db
-from app.models import DailyStats, Trade, TradeSummary
+from app.models import DailyStats, Trade, TradeAggregatesResponse, TradeSummary
 from app.security import require_admin_token
 from app.services import TradesApiService
 
@@ -30,7 +30,7 @@ async def get_daily_stats(db=Depends(get_db)):
     return await service.get_daily_stats(db=db)
 
 
-@router.get("/api/trades-aggregates")
+@router.get("/api/trades-aggregates", response_model=TradeAggregatesResponse)
 async def get_trades_aggregates(
     window: str = Query("all", pattern="^(all|7d|30d)$", description="Aggregate window: all/7d/30d"),
     db=Depends(get_db),

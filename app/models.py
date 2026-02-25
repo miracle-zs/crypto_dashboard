@@ -118,3 +118,83 @@ class OpenPositionsResponse(BaseModel):
     version: Optional[int] = None
     incremental: Optional[bool] = None
     changed: Optional[bool] = None
+
+
+class TradeDurationBucket(BaseModel):
+    label: str
+    trade_count: int
+    win_pnl: float
+    loss_pnl: float
+
+
+class TradeDurationPoint(BaseModel):
+    x: float
+    y: float
+    symbol: str
+    time: str
+
+
+class SymbolRankItem(BaseModel):
+    symbol: str
+    pnl: float
+    trade_count: int
+    win_rate: float
+    share: float
+
+
+class SymbolRankData(BaseModel):
+    winners: List[SymbolRankItem] = Field(default_factory=list)
+    losers: List[SymbolRankItem] = Field(default_factory=list)
+
+
+class TradeAggregatesResponse(BaseModel):
+    duration_buckets: List[TradeDurationBucket] = Field(default_factory=list)
+    duration_points: List[TradeDurationPoint] = Field(default_factory=list)
+    hourly_pnl: List[float] = Field(default_factory=list)
+    symbol_rank: SymbolRankData
+
+
+class LogsResponse(BaseModel):
+    logs: List[str] = Field(default_factory=list)
+
+
+class NoonLossReviewSummary(BaseModel):
+    reviewed_count_all: int = 0
+    delta_sum_all: float = 0.0
+
+
+class NoonLossReviewRow(BaseModel):
+    snapshot_date: str
+    noon_snapshot_time: Optional[str] = None
+    noon_loss_count: int = 0
+    noon_cut_loss_total: float = 0.0
+    noon_pct_of_balance: float = 0.0
+    review_time: Optional[str] = None
+    not_cut_count: int = 0
+    hold_loss_total: float = 0.0
+    delta_loss_total: float = 0.0
+    review_pct_of_balance: float = 0.0
+    rows: List[Any] = Field(default_factory=list)
+
+
+class NoonLossReviewHistoryResponse(BaseModel):
+    rows: List[NoonLossReviewRow] = Field(default_factory=list)
+    summary: NoonLossReviewSummary
+
+
+class SyncRunItem(BaseModel):
+    id: int
+    run_type: str
+    mode: Optional[str] = None
+    status: str
+    symbol_count: int = 0
+    rows_count: int = 0
+    trades_saved: int = 0
+    open_saved: int = 0
+    elapsed_ms: int = 0
+    error_message: Optional[str] = None
+    created_at: str
+
+
+class SyncRunsResponse(BaseModel):
+    rows: List[SyncRunItem] = Field(default_factory=list)
