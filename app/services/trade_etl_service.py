@@ -56,53 +56,59 @@ def extract_symbol_closed_positions(
     return positions, time.perf_counter() - started_at
 
 
-def analyze_orders(
+def _prefetch_fee_totals(
     processor,
     *,
     since: int,
     until: int,
-    traded_symbols: Optional[List[str]] = None,
-    use_time_filter: bool = True,
-    symbol_since_map: Optional[Dict[str, int]] = None,
-    prefetched_fee_totals: Optional[Dict[str, float]] = None,
-    return_symbol_status: bool = False,
-) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
-    local_prefetched_fee_totals = prefetched_fee_totals
-    if traded_symbols is None:
-        income_records = processor._fetch_income_history(since=since, until=until)
-        traded_symbols, local_prefetched_fee_totals = summarize_income_records(
-            income_records,
-            extra_loss_income_types=getattr(processor, "extra_loss_income_types", None),
+    prefetched_fee_totals: Optional[Dict[str, float]],
+) -> Dict[str, float]:
+    fee_prefetch_started = time.perf_counter()
+    fee_totals_by_symbol = (
+        prefetched_fee_totals
+        if prefetched_fee_totals is not None
+        else processor.get_fee_totals_by_symbol(since=since, until=until)
+    )
+    fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
+    logger.info(f"Income fee cache: symbols={len(fee_totals_by_symbol)}, elapsed={fee_prefetch_elapsed:.2f}s")
+    return fee_totals_by_symbol
+
+
+def _log_closed_etl_stats(
+    *,
+    success_count: int,
+    failure_count: int,
+    worker_count: int,
+    symbol_timings: List[tuple[str, float, int]],
+):
+    if symbol_timings:
+        slowest = sorted(symbol_timings, key=lambda item: item[1], reverse=True)[:5]
+        slowest_str = ", ".join(f"{symbol}:{elapsed:.2f}s/{count}" for symbol, elapsed, count in slowest)
+        logger.info(
+            f"Closed ETL stats: success={success_count}, failed={failure_count}, "
+            f"workers={worker_count}, slowest=[{slowest_str}]"
         )
-        logger.info(f"Income prefetch: records={len(income_records)}, symbols={len(traded_symbols)}")
+    else:
+        logger.info(f"Closed ETL stats: success={success_count}, failed={failure_count}, workers={worker_count}")
 
-    if not traded_symbols:
-        logger.warning("No trading history found in the specified period")
-        empty_df = pd.DataFrame()
-        if return_symbol_status:
-            return empty_df, [], {}
-        return empty_df
 
-    symbols = sorted(set(traded_symbols))
-    logger.info(f"Analyzing {len(symbols)} symbols...")
-
+def _collect_positions_for_symbols(
+    processor,
+    *,
+    symbols: List[str],
+    since: int,
+    until: int,
+    use_time_filter: bool,
+    symbol_since_map: Optional[Dict[str, int]],
+    fee_totals_by_symbol: Dict[str, float],
+    worker_count: int,
+) -> tuple[List[Dict], List[str], Dict[str, str], int, int, List[tuple[str, float, int]]]:
     all_positions: List[Dict] = []
-    worker_count = processor._resolve_workers(len(symbols))
-    logger.info(f"ETL worker count: {worker_count}")
     success_count = 0
     failure_count = 0
     symbol_timings: List[tuple[str, float, int]] = []
     success_symbols: List[str] = []
     failure_symbols: Dict[str, str] = {}
-
-    fee_prefetch_started = time.perf_counter()
-    fee_totals_by_symbol = (
-        local_prefetched_fee_totals
-        if local_prefetched_fee_totals is not None
-        else processor.get_fee_totals_by_symbol(since=since, until=until)
-    )
-    fee_prefetch_elapsed = time.perf_counter() - fee_prefetch_started
-    logger.info(f"Income fee cache: symbols={len(fee_totals_by_symbol)}, elapsed={fee_prefetch_elapsed:.2f}s")
 
     if worker_count == 1:
         for idx, symbol in enumerate(symbols, 1):
@@ -156,25 +162,14 @@ def analyze_orders(
                     failure_symbols[symbol] = str(exc)
                     logger.error(f"[{idx}/{len(symbols)}] Processing {symbol} failed: {exc}")
 
-    if symbol_timings:
-        slowest = sorted(symbol_timings, key=lambda item: item[1], reverse=True)[:5]
-        slowest_str = ", ".join(f"{symbol}:{elapsed:.2f}s/{count}" for symbol, elapsed, count in slowest)
-        logger.info(
-            f"Closed ETL stats: success={success_count}, failed={failure_count}, "
-            f"workers={worker_count}, slowest=[{slowest_str}]"
-        )
-    elif symbols:
-        logger.info(f"Closed ETL stats: success={success_count}, failed={failure_count}, workers={worker_count}")
+    return all_positions, success_symbols, failure_symbols, success_count, failure_count, symbol_timings
 
-    logger.info(f"Found {len(all_positions)} closed positions total")
 
-    if not all_positions:
-        logger.warning("No closed positions found")
-        empty_df = pd.DataFrame()
-        if return_symbol_status:
-            return empty_df, success_symbols, failure_symbols
-        return empty_df
-
+def _prefetch_open_prices(
+    processor,
+    *,
+    all_positions: List[Dict],
+) -> tuple[Dict[tuple[str, int], Optional[float]], float]:
     price_prefetch_started = time.perf_counter()
     price_keys = sorted({(pos["symbol"], processor.get_utc_day_start(pos["entry_time"])) for pos in all_positions})
     open_price_cache: Dict[tuple[str, int], Optional[float]] = {}
@@ -214,6 +209,82 @@ def analyze_orders(
             f"Open price cache: keys={len(price_keys)}, hits={hit_count}, workers={price_worker_count}, "
             f"elapsed={price_prefetch_elapsed:.2f}s, slowest=[{slowest_price_str}]"
         )
+
+    return open_price_cache, price_prefetch_elapsed
+
+
+def analyze_orders(
+    processor,
+    *,
+    since: int,
+    until: int,
+    traded_symbols: Optional[List[str]] = None,
+    use_time_filter: bool = True,
+    symbol_since_map: Optional[Dict[str, int]] = None,
+    prefetched_fee_totals: Optional[Dict[str, float]] = None,
+    return_symbol_status: bool = False,
+) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
+    local_prefetched_fee_totals = prefetched_fee_totals
+    if traded_symbols is None:
+        income_records = processor._fetch_income_history(since=since, until=until)
+        traded_symbols, local_prefetched_fee_totals = summarize_income_records(
+            income_records,
+            extra_loss_income_types=getattr(processor, "extra_loss_income_types", None),
+        )
+        logger.info(f"Income prefetch: records={len(income_records)}, symbols={len(traded_symbols)}")
+
+    if not traded_symbols:
+        logger.warning("No trading history found in the specified period")
+        empty_df = pd.DataFrame()
+        if return_symbol_status:
+            return empty_df, [], {}
+        return empty_df
+
+    symbols = sorted(set(traded_symbols))
+    logger.info(f"Analyzing {len(symbols)} symbols...")
+
+    worker_count = processor._resolve_workers(len(symbols))
+    logger.info(f"ETL worker count: {worker_count}")
+    fee_totals_by_symbol = _prefetch_fee_totals(
+        processor,
+        since=since,
+        until=until,
+        prefetched_fee_totals=local_prefetched_fee_totals,
+    )
+    (
+        all_positions,
+        success_symbols,
+        failure_symbols,
+        success_count,
+        failure_count,
+        symbol_timings,
+    ) = _collect_positions_for_symbols(
+        processor,
+        symbols=symbols,
+        since=since,
+        until=until,
+        use_time_filter=use_time_filter,
+        symbol_since_map=symbol_since_map,
+        fee_totals_by_symbol=fee_totals_by_symbol,
+        worker_count=worker_count,
+    )
+    _log_closed_etl_stats(
+        success_count=success_count,
+        failure_count=failure_count,
+        worker_count=worker_count,
+        symbol_timings=symbol_timings,
+    )
+
+    logger.info(f"Found {len(all_positions)} closed positions total")
+
+    if not all_positions:
+        logger.warning("No closed positions found")
+        empty_df = pd.DataFrame()
+        if return_symbol_status:
+            return empty_df, success_symbols, failure_symbols
+        return empty_df
+
+    open_price_cache, price_prefetch_elapsed = _prefetch_open_prices(processor, all_positions=all_positions)
 
     transform_started = time.perf_counter()
     df = processor._build_trades_dataframe(all_positions=all_positions, open_price_cache=open_price_cache)

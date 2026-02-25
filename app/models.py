@@ -198,3 +198,33 @@ class SyncRunItem(BaseModel):
 
 class SyncRunsResponse(BaseModel):
     rows: List[SyncRunItem] = Field(default_factory=list)
+
+
+class SnapshotDatesResponse(BaseModel):
+    dates: List[str] = Field(default_factory=list)
+
+
+class MetricsHistoryResponse(BaseModel):
+    rows: List[dict[str, Any]] = Field(default_factory=list)
+
+
+class LeaderboardSnapshotResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
+    message: Optional[str] = None
+    snapshot_date: Optional[str] = None
+    snapshot_time: Optional[str] = None
+    rows: List[dict[str, Any]] = Field(default_factory=list)
+    losers_rows: List[dict[str, Any]] = Field(default_factory=list)
+    gainers_top_count: Optional[int] = None
+    losers_top_count: Optional[int] = None
+
+
+class ReboundSnapshotResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
+    message: Optional[str] = None
+    snapshot_date: Optional[str] = None
+    snapshot_time: Optional[str] = None
+    rows: List[dict[str, Any]] = Field(default_factory=list)
+    top_count: Optional[int] = None

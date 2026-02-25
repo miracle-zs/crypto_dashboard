@@ -38,6 +38,7 @@ from app.jobs.scheduler_startup_jobs import register_scheduler_jobs
 from app.core.job_runtime import JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
+from app.core.scheduler_binding import SCHEDULER_CONFIG_FIELDS, apply_scheduler_config_fields
 from app.core.scheduler_runtime import get_scheduler_singleton, should_start_scheduler_runtime
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
@@ -53,66 +54,7 @@ UTC8 = ZoneInfo("Asia/Shanghai")
 class TradeDataScheduler:
     """交易数据定时更新调度器"""
 
-    _CONFIG_FIELDS = (
-        "days_to_fetch",
-        "update_interval_minutes",
-        "trades_incremental_fallback_interval_minutes",
-        "open_positions_update_interval_minutes",
-        "start_date",
-        "end_date",
-        "sync_lookback_minutes",
-        "symbol_sync_overlap_minutes",
-        "open_positions_lookback_days",
-        "enable_daily_open_positions_full_sync",
-        "open_positions_full_lookback_days",
-        "open_positions_full_sync_hour",
-        "open_positions_full_sync_minute",
-        "enable_daily_full_sync",
-        "daily_full_sync_hour",
-        "daily_full_sync_minute",
-        "use_time_filter",
-        "enable_user_stream",
-        "force_full_sync",
-        "enable_leaderboard_alert",
-        "leaderboard_top_n",
-        "leaderboard_min_quote_volume",
-        "leaderboard_max_symbols",
-        "leaderboard_kline_workers",
-        "leaderboard_weight_budget_per_minute",
-        "leaderboard_alert_hour",
-        "leaderboard_alert_minute",
-        "leaderboard_guard_before_minutes",
-        "leaderboard_guard_after_minutes",
-        "enable_rebound_7d_snapshot",
-        "rebound_7d_top_n",
-        "rebound_7d_kline_workers",
-        "rebound_7d_weight_budget_per_minute",
-        "rebound_7d_hour",
-        "rebound_7d_minute",
-        "enable_rebound_30d_snapshot",
-        "rebound_30d_top_n",
-        "rebound_30d_kline_workers",
-        "rebound_30d_weight_budget_per_minute",
-        "rebound_30d_hour",
-        "rebound_30d_minute",
-        "enable_rebound_60d_snapshot",
-        "rebound_60d_top_n",
-        "rebound_60d_kline_workers",
-        "rebound_60d_weight_budget_per_minute",
-        "rebound_60d_hour",
-        "rebound_60d_minute",
-        "noon_loss_check_hour",
-        "noon_loss_check_minute",
-        "noon_review_hour",
-        "noon_review_minute",
-        "noon_review_target_day_offset",
-        "enable_profit_alert",
-        "enable_reentry_alert",
-        "profit_alert_threshold_pct",
-        "api_job_lock_wait_seconds",
-        "enable_triggered_trades_compensation",
-        "trades_compensation_lookback_minutes",
-    )
+    _CONFIG_FIELDS = SCHEDULER_CONFIG_FIELDS
 
     def __init__(self):
         config = load_scheduler_config()
@@ -144,8 +86,7 @@ class TradeDataScheduler:
         self._pending_compensation_since_ms: dict[str, int] = {}
 
     def _apply_scheduler_config(self, config):
-        for field in self._CONFIG_FIELDS:
-            setattr(self, field, getattr(config, field))
+        apply_scheduler_config_fields(self, config)
 
     def _is_api_cooldown_active(self, source: str) -> bool:
         return self.runtime_controller.is_cooldown_active(source=source)
