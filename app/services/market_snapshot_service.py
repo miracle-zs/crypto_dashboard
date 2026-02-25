@@ -99,7 +99,7 @@ def build_top_gainers_snapshot(scheduler, utc8):
     progress_step = 20
     total_candidates = len(candidates)
     if total_candidates > 0:
-        min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
+        min_interval = max(0.02, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
         per_worker_rpm = max(1.0, 60.0 / min_interval)
         workers_by_budget = max(1, int(scheduler.leaderboard_weight_budget_per_minute // per_worker_rpm))
         worker_count = min(total_candidates, scheduler.leaderboard_kline_workers, workers_by_budget)
@@ -226,7 +226,7 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
     progress_step = 20
     total_candidates = len(candidates)
     if total_candidates > 0:
-        min_interval = max(0.05, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
+        min_interval = max(0.02, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
         per_worker_rpm = max(1.0, 60.0 / min_interval)
         workers_by_budget = max(1, int(weight_budget_per_minute // per_worker_rpm))
         worker_count = min(total_candidates, kline_workers, workers_by_budget)
