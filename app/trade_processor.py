@@ -460,7 +460,8 @@ class TradeDataProcessor:
                     'price': price,
                     'qty': qty,
                     'time': order_time,
-                    'order_id': order['orderId']
+                    'order_id': order['orderId'],
+                    'is_liquidation': self._is_liquidation_order(order),
                 })
 
             # Handle SHORT positions
@@ -478,7 +479,8 @@ class TradeDataProcessor:
                     'price': price,
                     'qty': qty,
                     'time': order_time,
-                    'order_id': order['orderId']
+                    'order_id': order['orderId'],
+                    'is_liquidation': self._is_liquidation_order(order),
                 })
 
         # Match LONG positions
@@ -548,7 +550,7 @@ class TradeDataProcessor:
                         'weight': weight,  # Weight for proportional fee allocation
                         'entry_order_id': entry['order_id'],
                         'exit_order_id': order['order_id'],
-                        'is_liquidation': self._is_liquidation_order(order),
+                        'is_liquidation': bool(order.get('is_liquidation', False)),
                     })
 
                     # Update remaining quantities
