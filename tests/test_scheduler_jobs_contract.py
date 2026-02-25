@@ -222,6 +222,21 @@ def test_scheduler_compensation_methods_delegate_to_job_module(monkeypatch):
     assert calls == {"request": 1, "pending": 1, "sync": 1}
 
 
+def test_scheduler_sync_trades_impl_delegates_to_job_module(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+
+    def fake_impl(s, force_full=False):
+        assert s is scheduler
+        return f"impl:{force_full}"
+
+    monkeypatch.setattr("app.scheduler.run_sync_trades_data_impl", fake_impl)
+
+    assert scheduler._sync_trades_data_impl(force_full=False) == "impl:False"
+    assert scheduler._sync_trades_data_impl(force_full=True) == "impl:True"
+
+
 def test_sync_trades_data_handles_empty_symbol_list(monkeypatch):
     from app.scheduler import TradeDataScheduler
 
