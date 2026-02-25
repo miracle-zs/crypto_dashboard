@@ -39,6 +39,10 @@ from app.services.trade_etl_service import (
     extract_symbol_closed_positions as extract_symbol_closed_positions_service,
     get_open_positions as get_open_positions_service,
 )
+from app.services.trade_income_aggregation import (
+    aggregate_fee_totals_by_symbol,
+    summarize_income_records,
+)
 
 # 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
@@ -376,38 +380,14 @@ class TradeDataProcessor:
         Batch fetch income once and aggregate commission/funding by symbol.
         """
         records = self._fetch_income_history(since=since, until=until, client=client)
-        fee_totals: Dict[str, float] = {}
         extra_types = getattr(self, "extra_loss_income_types", {"INSURANCE_CLEAR"})
-
-        for record in records:
-            symbol = record.get('symbol')
-            if not symbol:
-                continue
-            income_type = str(record.get("incomeType") or "").upper()
-            if income_type not in {"COMMISSION", "FUNDING_FEE", *extra_types}:
-                continue
-            income = float(record.get('income', 0.0))
-            fee_totals[symbol] = fee_totals.get(symbol, 0.0) + income
-
-        return fee_totals
+        return aggregate_fee_totals_by_symbol(records, extra_loss_income_types=extra_types)
 
     @staticmethod
     def _summarize_income_records(
         records: List[Dict], extra_loss_income_types: Optional[set[str]] = None
     ) -> Tuple[List[str], Dict[str, float]]:
-        symbols = set()
-        fee_totals: Dict[str, float] = {}
-        extra_types = {item.strip().upper() for item in (extra_loss_income_types or set()) if item}
-        tracked_cost_types = {"COMMISSION", "FUNDING_FEE", *extra_types}
-        for record in records:
-            symbol = record.get('symbol')
-            if not symbol:
-                continue
-            symbols.add(symbol)
-            income_type = str(record.get("incomeType") or "").upper()
-            if income_type in tracked_cost_types:
-                fee_totals[symbol] = fee_totals.get(symbol, 0.0) + float(record.get('income', 0.0))
-        return list(symbols), fee_totals
+        return summarize_income_records(records, extra_loss_income_types=extra_loss_income_types)
 
     @staticmethod
     def _is_liquidation_order(order: Dict) -> bool:

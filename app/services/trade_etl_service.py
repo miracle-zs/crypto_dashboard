@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from app.logger import logger
+from app.services.trade_income_aggregation import summarize_income_records
 
 
 def extract_symbol_closed_positions(
@@ -69,7 +70,7 @@ def analyze_orders(
     local_prefetched_fee_totals = prefetched_fee_totals
     if traded_symbols is None:
         income_records = processor._fetch_income_history(since=since, until=until)
-        traded_symbols, local_prefetched_fee_totals = processor._summarize_income_records(
+        traded_symbols, local_prefetched_fee_totals = summarize_income_records(
             income_records,
             extra_loss_income_types=getattr(processor, "extra_loss_income_types", None),
         )
