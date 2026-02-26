@@ -8,22 +8,15 @@ UTC8 = ZoneInfo("Asia/Shanghai")
 
 
 def run_noon_loss_check(scheduler):
-    """每天中午11:50检查24小时内开仓且当前浮亏的订单"""
+    """每天中午检查全部非长期仓位中当前浮亏的订单"""
     try:
         positions = scheduler.risk_repo.get_open_positions()
-        now = datetime.now(UTC8)
         candidate_positions = []
 
         for pos in positions:
             if pos.get("is_long_term"):
                 continue
-            entry_time_str = pos.get("entry_time")
-            try:
-                entry_dt = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
-            except Exception:
-                continue
-            if (now - entry_dt).total_seconds() <= 24 * 3600:
-                candidate_positions.append(pos)
+            candidate_positions.append(pos)
 
         symbol_fulls = [
             scheduler._normalize_futures_symbol(pos.get("symbol"))
@@ -84,8 +77,8 @@ def run_noon_loss_check(scheduler):
 
         scheduler.risk_repo.save_noon_loss_snapshot(
             {
-                "snapshot_date": now.strftime("%Y-%m-%d"),
-                "snapshot_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "snapshot_date": datetime.now(UTC8).strftime("%Y-%m-%d"),
+                "snapshot_time": datetime.now(UTC8).strftime("%Y-%m-%d %H:%M:%S"),
                 "loss_count": count,
                 "total_stop_loss": total_stop_loss,
                 "pct_of_balance": stop_loss_pct_of_balance,
@@ -94,7 +87,7 @@ def run_noon_loss_check(scheduler):
             }
         )
         logger.info(
-            f"午间浮亏快照已保存: date={now.strftime('%Y-%m-%d')}, "
+            f"午间浮亏快照已保存: date={datetime.now(UTC8).strftime('%Y-%m-%d')}, "
             f"count={count}, total_stop_loss={total_stop_loss:.2f} U, "
             f"pct_of_balance={stop_loss_pct_of_balance:.2f}%"
         )
@@ -103,7 +96,7 @@ def run_noon_loss_check(scheduler):
             title = f"⚠️ 午间浮亏警报: {count}个新订单"
             content = (
                 f"北京时间 {scheduler.noon_loss_check_hour:02d}:{scheduler.noon_loss_check_minute:02d} "
-                f"监测到 **{count}** 个24小时内开仓的订单出现浮亏。\n\n"
+                f"监测到 **{count}** 个非长期未平仓订单出现浮亏。\n\n"
             )
             content += (
                 f"**总结**\n"
