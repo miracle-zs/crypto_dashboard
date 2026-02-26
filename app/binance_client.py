@@ -24,6 +24,11 @@ class BinanceFuturesRestClient:
     _cooldown_lock = threading.Lock()
     _throttle_lock = threading.Lock()
     _global_last_request_ts = 0.0
+    _request_budget_enabled = False
+    _request_budget_per_minute = 0
+    _request_budget_tokens = 0.0
+    _request_budget_last_refill_ts = 0.0
+    _request_budget_path_weights: Dict[str, int] = {}
 
     def __init__(
         self,
@@ -49,6 +54,64 @@ class BinanceFuturesRestClient:
             return {}
         return {"X-MBX-APIKEY": self.api_key}
 
+    @classmethod
+    def configure_global_request_budget(
+        cls,
+        *,
+        enabled: bool,
+        per_minute: int = 0,
+        path_weights: Optional[Dict[str, int]] = None,
+    ):
+        with cls._throttle_lock:
+            if not enabled:
+                cls._request_budget_enabled = False
+                cls._request_budget_per_minute = 0
+                cls._request_budget_tokens = 0.0
+                cls._request_budget_last_refill_ts = 0.0
+                cls._request_budget_path_weights = {}
+                return
+
+            capacity = max(1, int(per_minute))
+            clean_weights: Dict[str, int] = {}
+            for path, weight in (path_weights or {}).items():
+                try:
+                    clean_weights[str(path)] = max(1, int(weight))
+                except Exception:
+                    continue
+            cls._request_budget_enabled = True
+            cls._request_budget_per_minute = capacity
+            cls._request_budget_tokens = float(capacity)
+            cls._request_budget_last_refill_ts = time.monotonic()
+            cls._request_budget_path_weights = clean_weights
+
+    @classmethod
+    def _path_weight(cls, path: str) -> int:
+        weights = cls._request_budget_path_weights
+        if not weights:
+            return 1
+        direct = weights.get(path)
+        if direct is not None:
+            return max(1, int(direct))
+        return 1
+
+    @classmethod
+    def _refill_budget_tokens(cls):
+        if not cls._request_budget_enabled or cls._request_budget_per_minute <= 0:
+            return
+        now = time.monotonic()
+        if cls._request_budget_last_refill_ts <= 0:
+            cls._request_budget_last_refill_ts = now
+            return
+        elapsed = now - cls._request_budget_last_refill_ts
+        if elapsed <= 0:
+            return
+        refill_rate_per_sec = cls._request_budget_per_minute / 60.0
+        cls._request_budget_tokens = min(
+            float(cls._request_budget_per_minute),
+            cls._request_budget_tokens + elapsed * refill_rate_per_sec,
+        )
+        cls._request_budget_last_refill_ts = now
+
     def _sign_params(self, params: Dict[str, Any]) -> str:
         query_string = urlencode(params)
         return hmac.new(
@@ -57,19 +120,42 @@ class BinanceFuturesRestClient:
             hashlib.sha256,
         ).hexdigest()
 
-    def _throttle(self):
+    def _throttle(self, path: str = ""):
         # 全局节流：所有 client 实例共享请求节奏，避免多线程实例级并发叠加打爆IP限额。
         with self.__class__._throttle_lock:
-            now = time.time()
-            elapsed = now - self.__class__._global_last_request_ts
-            if elapsed < self._min_request_interval:
-                time.sleep(self._min_request_interval - elapsed)
-            self.__class__._global_last_request_ts = time.time()
+            while True:
+                now = time.time()
+                elapsed = now - self.__class__._global_last_request_ts
+                wait_interval = max(0.0, self._min_request_interval - elapsed)
+
+                wait_budget = 0.0
+                need_weight = 0
+                budget_ready = True
+                if self.__class__._request_budget_enabled and self.__class__._request_budget_per_minute > 0:
+                    self.__class__._refill_budget_tokens()
+                    need_weight = self.__class__._path_weight(path)
+                    if self.__class__._request_budget_tokens < need_weight:
+                        budget_ready = False
+                        refill_rate_per_sec = self.__class__._request_budget_per_minute / 60.0
+                        deficit = need_weight - self.__class__._request_budget_tokens
+                        wait_budget = max(0.0, deficit / refill_rate_per_sec) if refill_rate_per_sec > 0 else 0.1
+
+                if wait_interval <= 0 and budget_ready:
+                    if need_weight > 0:
+                        self.__class__._request_budget_tokens = max(
+                            0.0,
+                            self.__class__._request_budget_tokens - need_weight,
+                        )
+                    self.__class__._global_last_request_ts = time.time()
+                    return
+
+                sleep_seconds = max(wait_interval, wait_budget, 0.001)
+                time.sleep(sleep_seconds)
 
     def _sync_server_time(self) -> bool:
         """Sync local request timestamp offset with Binance server time."""
         try:
-            self._throttle()
+            self._throttle("/fapi/v1/time")
             response = requests.get(f"{self.base_url}/fapi/v1/time", timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -138,7 +224,7 @@ class BinanceFuturesRestClient:
         clock_synced = False
         for attempt in range(1, max_retries + 1):
             try:
-                self._throttle()
+                self._throttle(path)
                 request_params = dict(base_params)
                 if signed:
                     request_params["recvWindow"] = self._recv_window

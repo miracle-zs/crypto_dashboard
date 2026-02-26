@@ -1,7 +1,46 @@
 import time
 import traceback
+import os
 
+from app.binance_client import BinanceFuturesRestClient
 from app.logger import logger
+
+
+def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(minimum, default)
+    try:
+        return max(minimum, int(raw))
+    except Exception:
+        logger.warning(f"环境变量 {name}={raw} 非法，使用默认值 {default}")
+        return max(minimum, default)
+
+
+def _configure_full_sync_request_budget() -> bool:
+    enabled = str(os.getenv("FULL_SYNC_REQUEST_BUDGET_ENABLED", "1")).strip().lower() in ("1", "true", "yes")
+    if not enabled:
+        return False
+
+    budget_per_minute = _read_int_env("FULL_SYNC_REQUEST_BUDGET_PER_MINUTE", 900, minimum=60)
+    path_weights = {
+        "/fapi/v1/allOrders": _read_int_env("FULL_SYNC_WEIGHT_ALL_ORDERS", 20, minimum=1),
+        "/fapi/v1/klines": _read_int_env("FULL_SYNC_WEIGHT_KLINES", 2, minimum=1),
+        "/fapi/v1/income": _read_int_env("FULL_SYNC_WEIGHT_INCOME", 30, minimum=1),
+    }
+    BinanceFuturesRestClient.configure_global_request_budget(
+        enabled=True,
+        per_minute=budget_per_minute,
+        path_weights=path_weights,
+    )
+    logger.info(
+        "全量同步请求预算器已启用: "
+        f"budget={budget_per_minute}/min, "
+        f"weights={{allOrders:{path_weights['/fapi/v1/allOrders']}, "
+        f"klines:{path_weights['/fapi/v1/klines']}, "
+        f"income:{path_weights['/fapi/v1/income']}}}"
+    )
+    return True
 
 
 def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
@@ -30,11 +69,14 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
     trades_saved = 0
     open_saved = 0
     symbol_count = 0
+    budget_enabled = False
 
     try:
         logger.info("=" * 50)
         run_mode = "全量" if force_full else "增量"
         logger.info(f"开始同步交易数据... mode={run_mode}")
+        if force_full:
+            budget_enabled = _configure_full_sync_request_budget()
 
         # 更新同步状态为进行中
         scheduler.sync_repo.update_sync_status(status="syncing")
@@ -132,4 +174,7 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
         logger.error(traceback.format_exc())
         return False
     finally:
+        if budget_enabled:
+            BinanceFuturesRestClient.configure_global_request_budget(enabled=False)
+            logger.info("全量同步请求预算器已关闭")
         scheduler._release_api_job_slot()
