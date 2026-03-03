@@ -3,14 +3,28 @@ def _assert_snapshot_payload_shape(body, *, kind: str):
     assert "ok" in body
     assert isinstance(body["ok"], bool)
     if body["ok"]:
+        assert "snapshot_date" in body
+        assert "snapshot_time" in body
         assert "rows" in body
         assert isinstance(body["rows"], list)
         if kind == "rebound":
             assert "top_count" in body
             assert isinstance(body["top_count"], int)
+            assert "window_start_utc" in body
         elif kind == "leaderboard":
+            assert "top" in body
+            assert isinstance(body["top"], int)
             assert "gainers_top_count" in body
+            assert isinstance(body["gainers_top_count"], int)
             assert "losers_top_count" in body
+            assert isinstance(body["losers_top_count"], int)
+            assert "window_start_utc" in body
+            assert "losers_reversal" in body
+            assert isinstance(body["losers_reversal"], dict)
+            assert "next_day_drop_metric" in body
+            assert isinstance(body["next_day_drop_metric"], dict)
+            assert "change_48h_metric" in body
+            assert isinstance(body["change_48h_metric"], dict)
     else:
         assert "reason" in body
         assert "message" in body

@@ -214,10 +214,18 @@ class LeaderboardSnapshotResponse(BaseModel):
     message: Optional[str] = None
     snapshot_date: Optional[str] = None
     snapshot_time: Optional[str] = None
+    window_start_utc: Optional[str] = None
+    top: Optional[int] = None
     rows: List[dict[str, Any]] = Field(default_factory=list)
     losers_rows: List[dict[str, Any]] = Field(default_factory=list)
     gainers_top_count: Optional[int] = None
     losers_top_count: Optional[int] = None
+    losers_reversal: Optional[dict[str, Any]] = None
+    next_day_drop_metric: Optional[dict[str, Any]] = None
+    continuation_pool: Optional[dict[str, Any]] = None
+    change_48h_metric: Optional[dict[str, Any]] = None
+    short_48h_metric: Optional[dict[str, Any]] = None
+    hold_48h_metric: Optional[dict[str, Any]] = None
 
 
 class ReboundSnapshotResponse(BaseModel):
@@ -226,5 +234,6 @@ class ReboundSnapshotResponse(BaseModel):
     message: Optional[str] = None
     snapshot_date: Optional[str] = None
     snapshot_time: Optional[str] = None
+    window_start_utc: Optional[str] = None
     rows: List[dict[str, Any]] = Field(default_factory=list)
     top_count: Optional[int] = None
