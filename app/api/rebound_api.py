@@ -56,3 +56,19 @@ async def get_rebound_60d_snapshot_dates(
     db=Depends(get_db),
 ):
     return await service.list_dates(db=db, window="60d", limit=limit)
+
+
+@router.get("/api/rebound-365d", response_model=ReboundSnapshotResponse)
+async def get_rebound_365d_snapshot(
+    date: Optional[str] = Query(None, description="Snapshot date in YYYY-MM-DD"),
+    db=Depends(get_db),
+):
+    return await service.get_snapshot_response(db=db, date=date, window="365d")
+
+
+@router.get("/api/rebound-365d/dates", response_model=SnapshotDatesResponse)
+async def get_rebound_365d_snapshot_dates(
+    limit: int = Query(90, ge=1, le=365),
+    db=Depends(get_db),
+):
+    return await service.list_dates(db=db, window="365d", limit=limit)

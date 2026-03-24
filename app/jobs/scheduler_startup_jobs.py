@@ -247,6 +247,28 @@ def register_scheduler_jobs(scheduler, *, utc8):
     else:
         logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
 
+    if scheduler.enable_rebound_365d_snapshot:
+        scheduler.scheduler.add_job(
+            func=scheduler.snapshot_morning_rebound_365d,
+            trigger=CronTrigger(
+                hour=scheduler.rebound_365d_hour,
+                minute=scheduler.rebound_365d_minute,
+                timezone=utc8,
+            ),
+            id="snapshot_morning_rebound_365d",
+            name="晨间365D反弹榜",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+            replace_existing=True,
+        )
+        logger.info(
+            "晨间365D反弹榜任务已启动: "
+            f"每天 {scheduler.rebound_365d_hour:02d}:{scheduler.rebound_365d_minute:02d} 执行"
+        )
+    else:
+        logger.info("晨间365D反弹榜任务未启用: ENABLE_REBOUND_365D_SNAPSHOT=0")
+
     scheduler.scheduler.start()
     logger.info(
         "增量交易同步任务已启动: "

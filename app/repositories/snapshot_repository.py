@@ -63,6 +63,9 @@ class SnapshotRepository:
     def save_rebound_60d_snapshot(self, snapshot):
         return self._rebound.save_rebound_60d_snapshot(snapshot)
 
+    def save_rebound_365d_snapshot(self, snapshot):
+        return self._rebound.save_rebound_365d_snapshot(snapshot)
+
     def get_latest_rebound_7d_snapshot(self):
         return self._rebound.get_latest_rebound_7d_snapshot()
 
@@ -71,6 +74,9 @@ class SnapshotRepository:
 
     def get_latest_rebound_60d_snapshot(self):
         return self._rebound.get_latest_rebound_60d_snapshot()
+
+    def get_latest_rebound_365d_snapshot(self):
+        return self._rebound.get_latest_rebound_365d_snapshot()
 
     def get_rebound_7d_snapshot_by_date(self, snapshot_date: str):
         return self._rebound.get_rebound_7d_snapshot_by_date(snapshot_date)
@@ -81,6 +87,9 @@ class SnapshotRepository:
     def get_rebound_60d_snapshot_by_date(self, snapshot_date: str):
         return self._rebound.get_rebound_60d_snapshot_by_date(snapshot_date)
 
+    def get_rebound_365d_snapshot_by_date(self, snapshot_date: str):
+        return self._rebound.get_rebound_365d_snapshot_by_date(snapshot_date)
+
     def list_rebound_7d_snapshot_dates(self, limit: int):
         return self._rebound.list_rebound_7d_snapshot_dates(limit)
 
@@ -89,3 +98,6 @@ class SnapshotRepository:
 
     def list_rebound_60d_snapshot_dates(self, limit: int):
         return self._rebound.list_rebound_60d_snapshot_dates(limit)
+
+    def list_rebound_365d_snapshot_dates(self, limit: int):
+        return self._rebound.list_rebound_365d_snapshot_dates(limit)

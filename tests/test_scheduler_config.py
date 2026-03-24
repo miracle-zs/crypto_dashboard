@@ -18,6 +18,10 @@ def test_scheduler_config_defaults(monkeypatch):
     assert config.trades_compensation_lookback_minutes == 1440
     assert config.leaderboard_alert_hour == 7
     assert config.leaderboard_alert_minute == 40
+    assert config.enable_rebound_365d_snapshot is True
+    assert config.rebound_365d_top_n == 10
+    assert config.rebound_365d_hour == 7
+    assert config.rebound_365d_minute == 36
     assert config.noon_loss_check_hour == 11
     assert config.noon_loss_check_minute == 50
 
@@ -38,9 +42,11 @@ def test_scheduler_config_time_normalization(monkeypatch):
     monkeypatch.setenv("LEADERBOARD_ALERT_HOUR", "49")
     monkeypatch.setenv("LEADERBOARD_ALERT_MINUTE", "121")
     monkeypatch.setenv("REBOUND_7D_MINUTE", "120")
+    monkeypatch.setenv("REBOUND_365D_MINUTE", "122")
 
     config = load_scheduler_config()
 
     assert config.leaderboard_alert_hour == 1
     assert config.leaderboard_alert_minute == 1
     assert config.rebound_7d_minute == 0
+    assert config.rebound_365d_minute == 2

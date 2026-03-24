@@ -13,6 +13,9 @@ def test_rebound_api_uses_repository_instead_of_db_snapshot_calls():
         "db.get_rebound_60d_snapshot_by_date",
         "db.get_latest_rebound_60d_snapshot",
         "db.list_rebound_60d_snapshot_dates",
+        "db.get_rebound_365d_snapshot_by_date",
+        "db.get_latest_rebound_365d_snapshot",
+        "db.list_rebound_365d_snapshot_dates",
         "db.get_open_positions",
     ]
     for pattern in forbidden:
@@ -59,6 +62,7 @@ def test_scheduler_uses_repositories_for_snapshot_and_balance_writes():
         "self.db.save_rebound_7d_snapshot",
         "self.db.save_rebound_30d_snapshot",
         "self.db.save_rebound_60d_snapshot",
+        "self.db.save_rebound_365d_snapshot",
         "self.db.save_balance_history",
         "self.db.save_transfer_income",
     ]

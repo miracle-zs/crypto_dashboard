@@ -389,6 +389,16 @@ class TradeDataScheduler:
             label="60D反弹榜"
         )
 
+    def _build_rebound_365d_snapshot(self):
+        """构建365D反弹幅度榜快照。"""
+        return self._build_rebound_snapshot(
+            window_days=365,
+            top_n=self.rebound_365d_top_n,
+            kline_workers=self.rebound_365d_kline_workers,
+            weight_budget_per_minute=self.rebound_365d_weight_budget_per_minute,
+            label="365D反弹榜"
+        )
+
     def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
         """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
         return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_7d_snapshot)
@@ -435,6 +445,22 @@ class TradeDataScheduler:
             schedule_minute=self.rebound_60d_minute,
             get_snapshot=self.get_rebound_60d_snapshot,
             save_snapshot=self.snapshot_repo.save_rebound_60d_snapshot,
+        )
+
+    def get_rebound_365d_snapshot(self, source: str = "365D反弹榜接口"):
+        """获取365D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
+        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_365d_snapshot)
+
+    def snapshot_morning_rebound_365d(self):
+        """每天早上生成365D反弹幅度Top榜快照并入库。"""
+        return snapshot_morning_rebound_job(
+            self,
+            source="晨间365D反弹榜",
+            label="365D反弹榜",
+            schedule_hour=self.rebound_365d_hour,
+            schedule_minute=self.rebound_365d_minute,
+            get_snapshot=self.get_rebound_365d_snapshot,
+            save_snapshot=self.snapshot_repo.save_rebound_365d_snapshot,
         )
 
     @staticmethod

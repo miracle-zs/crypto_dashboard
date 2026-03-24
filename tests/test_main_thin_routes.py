@@ -7,6 +7,7 @@ def test_main_does_not_define_business_api_routes_directly():
         '@app.get("/api/rebound-7d")',
         '@app.get("/api/rebound-30d")',
         '@app.get("/api/rebound-60d")',
+        '@app.get("/api/rebound-365d")',
         '@app.get("/api/leaderboard/dates")',
         '@app.get("/api/leaderboard/metrics-history")',
         '@app.get("/api/balance-history"',

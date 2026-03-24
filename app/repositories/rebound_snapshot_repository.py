@@ -57,6 +57,9 @@ class ReboundSnapshotRepository:
     def save_rebound_60d_snapshot(self, snapshot):
         return self._save_rebound_snapshot("rebound_60d_snapshots", snapshot)
 
+    def save_rebound_365d_snapshot(self, snapshot):
+        return self._save_rebound_snapshot("rebound_365d_snapshots", snapshot)
+
     @staticmethod
     def _row_to_rebound_snapshot(row) -> Dict:
         data = dict(row)
@@ -104,6 +107,9 @@ class ReboundSnapshotRepository:
     def get_latest_rebound_60d_snapshot(self):
         return self._get_latest_rebound_snapshot("rebound_60d_snapshots")
 
+    def get_latest_rebound_365d_snapshot(self):
+        return self._get_latest_rebound_snapshot("rebound_365d_snapshots")
+
     def _get_rebound_snapshot_by_date(self, table_name: str, snapshot_date: str):
         conn = self.db._get_connection()
         cursor = conn.cursor()
@@ -131,6 +137,9 @@ class ReboundSnapshotRepository:
     def get_rebound_60d_snapshot_by_date(self, snapshot_date: str):
         return self._get_rebound_snapshot_by_date("rebound_60d_snapshots", snapshot_date)
 
+    def get_rebound_365d_snapshot_by_date(self, snapshot_date: str):
+        return self._get_rebound_snapshot_by_date("rebound_365d_snapshots", snapshot_date)
+
     def _list_rebound_snapshot_dates(self, table_name: str, limit: int = 90):
         conn = self.db._get_connection()
         cursor = conn.cursor()
@@ -157,3 +166,6 @@ class ReboundSnapshotRepository:
 
     def list_rebound_60d_snapshot_dates(self, limit: int):
         return self._list_rebound_snapshot_dates("rebound_60d_snapshots", limit)
+
+    def list_rebound_365d_snapshot_dates(self, limit: int):
+        return self._list_rebound_snapshot_dates("rebound_365d_snapshots", limit)

@@ -55,7 +55,7 @@ def test_leaderboard_snapshot_contract(client):
 
 
 def test_rebound_snapshot_contracts(client):
-    endpoints = ["/api/rebound-7d", "/api/rebound-30d", "/api/rebound-60d"]
+    endpoints = ["/api/rebound-7d", "/api/rebound-30d", "/api/rebound-60d", "/api/rebound-365d"]
     for endpoint in endpoints:
         r = client.get(endpoint)
         assert r.status_code == 200
@@ -63,7 +63,7 @@ def test_rebound_snapshot_contracts(client):
 
 
 def test_rebound_dates_contracts(client):
-    endpoints = ["/api/rebound-7d/dates", "/api/rebound-30d/dates", "/api/rebound-60d/dates"]
+    endpoints = ["/api/rebound-7d/dates", "/api/rebound-30d/dates", "/api/rebound-60d/dates", "/api/rebound-365d/dates"]
     for endpoint in endpoints:
         r = client.get(f"{endpoint}?limit=30")
         assert r.status_code == 200

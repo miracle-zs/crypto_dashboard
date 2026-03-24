@@ -96,6 +96,12 @@ class SchedulerConfig:
     rebound_60d_weight_budget_per_minute: int
     rebound_60d_hour: int
     rebound_60d_minute: int
+    enable_rebound_365d_snapshot: bool
+    rebound_365d_top_n: int
+    rebound_365d_kline_workers: int
+    rebound_365d_weight_budget_per_minute: int
+    rebound_365d_hour: int
+    rebound_365d_minute: int
     noon_loss_check_hour: int
     noon_loss_check_minute: int
     noon_review_hour: int
@@ -196,6 +202,16 @@ def load_scheduler_config() -> SchedulerConfig:
         ),
         rebound_60d_hour=_env_int("REBOUND_60D_HOUR", rebound_7d_hour, minimum=0) % 24,
         rebound_60d_minute=_env_int("REBOUND_60D_MINUTE", rebound_7d_minute + 4, minimum=0) % 60,
+        enable_rebound_365d_snapshot=_env_bool("ENABLE_REBOUND_365D_SNAPSHOT", True),
+        rebound_365d_top_n=_env_int("REBOUND_365D_TOP_N", 10, minimum=1),
+        rebound_365d_kline_workers=_env_int("REBOUND_365D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
+        rebound_365d_weight_budget_per_minute=_env_int(
+            "REBOUND_365D_WEIGHT_BUDGET_PER_MINUTE",
+            rebound_7d_weight_budget_per_minute,
+            minimum=60,
+        ),
+        rebound_365d_hour=_env_int("REBOUND_365D_HOUR", rebound_7d_hour, minimum=0) % 24,
+        rebound_365d_minute=_env_int("REBOUND_365D_MINUTE", rebound_7d_minute + 6, minimum=0) % 60,
         noon_loss_check_hour=_env_int("NOON_LOSS_CHECK_HOUR", 11, minimum=0) % 24,
         noon_loss_check_minute=_env_int("NOON_LOSS_CHECK_MINUTE", 50, minimum=0) % 60,
         noon_review_hour=_env_int("NOON_REVIEW_HOUR", 23, minimum=0) % 24,

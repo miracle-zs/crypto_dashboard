@@ -924,6 +924,37 @@
             </div>
             <div id="rebound-60-cards" class="md:hidden p-3 space-y-3"></div>
         </div>
+
+        <div class="glass-panel panel-tier-main overflow-hidden panel-reveal rebound-panel" data-rebound-window="365">
+            <div class="px-4 py-3 border-b border-slate-800/20 flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-500 flex items-center">
+                    <i data-lucide="rocket" class="mr-2 w-4 h-4 text-amber-500"></i> 365D REBOUND TOP 10
+                </h3>
+                <div class="text-right">
+                    <div id="rebound-365-summary" class="text-[11px] font-mono text-slate-600">Top -- · --</div>
+                    <div class="text-[11px] text-slate-500">Daily snapshot @ {{ rebound_snapshot_time_label }}</div>
+                </div>
+            </div>
+            <div id="rebound-365-window" class="px-4 py-2 text-xs text-slate-500 border-b border-slate-800/20">
+                Window -- UTC → snapshot
+            </div>
+            <div class="hidden md:block overflow-x-auto">
+                <table class="leader-table w-full text-left text-sm min-w-[1080px]">
+                    <thead>
+                    <tr>
+                        <th class="px-4 py-3">Rank</th>
+                        <th class="px-4 py-3">Symbol</th>
+                        <th class="px-4 py-3 text-right">365D Low</th>
+                        <th class="px-4 py-3 text-right">Current</th>
+                        <th class="px-4 py-3 text-right">Rebound</th>
+                        <th class="px-4 py-3 text-right">Low Day (UTC)</th>
+                    </tr>
+                    </thead>
+                    <tbody id="rebound-365-body"></tbody>
+                </table>
+            </div>
+            <div id="rebound-365-cards" class="md:hidden p-3 space-y-3"></div>
+        </div>
     </div>
 
     <div class="section-label">METRIC ANALYSIS</div>

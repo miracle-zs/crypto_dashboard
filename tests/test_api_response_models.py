@@ -38,3 +38,5 @@ def test_rebound_endpoints_have_response_models():
     assert models.get("/api/rebound-30d/dates") is not None
     assert models.get("/api/rebound-60d") is not None
     assert models.get("/api/rebound-60d/dates") is not None
+    assert models.get("/api/rebound-365d") is not None
+    assert models.get("/api/rebound-365d/dates") is not None

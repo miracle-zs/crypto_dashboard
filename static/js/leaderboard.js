@@ -33,6 +33,12 @@
             body: document.getElementById('rebound-60-body'),
             cards: document.getElementById('rebound-60-cards'),
         },
+        365: {
+            summary: document.getElementById('rebound-365-summary'),
+            window: document.getElementById('rebound-365-window'),
+            body: document.getElementById('rebound-365-body'),
+            cards: document.getElementById('rebound-365-cards'),
+        },
     };
     const losersHitSummary = document.getElementById('losers-hit-summary');
     const losersHitSymbols = document.getElementById('losers-hit-symbols');
@@ -629,7 +635,7 @@
                 renderMetric2(null);
                 renderMetric3(null);
                 renderMetricsHistory([]);
-                await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
+                await Promise.all([14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate)));
                 return;
             }
 
@@ -661,14 +667,14 @@
             renderMetric2(metric2Data);
             renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
             await loadMetricsHistory();
-            await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
+            await Promise.all([14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate)));
         } catch (err) {
             statusText.textContent = `请求异常: ${err.message || err}`;
             renderLosersReversal(null);
             renderMetric2(null);
             renderMetric3(null);
             renderMetricsHistory([]);
-            await Promise.all([14, 30, 60].map((d) => loadReboundSnapshot(d, selectedDate)));
+            await Promise.all([14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate)));
         } finally {
             btnRefresh.disabled = false;
             lucide.createIcons();

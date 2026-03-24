@@ -46,6 +46,7 @@ class ReboundService:
             "7d": (snapshot_repo.get_rebound_7d_snapshot_by_date, snapshot_repo.get_latest_rebound_7d_snapshot),
             "30d": (snapshot_repo.get_rebound_30d_snapshot_by_date, snapshot_repo.get_latest_rebound_30d_snapshot),
             "60d": (snapshot_repo.get_rebound_60d_snapshot_by_date, snapshot_repo.get_latest_rebound_60d_snapshot),
+            "365d": (snapshot_repo.get_rebound_365d_snapshot_by_date, snapshot_repo.get_latest_rebound_365d_snapshot),
         }
         by_date, latest = getter_map[window]
 
@@ -79,6 +80,10 @@ class ReboundService:
                     self._read_int_env("REBOUND_60D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
                     self._read_int_env("REBOUND_60D_MINUTE", 34),
                 ),
+                "365d": (
+                    self._read_int_env("REBOUND_365D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
+                    self._read_int_env("REBOUND_365D_MINUTE", 36),
+                ),
             }
             r_hour, r_minute = rebound_time_map[window]
             time_label = f"{r_hour % 24:02d}:{r_minute % 60:02d}"
@@ -86,6 +91,7 @@ class ReboundService:
                 "7d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（14D）",
                 "30d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（30D）",
                 "60d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（60D）",
+                "365d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（365D）",
             }[window]
             return {"ok": False, "reason": "no_snapshot", "message": msg}
 
@@ -120,6 +126,7 @@ class ReboundService:
             "7d": snapshot_repo.list_rebound_7d_snapshot_dates,
             "30d": snapshot_repo.list_rebound_30d_snapshot_dates,
             "60d": snapshot_repo.list_rebound_60d_snapshot_dates,
+            "365d": snapshot_repo.list_rebound_365d_snapshot_dates,
         }
         dates = await run_in_thread(list_map[window], limit)
         payload = {"dates": dates}

@@ -509,6 +509,27 @@ def apply_v1_initial_schema(conn, logger):
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_rebound_60d_snapshot_date ON rebound_60d_snapshots(snapshot_date DESC)
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rebound_365d_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date TEXT NOT NULL,
+            snapshot_time TEXT NOT NULL,
+            window_start_utc TEXT,
+            candidates INTEGER DEFAULT 0,
+            effective INTEGER DEFAULT 0,
+            top_count INTEGER DEFAULT 0,
+            rows_json TEXT,
+            all_rows_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(snapshot_date)
+        )
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_rebound_365d_snapshot_time ON rebound_365d_snapshots(snapshot_time DESC)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_rebound_365d_snapshot_date ON rebound_365d_snapshots(snapshot_date DESC)
+    """)
 
     # 午间浮亏快照（每天11:50记录一次）
     cursor.execute("""
