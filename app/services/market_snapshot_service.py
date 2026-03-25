@@ -19,35 +19,65 @@ def _resolve_exchange_symbols_cache_ttl() -> float:
     return max(0.0, value)
 
 
-def _get_usdt_perpetual_symbols(scheduler):
+def _get_usdt_perpetual_symbol_meta(scheduler):
     now = time.time()
     with _EXCHANGE_SYMBOLS_LOCK:
         cached_symbols = _EXCHANGE_SYMBOLS_CACHE.get("symbols")
         expires_at = float(_EXCHANGE_SYMBOLS_CACHE.get("expires_at", 0.0) or 0.0)
         if cached_symbols and now < expires_at:
-            return set(cached_symbols)
+            return dict(cached_symbols)
 
     exchange_info = scheduler.processor.get_exchange_info(client=scheduler.processor.client)
     if not exchange_info or "symbols" not in exchange_info:
         raise RuntimeError("无法获取 exchangeInfo")
 
-    symbols = {
-        item.get("symbol")
-        for item in exchange_info.get("symbols", [])
+    symbols = {}
+    for item in exchange_info.get("symbols", []):
+        symbol = item.get("symbol")
         if (
-            item.get("contractType") == "PERPETUAL"
-            and item.get("quoteAsset") == "USDT"
-            and str(item.get("status", "")).upper() == "TRADING"
-        )
-    }
+            not symbol
+            or item.get("contractType") != "PERPETUAL"
+            or item.get("quoteAsset") != "USDT"
+            or str(item.get("status", "")).upper() != "TRADING"
+        ):
+            continue
+        symbols[str(symbol)] = {
+            "onboard_date": item.get("onboardDate"),
+        }
     if not symbols:
         raise RuntimeError("无可用USDT永续交易对")
 
     ttl_seconds = _resolve_exchange_symbols_cache_ttl()
     with _EXCHANGE_SYMBOLS_LOCK:
-        _EXCHANGE_SYMBOLS_CACHE["symbols"] = set(symbols)
+        _EXCHANGE_SYMBOLS_CACHE["symbols"] = dict(symbols)
         _EXCHANGE_SYMBOLS_CACHE["expires_at"] = now + ttl_seconds
     return symbols
+
+
+def _get_usdt_perpetual_symbols(scheduler):
+    return set(_get_usdt_perpetual_symbol_meta(scheduler).keys())
+
+
+def _is_listing_daily_candle(open_time_ms: int, onboard_date_ms) -> bool:
+    try:
+        onboard_ts = int(onboard_date_ms)
+    except (TypeError, ValueError):
+        return False
+    day_ms = 86_400_000
+    return open_time_ms <= onboard_ts < open_time_ms + day_ms
+
+
+def _filter_listing_daily_candle(klines, onboard_date_ms):
+    valid_rows = [kline for kline in klines if isinstance(kline, list) and len(kline) >= 4]
+    if not valid_rows:
+        return []
+    try:
+        first_open_time_ms = int(valid_rows[0][0])
+    except (TypeError, ValueError):
+        return valid_rows
+    if _is_listing_daily_candle(first_open_time_ms, onboard_date_ms):
+        return valid_rows[1:]
+    return valid_rows
 
 
 def build_top_gainers_snapshot(scheduler, utc8):
@@ -57,7 +87,8 @@ def build_top_gainers_snapshot(scheduler, utc8):
     midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
 
-    usdt_perpetual_symbols = _get_usdt_perpetual_symbols(scheduler)
+    usdt_perpetual_meta = _get_usdt_perpetual_symbol_meta(scheduler)
+    usdt_perpetual_symbols = set(usdt_perpetual_meta.keys())
 
     ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/24hr")
     if not ticker_data or not isinstance(ticker_data, list):
@@ -198,7 +229,8 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
     now_utc = datetime.now(timezone.utc)
     window_start_utc = now_utc - timedelta(days=window_days)
 
-    usdt_perpetual_symbols = _get_usdt_perpetual_symbols(scheduler)
+    usdt_perpetual_meta = _get_usdt_perpetual_symbol_meta(scheduler)
+    usdt_perpetual_symbols = set(usdt_perpetual_meta.keys())
 
     ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/price")
     if not ticker_data:
@@ -264,10 +296,13 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
             except Exception:
                 return item, None
 
+            filtered_klines = _filter_listing_daily_candle(
+                klines,
+                usdt_perpetual_meta.get(item["symbol"], {}).get("onboard_date"),
+            )
+
             lows = []
-            for kline in klines:
-                if not isinstance(kline, list) or len(kline) < 4:
-                    continue
+            for kline in filtered_klines:
                 try:
                     low_price = float(kline[3])
                     open_time = int(kline[0])
