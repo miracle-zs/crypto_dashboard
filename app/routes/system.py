@@ -8,6 +8,7 @@ from app.core.async_utils import run_in_thread
 from app.core.deps import get_db
 from app.database import Database
 from app.repositories import SyncRepository, TradeRepository
+from app.static_assets import static_asset_url
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -15,7 +16,14 @@ templates = Jinja2Templates(directory="templates")
 
 @router.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "dark_css_url": static_asset_url("/static/dark-unified.css"),
+            "page_js_url": static_asset_url("/static/js/index-dashboard.js"),
+        },
+    )
 
 
 @router.get("/api/status")

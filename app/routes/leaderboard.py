@@ -4,6 +4,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app.static_assets import static_asset_url
+
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
@@ -21,5 +23,7 @@ async def read_leaderboard_page(request: Request):
         {
             "leaderboard_snapshot_time_label": f"{leaderboard_hour:02d}:{leaderboard_minute:02d}",
             "rebound_snapshot_time_label": f"{rebound_hour:02d}:{rebound_minute:02d}",
+            "leaderboard_css_url": static_asset_url("/static/dark-unified.css"),
+            "leaderboard_js_url": static_asset_url("/static/js/leaderboard.js"),
         },
     )

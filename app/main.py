@@ -21,6 +21,7 @@ from app.routes.leaderboard import router as leaderboard_router
 from app.routes.system import router as system_router
 from app.routes.trades import router as trades_router
 from app.scheduler import get_scheduler, should_start_scheduler
+from app.static_assets import static_asset_url
 from app.user_stream import BinanceUserDataStream
 
 load_dotenv()
@@ -132,6 +133,8 @@ async def read_live_monitor(request: Request):
         {
             "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
             "noon_review_time_label": _time_label("NOON_REVIEW_HOUR", "NOON_REVIEW_MINUTE", 23, 2),
+            "dark_css_url": static_asset_url("/static/dark-unified.css"),
+            "page_js_url": static_asset_url("/static/js/live-monitor.js"),
         },
     )
 
@@ -143,10 +146,18 @@ async def read_metrics(request: Request):
         "metrics.html",
         {
             "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
+            "dark_css_url": static_asset_url("/static/dark-unified.css"),
+            "page_js_url": static_asset_url("/static/js/metrics.js"),
         },
     )
 
 
 @app.get("/logs", response_class=HTMLResponse)
 async def read_logs_page(request: Request):
-    return templates.TemplateResponse(request, "logs.html")
+    return templates.TemplateResponse(
+        request,
+        "logs.html",
+        {
+            "dark_css_url": static_asset_url("/static/dark-unified.css"),
+        },
+    )
