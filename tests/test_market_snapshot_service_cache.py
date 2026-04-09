@@ -86,6 +86,45 @@ def test_exchange_info_cache_can_be_disabled(monkeypatch):
     assert scheduler.processor.exchange_info_calls == 2
 
 
+def test_leaderboard_snapshot_includes_drawdown_from_7d_and_window_high(monkeypatch):
+    monkeypatch.setenv("EXCHANGE_INFO_CACHE_TTL_SECONDS", "0")
+    _reset_exchange_info_cache()
+
+    class _LeaderboardClient(_FakeClient):
+        def public_get(self, endpoint, params=None):
+            if endpoint == "/fapi/v1/ticker/24hr":
+                return [{"symbol": "BTCUSDT", "lastPrice": "100", "quoteVolume": "100000000"}]
+            if endpoint == "/fapi/v1/klines":
+                return [
+                    [1, "90", "140", "80", "100"],
+                    [2, "100", "130", "70", "100"],
+                ]
+            return super().public_get(endpoint, params)
+
+    class _LeaderboardProcessor(_FakeProcessor):
+        def __init__(self):
+            super().__init__()
+            self.client = _LeaderboardClient()
+
+        def _create_worker_client(self):
+            return _LeaderboardClient()
+
+        def get_price_change_from_utc_start(self, symbol, timestamp, client=None):
+            return 80.0
+
+    class _LeaderboardScheduler(_FakeScheduler):
+        def __init__(self):
+            super().__init__()
+            self.processor = _LeaderboardProcessor()
+
+    snapshot = market_snapshot_service.build_top_gainers_snapshot(_LeaderboardScheduler(), timezone.utc)
+
+    assert snapshot["top"] == 1
+    row = snapshot["rows"][0]
+    assert round(row["drawdown_from_7d_high_pct"], 2) == -28.57
+    assert round(row["drawdown_from_window_high_pct"], 2) == -28.57
+
+
 def test_rebound_excludes_first_daily_kline_when_it_is_listing_candle(monkeypatch):
     monkeypatch.setenv("EXCHANGE_INFO_CACHE_TTL_SECONDS", "0")
     _reset_exchange_info_cache()
@@ -145,6 +184,8 @@ def test_rebound_excludes_first_daily_kline_when_it_is_listing_candle(monkeypatc
     row = snapshot["rows"][0]
     assert row["low_365d"] == 8.0
     assert round(row["rebound_365d_pct"], 2) == 1150.0
+    assert round(row["drawdown_from_7d_high_pct"], 2) == 0.0
+    assert round(row["drawdown_from_window_high_pct"], 2) == 0.0
 
 
 def test_rebound_keeps_first_daily_kline_for_non_listing_contract(monkeypatch):
@@ -206,3 +247,5 @@ def test_rebound_keeps_first_daily_kline_for_non_listing_contract(monkeypatch):
     row = snapshot["rows"][0]
     assert row["low_365d"] == 5.0
     assert round(row["rebound_365d_pct"], 2) == 1900.0
+    assert round(row["drawdown_from_7d_high_pct"], 2) == 0.0
+    assert round(row["drawdown_from_window_high_pct"], 2) == 0.0

@@ -80,6 +80,37 @@ def _filter_listing_daily_candle(klines, onboard_date_ms):
     return valid_rows
 
 
+def _extract_highs_from_klines(klines):
+    highs = []
+    for kline in klines:
+        if not isinstance(kline, list) or len(kline) < 3:
+            continue
+        try:
+            high_price = float(kline[2])
+        except (TypeError, ValueError):
+            continue
+        if high_price > 0:
+            highs.append(high_price)
+    return highs
+
+
+def _calc_drawdown_from_high(current_price: float, high_price: float):
+    if current_price is None or current_price <= 0:
+        return None
+    if high_price is None or high_price <= 0:
+        return None
+    return min(0.0, (current_price / high_price - 1.0) * 100.0)
+
+
+def _build_drawdown_fields(*, current_price: float, highs_7d, highs_window):
+    recent_7d_high = max(highs_7d) if highs_7d else None
+    window_high = max(highs_window) if highs_window else None
+    return {
+        "drawdown_from_7d_high_pct": _calc_drawdown_from_high(current_price, recent_7d_high),
+        "drawdown_from_window_high_pct": _calc_drawdown_from_high(current_price, window_high),
+    }
+
+
 def build_top_gainers_snapshot(scheduler, utc8):
     """构建涨跌幅榜快照（不处理锁与冷却）。"""
     stage_started_at = time.perf_counter()
@@ -159,7 +190,24 @@ def build_top_gainers_snapshot(scheduler, utc8):
                 timestamp=midnight_utc_ms,
                 client=worker_client,
             )
-            return item, open_price
+            daily_klines = worker_client.public_get(
+                "/fapi/v1/klines",
+                {"symbol": item["symbol"], "interval": "1d", "limit": 7},
+            ) or []
+            intraday_klines = worker_client.public_get(
+                "/fapi/v1/klines",
+                {"symbol": item["symbol"], "interval": "1h", "startTime": midnight_utc_ms, "limit": 24},
+            ) or []
+            filtered_daily_klines = _filter_listing_daily_candle(
+                daily_klines,
+                usdt_perpetual_meta.get(item["symbol"], {}).get("onboard_date"),
+            )
+            drawdown_fields = _build_drawdown_fields(
+                current_price=item["last_price"],
+                highs_7d=_extract_highs_from_klines(filtered_daily_klines[-7:]),
+                highs_window=_extract_highs_from_klines(intraday_klines),
+            )
+            return item, open_price, drawdown_fields
 
         processed = 0
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -167,7 +215,7 @@ def build_top_gainers_snapshot(scheduler, utc8):
             for future in as_completed(futures):
                 processed += 1
                 try:
-                    item, open_price = future.result()
+                    item, open_price, drawdown_fields = future.result()
                 except Exception as exc:
                     logger.warning(f"涨幅榜逐币种计算异常: {exc}")
                     if processed % progress_step == 0 or processed == total_candidates:
@@ -187,6 +235,7 @@ def build_top_gainers_snapshot(scheduler, utc8):
                             "change": pct_change,
                             "volume": item["quote_volume"],
                             "last_price": item["last_price"],
+                            **drawdown_fields,
                         }
                     )
 
@@ -318,7 +367,17 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
             low_price, low_ts = min(lows, key=lambda entry: entry[0])
             rebound_pct = (item["current_price"] / low_price - 1.0) * 100.0
             low_at_utc = datetime.fromtimestamp(low_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            return item, {low_field: low_price, low_time_field: low_at_utc, metric_field: rebound_pct}
+            drawdown_fields = _build_drawdown_fields(
+                current_price=item["current_price"],
+                highs_7d=_extract_highs_from_klines(filtered_klines[-7:]),
+                highs_window=_extract_highs_from_klines(filtered_klines),
+            )
+            return item, {
+                low_field: low_price,
+                low_time_field: low_at_utc,
+                metric_field: rebound_pct,
+                **drawdown_fields,
+            }
 
         processed = 0
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -340,6 +399,8 @@ def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kli
                             low_field: payload[low_field],
                             low_time_field: payload[low_time_field],
                             metric_field: payload[metric_field],
+                            "drawdown_from_7d_high_pct": payload.get("drawdown_from_7d_high_pct"),
+                            "drawdown_from_window_high_pct": payload.get("drawdown_from_window_high_pct"),
                         }
                     )
 

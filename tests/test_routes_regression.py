@@ -9,6 +9,8 @@ def test_leaderboard_static_assets_have_cache_busting_version(client):
     text = response.text
     assert "/static/dark-unified.css?v=" in text
     assert "/static/js/leaderboard.js?v=" in text
+    assert "Drawdown 7D High" in text
+    assert "Drawdown Window High" in text
 
 
 def test_core_pages_static_assets_have_cache_busting_version(client):

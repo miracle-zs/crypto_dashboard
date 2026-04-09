@@ -18,6 +18,14 @@ class LeaderboardService:
     def _normalize_symbol(symbol: str) -> str:
         return normalize_futures_symbol(symbol)
 
+    @staticmethod
+    def _with_drawdown_defaults(row: dict) -> dict:
+        return {
+            **row,
+            "drawdown_from_7d_high_pct": row.get("drawdown_from_7d_high_pct"),
+            "drawdown_from_window_high_pct": row.get("drawdown_from_window_high_pct"),
+        }
+
     async def build_snapshot_response(self, db, date: Optional[str]):
         snapshot_repo = SnapshotRepository(db)
         trade_repo = TradeRepository(db)
@@ -117,7 +125,7 @@ class LeaderboardService:
             prev_rank = yesterday_rank.get(symbol)
             rank_delta = None if prev_rank is None else (prev_rank - idx)
             enriched_rows.append({
-                **row,
+                **self._with_drawdown_defaults(row),
                 "is_held": symbol in held_symbols,
                 "rank_delta_vs_yesterday": rank_delta,
                 "appearances_7d": appearances_7d.get(symbol, 0),
@@ -131,7 +139,7 @@ class LeaderboardService:
             prev_gainer_rank = yesterday_rank.get(symbol)
             was_prev_gainer_top = prev_gainer_rank is not None
             enriched_losers_rows.append({
-                **row,
+                **self._with_drawdown_defaults(row),
                 "is_held": symbol in held_symbols,
                 "rank_delta_vs_yesterday": rank_delta,
                 "appearances_7d": losers_appearances_7d.get(symbol, 0),

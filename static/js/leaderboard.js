@@ -121,6 +121,14 @@
         return formatChange(num);
     }
 
+    function getDrawdownClass(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 'rank-flat';
+        if (num < 0) return 'rank-down';
+        if (num > 0) return 'rank-up';
+        return 'rank-flat';
+    }
+
     function getDeltaMeta(delta) {
         if (typeof delta !== 'number') return {text: 'N/A', cls: 'rank-flat'};
         if (delta > 0) return {text: `↑ +${delta}`, cls: 'rank-up'};
@@ -397,6 +405,8 @@
 
         rows.forEach((row, idx) => {
             const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
+            const dd7Class = getDrawdownClass(row.drawdown_from_7d_high_pct);
+            const ddWindowClass = getDrawdownClass(row.drawdown_from_window_high_pct);
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -404,6 +414,8 @@
                 <td class="px-4 py-3 font-semibold">${row.symbol} ${held}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.last_price ?? row.price)}</td>
                 <td class="px-4 py-3 text-right rank-up font-bold">${formatChange(row.change)}</td>
+                <td class="px-4 py-3 text-right font-mono ${dd7Class}">${formatPercent(row.drawdown_from_7d_high_pct)}</td>
+                <td class="px-4 py-3 text-right font-mono ${ddWindowClass}">${formatPercent(row.drawdown_from_window_high_pct)}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatVolume(row.volume)}</td>
             `;
             tableBody.appendChild(tr);
@@ -430,6 +442,11 @@
                         <div class="v">${formatVolume(row.volume)}</div>
                     </div>
                 </div>
+                <details class="mobile-more">
+                    <summary>展开详情</summary>
+                    <div class="mt-1 text-xs ${dd7Class}">距7日高点: ${formatPercent(row.drawdown_from_7d_high_pct)}</div>
+                    <div class="mt-1 text-xs ${ddWindowClass}">距统计窗口高点: ${formatPercent(row.drawdown_from_window_high_pct)}</div>
+                </details>
             `;
             cards.appendChild(card);
         });
@@ -508,6 +525,8 @@
             const reboundClass = Number.isFinite(reboundPct)
                 ? (reboundPct >= 0 ? 'rank-up' : 'rank-down')
                 : 'rank-flat';
+            const dd7Class = getDrawdownClass(row.drawdown_from_7d_high_pct);
+            const ddWindowClass = getDrawdownClass(row.drawdown_from_window_high_pct);
             const held = row.is_held ? '<span class="held-badge">已持仓</span>' : '';
 
             const tr = document.createElement('tr');
@@ -517,6 +536,8 @@
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row[lowField])}</td>
                 <td class="px-4 py-3 text-right font-mono">${formatPrice(row.current_price)}</td>
                 <td class="px-4 py-3 text-right ${reboundClass} font-bold">${formatChangeOrDash(row[reboundField])}</td>
+                <td class="px-4 py-3 text-right font-mono ${dd7Class}">${formatPercent(row.drawdown_from_7d_high_pct)}</td>
+                <td class="px-4 py-3 text-right font-mono ${ddWindowClass}">${formatPercent(row.drawdown_from_window_high_pct)}</td>
                 <td class="px-4 py-3 text-right font-mono">${row[lowAtField] || '--'}</td>
             `;
             reboundBody.appendChild(tr);
@@ -546,6 +567,8 @@
                 <details class="mobile-more">
                     <summary>展开详情</summary>
                     <div class="mt-2 text-xs text-slate-500">低点日期(UTC): ${row[lowAtField] || '--'}</div>
+                    <div class="mt-1 text-xs ${dd7Class}">距7日高点: ${formatPercent(row.drawdown_from_7d_high_pct)}</div>
+                    <div class="mt-1 text-xs ${ddWindowClass}">距统计窗口高点: ${formatPercent(row.drawdown_from_window_high_pct)}</div>
                 </details>
             `;
             reboundCards.appendChild(card);

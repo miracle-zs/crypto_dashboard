@@ -7,6 +7,10 @@ def _assert_snapshot_payload_shape(body, *, kind: str):
         assert "snapshot_time" in body
         assert "rows" in body
         assert isinstance(body["rows"], list)
+        if body["rows"]:
+            first_row = body["rows"][0]
+            assert "drawdown_from_7d_high_pct" in first_row
+            assert "drawdown_from_window_high_pct" in first_row
         if kind == "rebound":
             assert "top_count" in body
             assert isinstance(body["top_count"], int)
@@ -19,6 +23,10 @@ def _assert_snapshot_payload_shape(body, *, kind: str):
             assert "losers_top_count" in body
             assert isinstance(body["losers_top_count"], int)
             assert "window_start_utc" in body
+            if body.get("losers_rows"):
+                first_loser = body["losers_rows"][0]
+                assert "drawdown_from_7d_high_pct" in first_loser
+                assert "drawdown_from_window_high_pct" in first_loser
             assert "losers_reversal" in body
             assert isinstance(body["losers_reversal"], dict)
             assert "next_day_drop_metric" in body

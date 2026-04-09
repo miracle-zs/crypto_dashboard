@@ -28,6 +28,14 @@ class ReboundService:
         except ValueError:
             return default
 
+    @staticmethod
+    def _with_drawdown_defaults(row: dict) -> dict:
+        return {
+            **row,
+            "drawdown_from_7d_high_pct": row.get("drawdown_from_7d_high_pct"),
+            "drawdown_from_window_high_pct": row.get("drawdown_from_window_high_pct"),
+        }
+
     async def get_snapshot_response(
         self,
         *,
@@ -107,7 +115,11 @@ class ReboundService:
         enriched_rows = []
         for idx, row in enumerate(snapshot.get("rows", []), start=1):
             symbol = str(row.get("symbol", "")).upper()
-            enriched_rows.append({**row, "rank": idx, "is_held": symbol in held_symbols})
+            enriched_rows.append({
+                **self._with_drawdown_defaults(row),
+                "rank": idx,
+                "is_held": symbol in held_symbols,
+            })
 
         snapshot["rows"] = enriched_rows
         snapshot["top_count"] = len(enriched_rows)
