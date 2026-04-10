@@ -18,6 +18,13 @@ def test_crash_risk_page_renders_with_page_assets(client):
     assert "结构性崩盘预警" in text
     assert "手动刷新" in text
     assert "方法说明" in text
+    assert 'href="/crash-risk"' in text
+
+
+def test_home_page_has_crash_risk_nav_entry(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'href="/crash-risk"' in r.text
 
 
 def test_pytest_runtime_ready():
