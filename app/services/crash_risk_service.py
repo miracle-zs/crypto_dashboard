@@ -57,7 +57,11 @@ class CrashRiskService:
         }
 
     def _get_latest_snapshot(self, db):
-        return self.repository_cls(db).get_latest_leaderboard_snapshot()
+        repo = self.repository_cls(db)
+        getter = getattr(repo, "get_candidate_symbols_snapshot_union", None)
+        if callable(getter):
+            return getter()
+        return repo.get_latest_leaderboard_snapshot()
 
     @staticmethod
     def _clamp(value, low, high):
@@ -156,11 +160,22 @@ class CrashRiskService:
 
         rows = []
         stage_counts = {"高危": 0, "警惕": 0, "观察": 0}
-        source_rows = snapshot.get("rows", []) or []
-        for source_row in source_rows:
-            symbol = str(source_row.get("symbol", "")).upper().strip()
-            if not symbol:
+        source_symbols = snapshot.get("symbols")
+        if source_symbols is None:
+            source_rows = snapshot.get("rows", []) or []
+            source_symbols = [
+                str(row.get("symbol", "")).upper().strip()
+                for row in source_rows
+                if str(row.get("symbol", "")).upper().strip()
+            ]
+        deduped_symbols = []
+        seen_symbols = set()
+        for symbol in source_symbols:
+            if not symbol or symbol in seen_symbols:
                 continue
+            seen_symbols.add(symbol)
+            deduped_symbols.append(symbol)
+        for symbol in deduped_symbols:
             market_series = self.fetch_symbol_inputs(symbol)
             score = self.score_symbol(market_series)
             row = {
@@ -181,7 +196,7 @@ class CrashRiskService:
                 "watch": stage_counts.get("观察", 0),
             },
             "source_snapshot": {
-                "source": "leaderboard_snapshot",
+                "source": snapshot.get("source", "leaderboard_snapshot"),
                 "snapshot_date": snapshot.get("snapshot_date"),
                 "snapshot_time": snapshot.get("snapshot_time"),
                 "window_start_utc": snapshot.get("window_start_utc"),
