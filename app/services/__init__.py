@@ -1,5 +1,6 @@
 from .leaderboard_history_service import LeaderboardHistoryService
 from .leaderboard_service import LeaderboardService
+from .crash_risk_service import CrashRiskService
 from .positions_service import PositionsService
 from .rebound_service import ReboundService
 from .system_api_service import SystemApiService
@@ -22,6 +23,7 @@ from .watchnotes_service import WatchNotesService
 __all__ = [
     "TradeQueryService",
     "LeaderboardService",
+    "CrashRiskService",
     "PositionsService",
     "ReboundService",
     "LeaderboardHistoryService",

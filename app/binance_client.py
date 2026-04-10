@@ -308,3 +308,15 @@ class BinanceFuturesRestClient:
 
     def public_put(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
         return self.request("PUT", path, params=params, signed=False)
+
+    def get_klines_1h(self, symbol: str, limit: int = 24):
+        return self.public_get(
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": "1h", "limit": limit},
+        )
+
+    def get_open_interest_history_1h(self, symbol: str, limit: int = 24):
+        return self.public_get(
+            "/futures/data/openInterestHist",
+            {"symbol": symbol, "period": "1h", "limit": limit},
+        )

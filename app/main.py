@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.balance_api import router as balance_api_router
+from app.api.crash_risk_api import router as crash_risk_api_router
 from app.api.leaderboard_api import router as leaderboard_api_router
 from app.api.positions_api import router as positions_api_router
 from app.api.rebound_api import router as rebound_api_router
@@ -17,6 +18,7 @@ from app.api.watchnotes_api import router as watchnotes_api_router
 from app.core.deps import get_db_singleton
 from app.core.metrics import log_api_metric, measure_ms
 from app.logger import logger
+from app.routes.crash_risk import router as crash_risk_router
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.system import router as system_router
 from app.routes.trades import router as trades_router
@@ -116,8 +118,10 @@ async def request_metrics_middleware(request: Request, call_next):
 app.include_router(system_router)
 app.include_router(trades_router)
 app.include_router(leaderboard_router)
+app.include_router(crash_risk_router)
 app.include_router(system_api_router)
 app.include_router(trades_api_router)
+app.include_router(crash_risk_api_router)
 app.include_router(leaderboard_api_router)
 app.include_router(positions_api_router)
 app.include_router(watchnotes_api_router)

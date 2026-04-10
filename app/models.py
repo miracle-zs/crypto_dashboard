@@ -204,6 +204,35 @@ class SnapshotDatesResponse(BaseModel):
     dates: List[str] = Field(default_factory=list)
 
 
+class CrashRiskSummary(BaseModel):
+    total: int = 0
+    high_risk: int = 0
+    warning: int = 0
+    watch: int = 0
+
+
+class CrashRiskSourceSnapshot(BaseModel):
+    source: str
+    snapshot_date: Optional[str] = None
+    snapshot_time: Optional[str] = None
+    window_start_utc: Optional[str] = None
+
+
+class CrashRiskRow(BaseModel):
+    symbol: str
+    risk_score: int
+    stage: str
+    drivers: List[str] = Field(default_factory=list)
+    component_scores: dict[str, int] = Field(default_factory=dict)
+
+
+class CrashRiskResponse(BaseModel):
+    as_of: Optional[str] = None
+    summary: CrashRiskSummary = Field(default_factory=CrashRiskSummary)
+    rows: List[CrashRiskRow] = Field(default_factory=list)
+    source_snapshot: Optional[CrashRiskSourceSnapshot] = None
+
+
 class MetricsHistoryResponse(BaseModel):
     rows: List[dict[str, Any]] = Field(default_factory=list)
 
