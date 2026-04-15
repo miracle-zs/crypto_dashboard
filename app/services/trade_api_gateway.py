@@ -14,8 +14,12 @@ def fetch_income_history(
     endpoint = "/fapi/v1/income"
     records: List[Dict] = []
     current_start = since
+    seen_tran_ids = set()
+    max_iterations = 10000  # Safety limit to prevent infinite loops
+    iterations = 0
 
-    while True:
+    while iterations < max_iterations:
+        iterations += 1
         params = {
             "startTime": current_start,
             "endTime": until,
@@ -27,19 +31,44 @@ def fetch_income_history(
         if not batch:
             break
 
-        records.extend(batch)
+        # Deduplicate by tranId to handle same-timestamp records
+        new_records = []
+        for record in batch:
+            tran_id = record.get("tranId")
+            if tran_id is not None and tran_id not in seen_tran_ids:
+                seen_tran_ids.add(tran_id)
+                new_records.append(record)
+            elif tran_id is None:
+                # Records without tranId are kept (shouldn't happen but be safe)
+                new_records.append(record)
+
+        records.extend(new_records)
         if len(batch) < 1000:
             break
 
         last_time = int(batch[-1]["time"])
+        # Prevent infinite loop if last_time doesn't advance
+        if last_time + 1 <= current_start:
+            logger.warning(
+                f"Income history pagination stuck at timestamp {last_time}, "
+                f"breaking to prevent infinite loop"
+            )
+            break
         current_start = last_time + 1
         time.sleep(0.2)
+
+    if iterations >= max_iterations:
+        logger.warning(
+            f"Income history hit max iterations ({max_iterations}), "
+            f"may have incomplete data"
+        )
 
     return records
 
 
 def fetch_account_balance(*, client) -> Optional[Dict[str, float]]:
-    endpoint = "/fapi/v2/account"
+    # v3 endpoint returns same top-level balance fields with better performance
+    endpoint = "/fapi/v3/account"
     account_info = client.signed_get(endpoint)
     if account_info:
         return {
@@ -133,7 +162,8 @@ def fetch_all_orders(
 
 
 def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:
-    endpoint = "/fapi/v2/positionRisk"
+    # v3 endpoint returns positions with open orders/positions only, better performance
+    endpoint = "/fapi/v3/positionRisk"
     try:
         positions = client.signed_get(endpoint)
         if positions is None:

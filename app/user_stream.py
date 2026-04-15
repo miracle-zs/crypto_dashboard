@@ -83,7 +83,12 @@ class BinanceUserDataStream:
             time.sleep(30 * 60)
             try:
                 url = f"{self.rest_base_url}/fapi/v1/listenKey"
-                response = requests.put(url, headers={"X-MBX-APIKEY": self.api_key}, timeout=10)
+                response = requests.put(
+                    url,
+                    headers={"X-MBX-APIKEY": self.api_key},
+                    params={"listenKey": self.listen_key},
+                    timeout=10,
+                )
                 response.raise_for_status()
                 logger.debug("listenKey keepalive success")
             except Exception as exc:
