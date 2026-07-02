@@ -100,6 +100,8 @@ def run_sync_open_positions(
                 since_ms = previous_entry_time_by_key.get(key)
                 if since_ms is None:
                     continue
+                overlap_ms = int(getattr(scheduler, "symbol_sync_overlap_minutes", 0) or 0) * 60 * 1000
+                since_ms = max(0, since_ms - overlap_ms)
                 previous_since = closed_symbol_since_ms.get(symbol)
                 closed_symbol_since_ms[symbol] = since_ms if previous_since is None else min(previous_since, since_ms)
             if closed_symbols:

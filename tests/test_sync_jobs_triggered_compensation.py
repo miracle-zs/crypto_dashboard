@@ -31,6 +31,7 @@ class _FakeScheduler:
         self.processor = _FakeProcessor(current_rows)
         self.sync_repo = _FakeSyncRepo(previous_rows)
         self.open_positions_lookback_days = 3
+        self.symbol_sync_overlap_minutes = 1440
         self.profit_alert_threshold_pct = 20.0
         self.requested_symbols = []
 
@@ -71,6 +72,7 @@ def test_run_sync_open_positions_triggers_compensation_for_closed_symbols():
     assert scheduler.requested_symbols[0][0] == ["BTCUSDT"]
     assert scheduler.requested_symbols[0][1] == "open_position_closed"
     assert "BTCUSDT" in scheduler.requested_symbols[0][2]
+    assert scheduler.requested_symbols[0][2]["BTCUSDT"] < 1771552800000
 
 
 def test_run_sync_open_positions_does_not_trigger_when_no_closed_positions():

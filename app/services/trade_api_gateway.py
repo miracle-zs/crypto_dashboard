@@ -128,6 +128,11 @@ def fetch_all_orders(
 
             batch = client.signed_get(endpoint, params)
             if batch is None:
+                if current_end < end_time:
+                    logger.warning(
+                        f"allOrders request failed for {symbol}, skipping window=[{window_start},{current_end}]"
+                    )
+                    break
                 if fail_on_error:
                     raise RuntimeError(f"allOrders request failed for {symbol}, window=[{window_start},{current_end}]")
                 batch = []
