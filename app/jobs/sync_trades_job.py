@@ -107,13 +107,29 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
             until=until,
         )
 
+        if failure_symbols:
+            failed_count = len(failure_symbols)
+            success_count = len(success_symbols)
+            run_status = "partial" if success_count else "error"
+            error_msg = (
+                f"部分币种同步失败: success={success_count}, failed={failed_count}"
+                if success_count
+                else f"全部币种同步失败: failed={failed_count}"
+            )
+        else:
+            run_status = "success"
+            error_msg = None
+
         # 检查持仓超时告警
         stage_started = time.perf_counter()
         scheduler.check_long_held_positions()
         risk_check_elapsed = time.perf_counter() - stage_started
 
         # 更新同步状态
-        scheduler.sync_repo.update_sync_status(status="idle")
+        scheduler.sync_repo.update_sync_status(
+            status="idle" if run_status == "success" else run_status,
+            error_message=error_msg,
+        )
 
         # 显示统计信息
         stats = scheduler.sync_repo.get_statistics()
@@ -136,15 +152,16 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
         scheduler.sync_repo.log_sync_run(
             run_type="trades_sync",
             mode="full" if force_full else "incremental",
-            status="success",
+            status=run_status,
             symbol_count=symbol_count,
             rows_count=len(df),
             trades_saved=trades_saved,
             open_saved=open_saved,
             elapsed_ms=int(total_elapsed * 1000),
+            error_message=error_msg,
         )
         logger.info("=" * 50)
-        return True
+        return run_status == "success"
 
     except Exception as exc:
         error_msg = f"同步失败: {str(exc)}"

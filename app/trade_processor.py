@@ -42,6 +42,7 @@ from app.services.trade_etl_service import (
 from app.services.trade_income_aggregation import (
     aggregate_fee_totals_by_symbol,
     summarize_income_records,
+    summarize_income_records_with_ranges,
 )
 from app.services.trade_price_service import (
     calc_utc_day_start,
@@ -167,10 +168,17 @@ class TradeDataProcessor:
         until: int,
         client: Optional[BinanceFuturesRestClient] = None,
         income_type: Optional[str] = None,
+        fail_on_error: bool = False,
     ) -> List[Dict]:
         """Fetch income history once in a paginated way for a time window."""
         client = client or self.client
-        return fetch_income_history(client=client, since=since, until=until, income_type=income_type)
+        return fetch_income_history(
+            client=client,
+            since=since,
+            until=until,
+            income_type=income_type,
+            fail_on_error=fail_on_error,
+        )
 
     def get_transfer_income_records(self, start_time: int, end_time: Optional[int] = None) -> List[Dict]:
         """
@@ -414,11 +422,31 @@ class TradeDataProcessor:
         client: Optional[BinanceFuturesRestClient] = None
     ) -> tuple[List[str], Dict[str, float]]:
         """Fetch traded symbols and fee totals in one income-history pass."""
+        symbols_list, fee_totals, _activity_ranges = self.get_traded_symbols_fee_totals_and_ranges(
+            since=since,
+            until=until,
+            client=client,
+        )
+
+        return symbols_list, fee_totals
+
+    def get_traded_symbols_fee_totals_and_ranges(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None,
+    ) -> tuple[List[str], Dict[str, float], Dict[str, tuple[int, int]]]:
         client = client or self.client
         logger.info("Fetching traded symbols from income history...")
-        result = self._fetch_income_history(since=since, until=until, client=client)
-        symbols_list, fee_totals = self._summarize_income_records(
-            result, extra_loss_income_types=self.extra_loss_income_types
+        result = self._fetch_income_history(
+            since=since,
+            until=until,
+            client=client,
+            fail_on_error=True,
+        )
+        symbols_list, fee_totals, activity_ranges = summarize_income_records_with_ranges(
+            result,
+            extra_loss_income_types=self.extra_loss_income_types,
         )
 
         if symbols_list:
@@ -426,7 +454,7 @@ class TradeDataProcessor:
         else:
             logger.warning("No symbols found in income history")
 
-        return symbols_list, fee_totals
+        return symbols_list, fee_totals, activity_ranges
 
     def _extract_symbol_closed_positions(
         self,
@@ -453,6 +481,7 @@ class TradeDataProcessor:
         traded_symbols: Optional[List[str]] = None,
         use_time_filter: bool = True,
         symbol_since_map: Optional[Dict[str, int]] = None,
+        symbol_until_map: Optional[Dict[str, int]] = None,
         prefetched_fee_totals: Optional[Dict[str, float]] = None,
         return_symbol_status: bool = False,
     ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
@@ -464,6 +493,7 @@ class TradeDataProcessor:
             traded_symbols=traded_symbols,
             use_time_filter=use_time_filter,
             symbol_since_map=symbol_since_map,
+            symbol_until_map=symbol_until_map,
             prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=return_symbol_status,
         )

@@ -63,3 +63,30 @@ def test_is_liquidation_order_by_client_order_id():
     assert is_liquidation_order({"clientOrderId": "autoclose-abc"}) is True
     assert is_liquidation_order({"clientOrderId": "adl_autoclose_x"}) is True
     assert is_liquidation_order({"clientOrderId": "manual-entry"}) is False
+
+
+def test_match_one_way_short_round_trip():
+    orders = [
+        {
+            "orderId": 1,
+            "side": "SELL",
+            "positionSide": "BOTH",
+            "executedQty": "2",
+            "avgPrice": "100",
+            "updateTime": 1000,
+        },
+        {
+            "orderId": 2,
+            "side": "BUY",
+            "positionSide": "BOTH",
+            "executedQty": "2",
+            "avgPrice": "90",
+            "updateTime": 2000,
+        },
+    ]
+
+    result = match_orders_to_positions(orders, "BTCUSDT", presorted=True)
+
+    assert len(result) == 1
+    assert result[0]["side"] == "SHORT"
+    assert result[0]["pnl_before_fees"] == 20

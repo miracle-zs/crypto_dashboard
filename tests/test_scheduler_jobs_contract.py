@@ -323,7 +323,7 @@ def test_sync_trades_data_uses_batch_watermark_updates(monkeypatch):
     monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
     monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
 
-    assert scheduler._sync_trades_data_impl(force_full=False) is True
+    assert scheduler._sync_trades_data_impl(force_full=False) is False
     assert len(fake_repo.success_batch_calls) == 1
     assert len(fake_repo.failure_batch_calls) == 1
 
@@ -373,6 +373,39 @@ def test_sync_trades_data_prefers_single_income_pass_api(monkeypatch):
     monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
 
     assert scheduler._sync_trades_data_impl(force_full=False) is True
+
+
+def test_full_sync_crops_each_symbol_to_income_activity_range():
+    from types import SimpleNamespace
+
+    from app.jobs.sync_pipeline_jobs import fetch_and_analyze_closed_trades
+
+    captured = {}
+
+    class FakeProcessor:
+        def get_traded_symbols_fee_totals_and_ranges(self, since, until):
+            return ["BTCUSDT"], {"BTCUSDT": -1.0}, {"BTCUSDT": (200_000, 300_000)}
+
+        def analyze_orders(self, **kwargs):
+            captured.update(kwargs)
+            return (__import__("pandas").DataFrame(), ["BTCUSDT"], {})
+
+    scheduler = SimpleNamespace(
+        processor=FakeProcessor(),
+        sync_repo=SimpleNamespace(),
+        symbol_sync_overlap_minutes=1,
+        use_time_filter=True,
+    )
+
+    fetch_and_analyze_closed_trades(
+        scheduler,
+        since=100_000,
+        until=500_000,
+        is_full_sync_run=True,
+    )
+
+    assert captured["symbol_since_map"] == {"BTCUSDT": 140_000}
+    assert captured["symbol_until_map"] == {"BTCUSDT": 360_000}
 
 
 def test_request_trades_compensation_merges_symbols_with_earliest_since(monkeypatch):

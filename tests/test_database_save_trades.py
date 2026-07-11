@@ -3,14 +3,14 @@ import pandas as pd
 from app.database import Database
 
 
-def _trade_row(entry_time: str, pnl: float, entry_order_id: int, exit_order_id: str):
+def _trade_row(entry_time: str, pnl: float, entry_order_id: int, exit_order_id: str, symbol: str = "BTC"):
     return {
         "No": 1,
         "Date": "20260221",
         "Entry_Time": entry_time,
         "Exit_Time": "2026-02-21 10:15:00",
         "Holding_Time": "15分0秒",
-        "Symbol": "BTC",
+        "Symbol": symbol,
         "Side": "LONG",
         "Price_Change_Pct": 0.1,
         "Entry_Amount": 1000,
@@ -75,3 +75,26 @@ def test_save_trades_overwrite_replaces_time_window_only(tmp_path):
     }
     middle_row = [row for row in rows if str(row["entry_time"]) == "2026-02-21 10:00:00"][0]
     assert int(middle_row["entry_order_id"]) == 7
+
+
+def test_save_trades_overwrite_does_not_delete_other_symbols(tmp_path):
+    db = Database(db_path=str(tmp_path / "save_trades_symbol_scope.db"))
+    entry_time = "2026-02-21 10:00:00"
+    db.save_trades(
+        pd.DataFrame(
+            [
+                _trade_row(entry_time, 10, 1, "2", symbol="BTC"),
+                _trade_row(entry_time, 20, 3, "4", symbol="ETH"),
+            ]
+        )
+    )
+
+    db.save_trades(
+        pd.DataFrame([_trade_row(entry_time, 88, 7, "8", symbol="BTC")]),
+        overwrite=True,
+    )
+
+    conn = db._get_connection()
+    rows = conn.execute("SELECT symbol, entry_order_id FROM trades ORDER BY symbol").fetchall()
+    conn.close()
+    assert [(row["symbol"], row["entry_order_id"]) for row in rows] == [("BTC", 7), ("ETH", 3)]

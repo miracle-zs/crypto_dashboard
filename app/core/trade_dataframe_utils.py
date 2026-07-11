@@ -1,5 +1,7 @@
 import pandas as pd
 
+from app.core.trade_position_utils import format_holding_time_cn
+
 
 def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
     """Merge positions with same symbol and entry time."""
@@ -7,10 +9,11 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     local_df = df.copy()
-    local_df["Entry_Time_Key"] = pd.to_datetime(local_df["Entry_Time"]).dt.floor("min")
     merged_data = []
 
-    for (symbol, side, entry_time_key), group in local_df.groupby(["Symbol", "Side", "Entry_Time_Key"]):
+    for (symbol, side, entry_order_id), group in local_df.groupby(
+        ["Symbol", "Side", "Entry_Order_ID"], dropna=False
+    ):
         if len(group) == 1:
             row = group.iloc[0].to_dict()
             merged_data.append(row)
@@ -26,13 +29,16 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
         close_type_merged = "爆仓" if has_liquidation else ("止盈" if pnl_net_merged > 0 else "止损")
         return_rate_raw_merged = (pnl_net_merged / entry_amount_merged * 100) if entry_amount_merged != 0 else 0
         return_rate_merged = f"{return_rate_raw_merged:.2f}%"
+        entry_time = pd.to_datetime(group["Entry_Time"]).min()
+        exit_time = pd.to_datetime(group["Exit_Time"]).max()
+        holding_time = format_holding_time_cn((exit_time - entry_time).total_seconds())
 
         merged_row = {
             "No": group.iloc[0]["No"],
             "Date": group.iloc[0]["Date"],
-            "Entry_Time": group.iloc[0]["Entry_Time"],
-            "Exit_Time": group.iloc[0]["Exit_Time"],
-            "Holding_Time": group.iloc[0]["Holding_Time"],
+            "Entry_Time": entry_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "Exit_Time": exit_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "Holding_Time": holding_time,
             "Symbol": symbol,
             "Side": side,
             "Price_Change_Pct": group.iloc[0]["Price_Change_Pct"],
@@ -46,15 +52,12 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
             "Return_Rate": return_rate_merged,
             "Open_Price": group.iloc[0]["Open_Price"],
             "PNL_Before_Fees": round(group["PNL_Before_Fees"].sum(), 2),
-            "Entry_Order_ID": group.iloc[0]["Entry_Order_ID"],
+            "Entry_Order_ID": entry_order_id,
             "Exit_Order_ID": ",".join(group["Exit_Order_ID"].astype(str).unique()),
-            "Entry_Time_Key": entry_time_key,
         }
         merged_data.append(merged_row)
 
     merged_df = pd.DataFrame(merged_data)
-    if "Entry_Time_Key" in merged_df.columns:
-        merged_df = merged_df.drop("Entry_Time_Key", axis=1)
     merged_df = merged_df.sort_values("Entry_Time", ascending=True).reset_index(drop=True)
     merged_df["No"] = range(1, len(merged_df) + 1)
     return merged_df

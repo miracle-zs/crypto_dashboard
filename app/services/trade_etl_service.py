@@ -36,6 +36,7 @@ def extract_symbol_closed_positions(
             start_time=None,
             end_time=None,
             client=worker_client,
+            fail_on_error=True,
         )
 
     if not orders:
@@ -100,6 +101,7 @@ def _collect_positions_for_symbols(
     until: int,
     use_time_filter: bool,
     symbol_since_map: Optional[Dict[str, int]],
+    symbol_until_map: Optional[Dict[str, int]],
     fee_totals_by_symbol: Dict[str, float],
     worker_count: int,
 ) -> tuple[List[Dict], List[str], Dict[str, str], int, int, List[tuple[str, float, int]]]:
@@ -115,10 +117,11 @@ def _collect_positions_for_symbols(
             logger.info(f"[{idx}/{len(symbols)}] Processing {symbol}...")
             try:
                 symbol_since = symbol_since_map.get(symbol, since) if symbol_since_map else since
+                symbol_until = symbol_until_map.get(symbol, until) if symbol_until_map else until
                 positions, elapsed = processor._extract_symbol_closed_positions(
                     symbol=symbol,
                     since=symbol_since,
-                    until=until,
+                    until=symbol_until,
                     use_time_filter=use_time_filter,
                     fee_totals_by_symbol=fee_totals_by_symbol,
                 )
@@ -139,7 +142,7 @@ def _collect_positions_for_symbols(
                     processor._extract_symbol_closed_positions,
                     symbol,
                     symbol_since_map.get(symbol, since) if symbol_since_map else since,
-                    until,
+                    symbol_until_map.get(symbol, until) if symbol_until_map else until,
                     use_time_filter,
                     fee_totals_by_symbol,
                 ): symbol
@@ -221,6 +224,7 @@ def analyze_orders(
     traded_symbols: Optional[List[str]] = None,
     use_time_filter: bool = True,
     symbol_since_map: Optional[Dict[str, int]] = None,
+    symbol_until_map: Optional[Dict[str, int]] = None,
     prefetched_fee_totals: Optional[Dict[str, float]] = None,
     return_symbol_status: bool = False,
 ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
@@ -265,6 +269,7 @@ def analyze_orders(
         until=until,
         use_time_filter=use_time_filter,
         symbol_since_map=symbol_since_map,
+        symbol_until_map=symbol_until_map,
         fee_totals_by_symbol=fee_totals_by_symbol,
         worker_count=worker_count,
     )
@@ -320,6 +325,7 @@ def extract_open_positions_for_symbol(
         start_time=since,
         end_time=until,
         client=worker_client,
+        fail_on_error=True,
     )
     if not orders:
         return [], time.perf_counter() - started_at
@@ -327,6 +333,7 @@ def extract_open_positions_for_symbol(
     filled_orders = [order for order in orders if float(order["executedQty"]) > 0 and order["updateTime"] >= since]
     long_entries = []
     short_entries = []
+    one_way_entries = []
 
     for order in sorted(filled_orders, key=lambda item: item["updateTime"]):
         side = order["side"]
@@ -336,9 +343,32 @@ def extract_open_positions_for_symbol(
         order_time = order["updateTime"]
         order_id = order["orderId"]
 
-        if (position_side == "LONG" and side == "BUY") or (position_side == "BOTH" and side == "BUY"):
+        if position_side == "BOTH":
+            incoming_side = "LONG" if side == "BUY" else "SHORT"
+            closing_side = "SHORT" if incoming_side == "LONG" else "LONG"
+            remaining = qty
+            while remaining > 0 and one_way_entries and one_way_entries[0]["side"] == closing_side:
+                entry = one_way_entries[0]
+                close_qty = min(remaining, entry["qty"])
+                entry["qty"] -= close_qty
+                remaining -= close_qty
+                if entry["qty"] <= 0.0001:
+                    one_way_entries.pop(0)
+            if remaining > 0:
+                one_way_entries.append(
+                    {
+                        "side": incoming_side,
+                        "price": price,
+                        "qty": remaining,
+                        "time": order_time,
+                        "order_id": order_id,
+                    }
+                )
+            continue
+
+        if position_side == "LONG" and side == "BUY":
             long_entries.append({"price": price, "qty": qty, "time": order_time, "order_id": order_id})
-        elif (position_side == "LONG" and side == "SELL") or (position_side == "BOTH" and side == "SELL"):
+        elif position_side == "LONG" and side == "SELL":
             processor._consume_fifo_entries(long_entries, qty)
 
         if position_side == "SHORT" and side == "SELL":
@@ -348,6 +378,8 @@ def extract_open_positions_for_symbol(
 
     final_entries = []
     if real_net_qty > 0:
+        if one_way_entries:
+            long_entries = [entry for entry in one_way_entries if entry["side"] == "LONG"]
         calculated_qty = sum(entry["qty"] for entry in long_entries)
         if abs(calculated_qty - real_net_qty) > 0.0001:
             logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc={calculated_qty}. Adjusting to Real.")
@@ -355,6 +387,8 @@ def extract_open_positions_for_symbol(
                 processor._trim_entries_to_target_qty(long_entries, real_net_qty)
         final_entries = long_entries
     elif real_net_qty < 0:
+        if one_way_entries:
+            short_entries = [entry for entry in one_way_entries if entry["side"] == "SHORT"]
         abs_real_qty = abs(real_net_qty)
         calculated_qty = sum(entry["qty"] for entry in short_entries)
         if abs(calculated_qty - abs_real_qty) > 0.0001:
@@ -423,7 +457,7 @@ def get_open_positions(
                 f"Open ETL stats: success={success_count}, failed={failure_count}, "
                 f"workers={worker_count}, slowest=[{slowest_str}]"
             )
-        return open_positions
+        return None if failure_count else open_positions
 
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_map = {
@@ -454,4 +488,4 @@ def get_open_positions(
             f"Open ETL stats: success={success_count}, failed={failure_count}, "
             f"workers={worker_count}, slowest=[{slowest_str}]"
         )
-    return open_positions
+    return None if failure_count else open_positions

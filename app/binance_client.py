@@ -80,7 +80,9 @@ class BinanceFuturesRestClient:
                     continue
             cls._request_budget_enabled = True
             cls._request_budget_per_minute = capacity
-            cls._request_budget_tokens = float(capacity)
+            # Start empty to avoid a full-capacity burst colliding with requests
+            # already counted by Binance in the current rolling minute.
+            cls._request_budget_tokens = 0.0
             cls._request_budget_last_refill_ts = time.monotonic()
             cls._request_budget_path_weights = clean_weights
 

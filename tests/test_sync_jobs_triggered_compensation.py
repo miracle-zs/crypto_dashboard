@@ -6,6 +6,8 @@ class _FakeProcessor:
         self._open_positions = open_positions
 
     def get_open_positions(self, since, until, traded_symbols=None):
+        if self._open_positions is None:
+            return None
         return list(self._open_positions)
 
 
@@ -86,4 +88,15 @@ def test_run_sync_open_positions_does_not_trigger_when_no_closed_positions():
 
     run_sync_open_positions(scheduler)
 
+    assert scheduler.requested_symbols == []
+
+
+def test_run_sync_open_positions_preserves_snapshot_when_fetch_fails():
+    previous_rows = [{"symbol": "BTCUSDT", "order_id": 1}]
+    scheduler = _FakeScheduler(previous_rows, [])
+    scheduler.processor = _FakeProcessor(None)
+
+    run_sync_open_positions(scheduler)
+
+    assert scheduler.sync_repo.saved_rows is None
     assert scheduler.requested_symbols == []

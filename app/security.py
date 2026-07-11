@@ -8,7 +8,7 @@ from fastapi import Header, HTTPException
 def require_admin_token(x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")) -> None:
     expected = os.getenv("DASHBOARD_ADMIN_TOKEN", "")
     if not expected:
-        return
+        raise HTTPException(status_code=503, detail="DASHBOARD_ADMIN_TOKEN is not configured")
 
     provided = x_admin_token or ""
     if not secrets.compare_digest(provided, expected):

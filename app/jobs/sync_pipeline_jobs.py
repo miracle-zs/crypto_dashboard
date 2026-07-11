@@ -58,7 +58,12 @@ def fetch_and_analyze_closed_trades(
     logger.info("从Binance API抓取数据...")
     stage_started = time.perf_counter()
     prefetched_fee_totals = None
-    if hasattr(scheduler.processor, "get_traded_symbols_and_fee_totals"):
+    symbol_activity_ranges = {}
+    if hasattr(scheduler.processor, "get_traded_symbols_fee_totals_and_ranges"):
+        traded_symbols, prefetched_fee_totals, symbol_activity_ranges = (
+            scheduler.processor.get_traded_symbols_fee_totals_and_ranges(since, until)
+        )
+    elif hasattr(scheduler.processor, "get_traded_symbols_and_fee_totals"):
         traded_symbols, prefetched_fee_totals = scheduler.processor.get_traded_symbols_and_fee_totals(since, until)
     else:
         traded_symbols = scheduler.processor.get_traded_symbols(since, until)
@@ -68,6 +73,7 @@ def fetch_and_analyze_closed_trades(
 
     stage_started = time.perf_counter()
     symbol_since_map = None
+    symbol_until_map = None
     if not is_full_sync_run and traded_symbols:
         watermarks = scheduler.sync_repo.get_symbol_sync_watermarks(traded_symbols)
         symbol_since_map, warmed_symbols = build_symbol_since_map(
@@ -83,6 +89,22 @@ def fetch_and_analyze_closed_trades(
             f"cold={len(traded_symbols) - warmed_symbols}, "
             f"overlap_minutes={scheduler.symbol_sync_overlap_minutes}"
         )
+    elif is_full_sync_run and traded_symbols and symbol_activity_ranges:
+        overlap_ms = int(scheduler.symbol_sync_overlap_minutes) * 60 * 1000
+        symbol_since_map = {
+            symbol: max(since, int(symbol_activity_ranges[symbol][0]) - overlap_ms)
+            for symbol in traded_symbols
+            if symbol in symbol_activity_ranges
+        }
+        symbol_until_map = {
+            symbol: min(until, int(symbol_activity_ranges[symbol][1]) + overlap_ms)
+            for symbol in traded_symbols
+            if symbol in symbol_activity_ranges
+        }
+        logger.info(
+            "全量同步按币种活动区间裁剪: "
+            f"symbols={len(symbol_since_map)}, overlap_minutes={scheduler.symbol_sync_overlap_minutes}"
+        )
 
     if traded_symbols:
         analysis_result = scheduler.processor.analyze_orders(
@@ -91,6 +113,7 @@ def fetch_and_analyze_closed_trades(
             traded_symbols=traded_symbols,
             use_time_filter=scheduler.use_time_filter,
             symbol_since_map=symbol_since_map,
+            symbol_until_map=symbol_until_map,
             prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=True,
         )

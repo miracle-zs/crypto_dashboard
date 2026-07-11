@@ -10,7 +10,7 @@ service = SystemApiService()
 
 
 @router.get("/api/logs", response_model=LogsResponse)
-async def get_logs(lines: int = Query(200, description="Number of log lines to return")):
+async def get_logs(lines: int = Query(200, ge=1, le=5000, description="Number of log lines to return")):
     return await service.get_logs(lines=lines)
 
 

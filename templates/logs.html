@@ -526,6 +526,15 @@
             }
         }
 
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function renderLogs() {
             const container = document.getElementById('logContainer');
             const levelFilter = document.getElementById('levelFilter').value;
@@ -557,7 +566,7 @@
                 else if (line.includes('| DEBUG')) levelClass = 'log-debug';
 
                 // 高亮时间戳
-                const formatted = line
+                const formatted = escapeHtml(line)
                     .replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/, '<span class="log-time">$1</span>')
                     .replace(/\| (INFO|WARN|ERROR|DEBUG)/, '| <span class="log-level">$1</span>');
 

@@ -193,6 +193,9 @@ NOON_REVIEW_MINUTE=2
 
 # API任务互斥锁等待秒数（默认8；0=关闭互斥锁）
 API_JOB_LOCK_WAIT_SECONDS=8
+
+# 管理写接口鉴权（生产环境必须配置）
+DASHBOARD_ADMIN_TOKEN=replace-with-a-strong-random-token
 ```
 
 说明：
@@ -201,7 +204,7 @@ API_JOB_LOCK_WAIT_SECONDS=8
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
 - 启用 `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 后，交易增量会采用“低频兜底 + 触发补偿”模式，建议将 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 设为 `1440`（每天一次）。
 - `TRADES_COMPENSATION_LOOKBACK_MINUTES` 仅在触发补偿未提供 symbol 级精确起点时生效。
-- 可选设置 `DASHBOARD_ADMIN_TOKEN` 为写接口开启鉴权；开启后需在请求头传 `X-Admin-Token`。
+- 必须设置 `DASHBOARD_ADMIN_TOKEN` 才能使用写接口；前端会在首次写操作时提示输入，并在当前标签页保存。
 
 ### 3. 运行
 ```bash

@@ -66,6 +66,61 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
     return positions
 
 
+def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
+    """Match positionSide=BOTH orders by tracking the signed net position."""
+    positions = []
+    open_entries = []
+
+    for order in orders:
+        order_side = order["side"]
+        incoming_side = "LONG" if order_side == "BUY" else "SHORT"
+        closing_side = "SHORT" if incoming_side == "LONG" else "LONG"
+        remaining = order["qty"]
+
+        while remaining > 0 and open_entries and open_entries[0]["side"] == closing_side:
+            entry = open_entries[0]
+            close_qty = min(remaining, entry["qty"])
+            if closing_side == "LONG":
+                pnl_before_fees = (order["price"] - entry["price"]) * close_qty
+            else:
+                pnl_before_fees = (entry["price"] - order["price"]) * close_qty
+
+            time_held = order["time"] - entry["time"]
+            positions.append(
+                {
+                    "symbol": symbol,
+                    "side": closing_side,
+                    "entry_price": entry["price"],
+                    "exit_price": order["price"],
+                    "entry_time": entry["time"],
+                    "exit_time": order["time"],
+                    "qty": close_qty,
+                    "pnl_before_fees": pnl_before_fees,
+                    "weight": close_qty * time_held,
+                    "entry_order_id": entry["order_id"],
+                    "exit_order_id": order["order_id"],
+                    "is_liquidation": bool(order.get("is_liquidation", False)),
+                }
+            )
+            entry["qty"] -= close_qty
+            remaining -= close_qty
+            if entry["qty"] <= 0.0001:
+                open_entries.pop(0)
+
+        if remaining > 0:
+            open_entries.append(
+                {
+                    "side": incoming_side,
+                    "price": order["price"],
+                    "qty": remaining,
+                    "time": order["time"],
+                    "order_id": order["order_id"],
+                }
+            )
+
+    return positions
+
+
 def match_orders_to_positions(
     orders: List[Dict],
     symbol: str,
@@ -79,6 +134,7 @@ def match_orders_to_positions(
     total_fees = sum(fees_map.values())
     long_positions = []
     short_positions = []
+    one_way_orders = []
 
     iterable_orders = orders if presorted else sorted(orders, key=lambda x: x["updateTime"])
     for order in iterable_orders:
@@ -92,11 +148,24 @@ def match_orders_to_positions(
         order_time = order["updateTime"]
         liquidation = is_liquidation_order(order)
 
-        if (position_side == "LONG" and side == "BUY") or (position_side == "BOTH" and side == "BUY"):
+        if position_side == "BOTH":
+            one_way_orders.append(
+                {
+                    "side": side,
+                    "price": price,
+                    "qty": qty,
+                    "time": order_time,
+                    "order_id": order["orderId"],
+                    "is_liquidation": liquidation,
+                }
+            )
+            continue
+
+        if position_side == "LONG" and side == "BUY":
             long_positions.append(
                 {"type": "entry", "price": price, "qty": qty, "time": order_time, "order_id": order["orderId"]}
             )
-        elif (position_side == "LONG" and side == "SELL") or (position_side == "BOTH" and side == "SELL"):
+        elif position_side == "LONG" and side == "SELL":
             long_positions.append(
                 {
                     "type": "exit",
@@ -124,8 +193,10 @@ def match_orders_to_positions(
                 }
             )
 
-    all_positions = match_position_side(long_positions, symbol, "LONG") + match_position_side(
-        short_positions, symbol, "SHORT"
+    all_positions = (
+        match_position_side(long_positions, symbol, "LONG")
+        + match_position_side(short_positions, symbol, "SHORT")
+        + match_one_way_orders(one_way_orders, symbol)
     )
 
     if all_positions:

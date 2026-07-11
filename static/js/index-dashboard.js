@@ -15,6 +15,23 @@
         let tradePageHasNext = false;
         let totalTradePages = 1;
 
+        async function adminFetch(url, options = {}) {
+            let token = sessionStorage.getItem('dashboardAdminToken') || '';
+            const send = (value) => fetch(url, {
+                ...options,
+                headers: { ...(options.headers || {}), ...(value ? { 'X-Admin-Token': value } : {}) }
+            });
+            let response = await send(token);
+            if (response.status === 401) {
+                token = window.prompt('请输入管理员 Token') || '';
+                if (token) {
+                    sessionStorage.setItem('dashboardAdminToken', token);
+                    response = await send(token);
+                }
+            }
+            return response;
+        }
+
         function toggleTradeLogMobile() {
             tradeLogMobileExpanded = !tradeLogMobileExpanded;
             renderTable(latestTrades);
@@ -862,7 +879,7 @@
             }
 
             try {
-                const res = await fetch(`/api/monthly-target?target=${target}`, {
+                const res = await adminFetch(`/api/monthly-target?target=${target}`, {
                     method: 'POST'
                 });
 
@@ -907,4 +924,3 @@
 
         // Initialize Theme
         applyTheme(isDarkMode);
-

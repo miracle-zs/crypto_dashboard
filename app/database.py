@@ -74,17 +74,17 @@ class Database:
         try:
             cursor = conn.cursor()
 
-            if overwrite:
-                # 获取数据的时间范围，只删除该范围内的旧数据
-                if 'Entry_Time' in df.columns:
-                    min_time = df['Entry_Time'].min()
-                    max_time = df['Entry_Time'].max()
-                    logger.info(f"覆盖模式: 删除 {min_time} 至 {max_time} 期间的旧记录...")
-                    cursor.execute("DELETE FROM trades WHERE entry_time >= ? AND entry_time <= ?", (min_time, max_time))
-                else:
-                    # 如果没有时间字段，甚至可以考虑清空全表（视需求而定，这里保守一点只清空相关的Symbol）
-                    # 但既然是overwrite模式且通常用于全量同步，按时间删是最安全的
-                    pass
+            if overwrite and {'Symbol', 'Entry_Time'}.issubset(df.columns):
+                delete_windows = []
+                for symbol, group in df.groupby('Symbol'):
+                    min_time = group['Entry_Time'].min()
+                    max_time = group['Entry_Time'].max()
+                    delete_windows.append((str(symbol), min_time, max_time))
+                logger.info(f"覆盖模式: 按币种替换 {len(delete_windows)} 个时间窗口")
+                cursor.executemany(
+                    "DELETE FROM trades WHERE symbol = ? AND entry_time >= ? AND entry_time <= ?",
+                    delete_windows,
+                )
 
             upsert_rows = []
             for row in df.itertuples(index=False):

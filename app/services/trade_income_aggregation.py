@@ -29,6 +29,30 @@ def summarize_income_records(
     return list(symbols), fee_totals
 
 
+def summarize_income_records_with_ranges(
+    records: List[Dict], extra_loss_income_types: Optional[set[str]] = None
+) -> Tuple[List[str], Dict[str, float], Dict[str, tuple[int, int]]]:
+    symbols, fee_totals = summarize_income_records(
+        records,
+        extra_loss_income_types=extra_loss_income_types,
+    )
+    activity_ranges: Dict[str, tuple[int, int]] = {}
+    for record in records:
+        symbol = record.get("symbol")
+        if not symbol:
+            continue
+        try:
+            event_time = int(record.get("time"))
+        except (TypeError, ValueError):
+            continue
+        current = activity_ranges.get(symbol)
+        if current is None:
+            activity_ranges[symbol] = (event_time, event_time)
+        else:
+            activity_ranges[symbol] = (min(current[0], event_time), max(current[1], event_time))
+    return symbols, fee_totals, activity_ranges
+
+
 def aggregate_fee_totals_by_symbol(
     records: List[Dict], extra_loss_income_types: Optional[set[str]] = None
 ) -> Dict[str, float]:

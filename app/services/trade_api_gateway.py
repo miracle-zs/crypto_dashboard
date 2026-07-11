@@ -10,6 +10,7 @@ def fetch_income_history(
     since: int,
     until: int,
     income_type: Optional[str] = None,
+    fail_on_error: bool = False,
 ) -> List[Dict]:
     endpoint = "/fapi/v1/income"
     records: List[Dict] = []
@@ -28,6 +29,12 @@ def fetch_income_history(
         if income_type:
             params["incomeType"] = income_type
         batch = client.signed_get(endpoint, params)
+        if batch is None:
+            if fail_on_error:
+                raise RuntimeError(
+                    f"income request failed, window=[{current_start},{until}], income_type={income_type or 'ALL'}"
+                )
+            break
         if not batch:
             break
 
@@ -128,11 +135,6 @@ def fetch_all_orders(
 
             batch = client.signed_get(endpoint, params)
             if batch is None:
-                if current_end < end_time:
-                    logger.warning(
-                        f"allOrders request failed for {symbol}, skipping window=[{window_start},{current_end}]"
-                    )
-                    break
                 if fail_on_error:
                     raise RuntimeError(f"allOrders request failed for {symbol}, window=[{window_start},{current_end}]")
                 batch = []

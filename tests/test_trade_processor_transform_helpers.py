@@ -112,7 +112,7 @@ def test_merge_same_entry_positions_preserves_liquidation_close_type():
             {
                 "No": 2,
                 "Date": "20260225",
-                "Entry_Time": "2026-02-25 10:00:20",
+                "Entry_Time": "2026-02-25 10:00:00",
                 "Exit_Time": "2026-02-25 10:30:20",
                 "Holding_Time": "30分0秒",
                 "Symbol": "BTC",
@@ -128,7 +128,7 @@ def test_merge_same_entry_positions_preserves_liquidation_close_type():
                 "Return_Rate": "-8.10%",
                 "Open_Price": 95.0,
                 "PNL_Before_Fees": -16.0,
-                "Entry_Order_ID": 3,
+                "Entry_Order_ID": 1,
                 "Exit_Order_ID": "4",
             },
         ]
@@ -138,3 +138,39 @@ def test_merge_same_entry_positions_preserves_liquidation_close_type():
 
     assert len(merged) == 1
     assert merged.iloc[0]["Close_Type"] == "爆仓"
+    assert merged.iloc[0]["Exit_Time"] == "2026-02-25 10:30:20"
+
+
+def test_merge_same_minute_keeps_distinct_entry_orders():
+    processor = TradeDataProcessor.__new__(TradeDataProcessor)
+    rows = []
+    for order_id, second in ((1, 0), (3, 20)):
+        rows.append(
+            {
+                "No": order_id,
+                "Date": "20260225",
+                "Entry_Time": f"2026-02-25 10:00:{second:02d}",
+                "Exit_Time": "2026-02-25 10:30:00",
+                "Holding_Time": "30分0秒",
+                "Symbol": "BTC",
+                "Side": "LONG",
+                "Price_Change_Pct": 0.0,
+                "Entry_Amount": 100.0,
+                "Entry_Price": 100.0,
+                "Exit_Price": 101.0,
+                "Qty": 1.0,
+                "Fees": -0.1,
+                "PNL_Net": 0.9,
+                "Close_Type": "止盈",
+                "Return_Rate": "0.90%",
+                "Open_Price": 95.0,
+                "PNL_Before_Fees": 1.0,
+                "Entry_Order_ID": order_id,
+                "Exit_Order_ID": str(order_id + 1),
+            }
+        )
+
+    merged = processor.merge_same_entry_positions(pd.DataFrame(rows))
+
+    assert len(merged) == 2
+    assert set(merged["Entry_Order_ID"]) == {1, 3}

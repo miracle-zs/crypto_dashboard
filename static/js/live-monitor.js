@@ -45,6 +45,23 @@
         const noonLossCheckTimeLabel = monitorConfig.noonLossCheckTimeLabel || '11:50';
         const noonReviewTimeLabel = monitorConfig.noonReviewTimeLabel || '23:02';
 
+        async function adminFetch(url, options = {}) {
+            let token = sessionStorage.getItem('dashboardAdminToken') || '';
+            const send = (value) => fetch(url, {
+                ...options,
+                headers: { ...(options.headers || {}), ...(value ? { 'X-Admin-Token': value } : {}) }
+            });
+            let response = await send(token);
+            if (response.status === 401) {
+                token = window.prompt('请输入管理员 Token') || '';
+                if (token) {
+                    sessionStorage.setItem('dashboardAdminToken', token);
+                    response = await send(token);
+                }
+            }
+            return response;
+        }
+
         function getDailyTargetValue() {
             const value = Number(equityDailyTargetInput?.value);
             if (!Number.isFinite(value) || value < 0) return 1000;
@@ -1072,7 +1089,7 @@
             }
 
             try {
-                const response = await fetch(`/api/watch-notes?symbol=${encodeURIComponent(symbol)}`, {
+                const response = await adminFetch(`/api/watch-notes?symbol=${encodeURIComponent(symbol)}`, {
                     method: 'POST'
                 });
                 const payload = await response.json().catch(() => ({}));
@@ -1102,7 +1119,7 @@
             }
 
             try {
-                const response = await fetch(`/api/watch-notes/${safeId}`, {
+                const response = await adminFetch(`/api/watch-notes/${safeId}`, {
                     method: 'DELETE'
                 });
                 const payload = await response.json().catch(() => ({}));
@@ -1374,7 +1391,7 @@
 
         async function toggleLongTerm(symbol, orderId, isLongTerm) {
             try {
-                const response = await fetch(`/api/positions/set-long-term?symbol=${symbol}&order_id=${orderId}&is_long_term=${isLongTerm}`, {
+                const response = await adminFetch(`/api/positions/set-long-term?symbol=${symbol}&order_id=${orderId}&is_long_term=${isLongTerm}`, {
                     method: 'POST'
                 });
                 if (response.ok) {
