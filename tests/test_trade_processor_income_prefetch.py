@@ -1,4 +1,5 @@
 from app.trade_processor import TradeDataProcessor
+from app.services.trade_etl_service import _prefetch_open_prices, extract_symbol_closed_positions
 
 
 def test_analyze_orders_prefetches_income_once_when_symbols_not_provided():
@@ -103,3 +104,82 @@ def test_analyze_orders_uses_prefetched_fee_totals_without_second_income_fetch()
     assert success_symbols == ["BTCUSDT"]
     assert failure_symbols == {}
     assert called["fee_totals"] == 0
+
+
+def test_incremental_symbol_etl_queries_orders_and_user_trades_once():
+    class FakeProcessor:
+        def __init__(self):
+            self.calls = []
+
+        def _create_worker_client(self):
+            return object()
+
+        def get_all_orders(self, symbol, **kwargs):
+            self.calls.append(("orders", symbol, kwargs["start_time"], kwargs["end_time"]))
+            return [
+                {
+                    "orderId": 12,
+                    "updateTime": 950_000,
+                    "executedQty": "1",
+                }
+            ]
+
+        def get_user_trades(self, symbol, **kwargs):
+            self.calls.append(("trades", symbol, kwargs["start_time"], kwargs["end_time"]))
+            return [{"id": 13, "orderId": 12, "time": 960_000}]
+
+        def match_orders_to_positions(self, orders, symbol, fees_map, presorted=False):
+            return []
+
+    processor = FakeProcessor()
+    positions, _elapsed, cursors = extract_symbol_closed_positions(
+        processor,
+        symbol="BTCUSDT",
+        since=800_000,
+        until=1_000_000,
+        fee_totals_by_symbol={"BTCUSDT": -1.0},
+        order_cursor={"last_id": 10, "last_time_ms": 900_000},
+        trade_cursor={"last_id": 11, "last_time_ms": 910_000},
+        cursor_overlap_minutes=10,
+        return_cursor_update=True,
+    )
+
+    assert positions == []
+    assert [call[0] for call in processor.calls] == ["orders", "trades"]
+    assert cursors == {
+        "orders": {"last_id": 12, "last_time_ms": 950_000},
+        "trades": {"last_id": 13, "last_time_ms": 960_000},
+    }
+
+
+def test_trade_open_prices_prefer_local_daily_kline_cache():
+    day_start = 1_700_000_000_000
+
+    class FakeRepo:
+        def load(self, symbols, since_open_time=None):
+            assert symbols == ["BTCUSDT"]
+            return {
+                "BTCUSDT": [
+                    {"symbol": "BTCUSDT", "open_time": day_start, "open": 123.0}
+                ]
+            }
+
+    class FakeProcessor:
+        daily_kline_repo = FakeRepo()
+        max_price_workers = 1
+
+        def get_utc_day_start(self, timestamp):
+            return day_start
+
+        def _resolve_workers(self, task_count, max_workers=None):
+            return 1
+
+        def _fetch_open_price_for_key(self, *args, **kwargs):
+            raise AssertionError("local cache hit must not emit a kline request")
+
+    prices, _elapsed = _prefetch_open_prices(
+        FakeProcessor(),
+        all_positions=[{"symbol": "BTCUSDT", "entry_time": day_start + 1000}],
+    )
+
+    assert prices == {("BTCUSDT", day_start): 123.0}

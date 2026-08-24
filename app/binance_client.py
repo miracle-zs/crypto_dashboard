@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import requests
 
 from app.logger import logger
+from app.core.binance_request_budget import RollingWeightLimiter, binance_request_weight
 
 
 class BinanceFuturesRestClient:
@@ -26,9 +27,7 @@ class BinanceFuturesRestClient:
     _global_last_request_ts = 0.0
     _request_budget_enabled = False
     _request_budget_per_minute = 0
-    _request_budget_tokens = 0.0
-    _request_budget_last_refill_ts = 0.0
-    _request_budget_path_weights: Dict[str, int] = {}
+    _request_budget_limiter: Optional[RollingWeightLimiter] = None
 
     def __init__(
         self,
@@ -66,53 +65,29 @@ class BinanceFuturesRestClient:
             if not enabled:
                 cls._request_budget_enabled = False
                 cls._request_budget_per_minute = 0
-                cls._request_budget_tokens = 0.0
-                cls._request_budget_last_refill_ts = 0.0
-                cls._request_budget_path_weights = {}
+                cls._request_budget_limiter = None
                 return
 
             capacity = max(1, int(per_minute))
-            clean_weights: Dict[str, int] = {}
-            for path, weight in (path_weights or {}).items():
-                try:
-                    clean_weights[str(path)] = max(1, int(weight))
-                except Exception:
-                    continue
             cls._request_budget_enabled = True
             cls._request_budget_per_minute = capacity
-            # Start empty to avoid a full-capacity burst colliding with requests
-            # already counted by Binance in the current rolling minute.
-            cls._request_budget_tokens = 0.0
-            cls._request_budget_last_refill_ts = time.monotonic()
-            cls._request_budget_path_weights = clean_weights
+            if cls._request_budget_limiter is None:
+                cls._request_budget_limiter = RollingWeightLimiter(capacity)
+            else:
+                cls._request_budget_limiter.set_max_weight(capacity)
+            if path_weights:
+                logger.warning(
+                    "忽略旧版 path_weights 覆盖；请求权重统一按 endpoint + params 计算"
+                )
 
     @classmethod
-    def _path_weight(cls, path: str) -> int:
-        weights = cls._request_budget_path_weights
-        if not weights:
-            return 1
-        direct = weights.get(path)
-        if direct is not None:
-            return max(1, int(direct))
-        return 1
+    def _path_weight(cls, path: str, params: Optional[Dict[str, Any]] = None) -> int:
+        return binance_request_weight(path, params)
 
     @classmethod
-    def _refill_budget_tokens(cls):
-        if not cls._request_budget_enabled or cls._request_budget_per_minute <= 0:
-            return
-        now = time.monotonic()
-        if cls._request_budget_last_refill_ts <= 0:
-            cls._request_budget_last_refill_ts = now
-            return
-        elapsed = now - cls._request_budget_last_refill_ts
-        if elapsed <= 0:
-            return
-        refill_rate_per_sec = cls._request_budget_per_minute / 60.0
-        cls._request_budget_tokens = min(
-            float(cls._request_budget_per_minute),
-            cls._request_budget_tokens + elapsed * refill_rate_per_sec,
-        )
-        cls._request_budget_last_refill_ts = now
+    def request_weight_last_60_seconds(cls) -> int:
+        limiter = cls._request_budget_limiter
+        return limiter.usage() if limiter is not None else 0
 
     def _sign_params(self, params: Dict[str, Any]) -> str:
         query_string = urlencode(params)
@@ -122,37 +97,20 @@ class BinanceFuturesRestClient:
             hashlib.sha256,
         ).hexdigest()
 
-    def _throttle(self, path: str = ""):
+    def _throttle(self, path: str = "", params: Optional[Dict[str, Any]] = None):
         # 全局节流：所有 client 实例共享请求节奏，避免多线程实例级并发叠加打爆IP限额。
         with self.__class__._throttle_lock:
-            while True:
-                now = time.time()
-                elapsed = now - self.__class__._global_last_request_ts
-                wait_interval = max(0.0, self._min_request_interval - elapsed)
+            now = time.time()
+            elapsed = now - self.__class__._global_last_request_ts
+            wait_interval = max(0.0, self._min_request_interval - elapsed)
+            if wait_interval > 0:
+                time.sleep(wait_interval)
 
-                wait_budget = 0.0
-                need_weight = 0
-                budget_ready = True
-                if self.__class__._request_budget_enabled and self.__class__._request_budget_per_minute > 0:
-                    self.__class__._refill_budget_tokens()
-                    need_weight = self.__class__._path_weight(path)
-                    if self.__class__._request_budget_tokens < need_weight:
-                        budget_ready = False
-                        refill_rate_per_sec = self.__class__._request_budget_per_minute / 60.0
-                        deficit = need_weight - self.__class__._request_budget_tokens
-                        wait_budget = max(0.0, deficit / refill_rate_per_sec) if refill_rate_per_sec > 0 else 0.1
+            limiter = self.__class__._request_budget_limiter
+            if self.__class__._request_budget_enabled and limiter is not None:
+                limiter.acquire(self.__class__._path_weight(path, params))
 
-                if wait_interval <= 0 and budget_ready:
-                    if need_weight > 0:
-                        self.__class__._request_budget_tokens = max(
-                            0.0,
-                            self.__class__._request_budget_tokens - need_weight,
-                        )
-                    self.__class__._global_last_request_ts = time.time()
-                    return
-
-                sleep_seconds = max(wait_interval, wait_budget, 0.001)
-                time.sleep(sleep_seconds)
+            self.__class__._global_last_request_ts = time.time()
 
     def _sync_server_time(self) -> bool:
         """Sync local request timestamp offset with Binance server time."""
@@ -222,11 +180,10 @@ class BinanceFuturesRestClient:
         url = f"{self.base_url}{path}"
 
         max_retries = 4
-        backoff_seconds = 1
         clock_synced = False
         for attempt in range(1, max_retries + 1):
             try:
-                self._throttle(path)
+                self._throttle(path, base_params)
                 request_params = dict(base_params)
                 if signed:
                     request_params["recvWindow"] = self._recv_window
@@ -275,14 +232,6 @@ class BinanceFuturesRestClient:
                     if hasattr(exc, "response") and exc.response is not None:
                         logger.error(f"Response: {exc.response.text}")
                     return None
-
-                if status_code == 429 and attempt < max_retries:
-                    logger.warning(
-                        f"Rate limited (429) on {path}. Backing off {backoff_seconds}s (attempt {attempt}/{max_retries})"
-                    )
-                    time.sleep(backoff_seconds)
-                    backoff_seconds *= 2
-                    continue
 
                 logger.error(f"API request failed: {exc}")
                 if hasattr(exc, "response") and exc.response is not None:

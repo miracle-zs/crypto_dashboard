@@ -38,6 +38,29 @@ def test_sync_repository_batch_success_and_failure_updates(tmp_path):
     assert rows["XRPUSDT"]["last_error"] == "auth"
 
 
+def test_sync_repository_maintains_income_order_and_trade_cursors(tmp_path):
+    db = Database(db_path=str(tmp_path / "endpoint_cursors.db"))
+    repo = SyncRepository(db)
+
+    repo.upsert_sync_cursors(
+        [
+            {"stream": "income", "symbol": "", "last_id": 9, "last_time_ms": 1000},
+            {"stream": "orders", "symbol": "BTCUSDT", "last_id": 19, "last_time_ms": 2000},
+            {"stream": "trades", "symbol": "BTCUSDT", "last_id": 29, "last_time_ms": 3000},
+        ]
+    )
+
+    assert repo.get_sync_cursor("income") == {"last_id": 9, "last_time_ms": 1000}
+    assert repo.get_sync_cursors("orders", ["BTCUSDT", "ETHUSDT"]) == {
+        "BTCUSDT": {"last_id": 19, "last_time_ms": 2000},
+        "ETHUSDT": None,
+    }
+    assert repo.get_sync_cursors("trades", ["BTCUSDT"])["BTCUSDT"] == {
+        "last_id": 29,
+        "last_time_ms": 3000,
+    }
+
+
 def test_save_open_positions_caches_state_columns(tmp_path):
     db = Database(db_path=str(tmp_path / "positions_cache.db"))
     repo = SyncRepository(db)

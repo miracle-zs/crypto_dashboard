@@ -35,6 +35,15 @@ class SyncRepository:
     def get_symbol_sync_watermarks(self, symbols):
         return self._read.get_symbol_sync_watermarks(symbols)
 
+    def get_sync_cursor(self, stream: str, symbol: str = ""):
+        return self._read.get_sync_cursor(stream, symbol)
+
+    def get_sync_cursors(self, stream: str, symbols):
+        return self._read.get_sync_cursors(stream, symbols)
+
+    def upsert_sync_cursors(self, rows):
+        return self._write.upsert_sync_cursors(rows)
+
     def update_symbol_sync_success(self, **kwargs):
         symbol = kwargs.get("symbol")
         end_ms = kwargs.get("end_ms")

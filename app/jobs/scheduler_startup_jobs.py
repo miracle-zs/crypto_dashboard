@@ -8,9 +8,7 @@ from app.jobs.sync_jobs import run_sync_open_positions, run_sync_trades_incremen
 from app.logger import logger
 
 
-def register_scheduler_jobs(scheduler, *, utc8):
-    logger.info("立即执行首次数据同步...")
-    scheduler.scheduler.add_job(partial(run_sync_trades_incremental, scheduler), "date")
+def _register_sync_jobs(scheduler, *, utc8):
     scheduler.scheduler.add_job(partial(run_sync_open_positions, scheduler), "date")
     if not scheduler.enable_user_stream:
         scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
@@ -20,18 +18,16 @@ def register_scheduler_jobs(scheduler, *, utc8):
         if scheduler.enable_triggered_trades_compensation
         else scheduler.update_interval_minutes
     )
-
     scheduler.scheduler.add_job(
         func=partial(run_sync_trades_incremental, scheduler),
         trigger=IntervalTrigger(minutes=trades_interval_minutes),
         id="sync_trades_incremental",
-        name="同步交易数据(增量)",
+        name="同步交易数据(游标增量)",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=120,
         replace_existing=True,
     )
-
     scheduler.scheduler.add_job(
         func=partial(run_sync_open_positions, scheduler),
         trigger=IntervalTrigger(minutes=scheduler.open_positions_update_interval_minutes),
@@ -43,81 +39,129 @@ def register_scheduler_jobs(scheduler, *, utc8):
         replace_existing=True,
     )
 
+    # The former daily 03:30 scan is now one bounded weekly reconciliation.
     if scheduler.enable_daily_full_sync:
         scheduler.scheduler.add_job(
-            func=scheduler.sync_trades_full,
+            func=partial(
+                scheduler.sync_trades_full,
+                lookback_days=scheduler.days_to_fetch,
+            ),
             trigger=CronTrigger(
+                day_of_week="sun",
                 hour=scheduler.daily_full_sync_hour,
                 minute=scheduler.daily_full_sync_minute,
                 timezone=utc8,
             ),
-            id="sync_trades_full_daily",
-            name="同步交易数据(全量)",
+            id="sync_trades_full_weekly",
+            name="同步交易数据(每周全量校验)",
             max_instances=1,
             coalesce=True,
             misfire_grace_time=600,
             replace_existing=True,
         )
-        logger.info(
-            "全量同步任务已启动: "
-            f"每天 {scheduler.daily_full_sync_hour:02d}:{scheduler.daily_full_sync_minute:02d} 执行"
-        )
-    else:
-        logger.info("全量同步任务未启用: ENABLE_DAILY_FULL_SYNC=0")
 
+    scheduler.scheduler.add_job(
+        func=scheduler.validate_recent_trade_history,
+        trigger=CronTrigger(
+            hour=scheduler.history_validation_hour,
+            minute=scheduler.history_validation_minute,
+            timezone=utc8,
+        ),
+        id="validate_recent_trade_history",
+        name="校验最近24-48小时交易数据",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+        replace_existing=True,
+    )
     if scheduler.enable_daily_open_positions_full_sync:
-        open_full_hour = scheduler.open_positions_full_sync_hour
-        open_full_minute = scheduler.open_positions_full_sync_minute
-
-        if (
-            scheduler.enable_daily_full_sync
-            and open_full_hour == scheduler.daily_full_sync_hour
-            and open_full_minute == scheduler.daily_full_sync_minute
-        ):
-            shifted_total = (open_full_hour * 60 + open_full_minute + 20) % (24 * 60)
-            open_full_hour = shifted_total // 60
-            open_full_minute = shifted_total % 60
-            logger.warning(
-                "未平仓全量窗口任务与全量交易同步重叠，自动错开到 "
-                f"{open_full_hour:02d}:{open_full_minute:02d}"
-            )
-
         scheduler.scheduler.add_job(
             func=scheduler.sync_open_positions_full_window,
             trigger=CronTrigger(
-                hour=open_full_hour,
-                minute=open_full_minute,
+                day_of_week="sun",
+                hour=scheduler.open_positions_full_sync_hour,
+                minute=scheduler.open_positions_full_sync_minute,
                 timezone=utc8,
             ),
-            id="sync_open_positions_full_daily",
-            name="同步未平仓订单(全量窗口)",
+            id="sync_open_positions_full_weekly",
+            name="同步未平仓订单(每周全量窗口)",
             max_instances=1,
             coalesce=True,
             misfire_grace_time=600,
             replace_existing=True,
         )
-        logger.info(
-            "未平仓全量窗口任务已启动: "
-            f"每天 {open_full_hour:02d}:{open_full_minute:02d} 执行 "
-            f"(lookback_days={scheduler.open_positions_full_lookback_days})"
-        )
-    else:
-        logger.info("未平仓全量窗口任务未启用: ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC=0")
 
     if not scheduler.enable_user_stream:
         scheduler.scheduler.add_job(
             func=scheduler.sync_balance_data,
-            trigger=IntervalTrigger(minutes=1),
+            trigger=IntervalTrigger(minutes=scheduler.balance_sync_interval_minutes),
             id="sync_balance",
-            name="同步账户余额",
+            name="同步账户余额与TRANSFER流水",
             max_instances=1,
             coalesce=True,
             misfire_grace_time=60,
             replace_existing=True,
         )
-    else:
-        logger.info("已启用用户数据流，跳过轮询余额同步任务")
 
+    return trades_interval_minutes
+
+
+def _register_market_jobs(scheduler, *, utc8):
+    scheduler.scheduler.add_job(
+        func=scheduler.refresh_daily_kline_cache,
+        trigger=CronTrigger(
+            hour=scheduler.daily_kline_update_hour,
+            minute=scheduler.daily_kline_update_minute,
+            timezone=utc8,
+        ),
+        id="refresh_daily_klines",
+        name="日K线缓存回填/增量更新",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=900,
+        replace_existing=True,
+    )
+
+    if (
+        scheduler.enable_leaderboard_alert
+        or scheduler.enable_rebound_7d_snapshot
+        or scheduler.enable_rebound_30d_snapshot
+        or scheduler.enable_rebound_60d_snapshot
+        or scheduler.enable_rebound_365d_snapshot
+    ):
+        scheduler.scheduler.add_job(
+            func=scheduler.build_and_save_all_market_snapshots,
+            trigger=CronTrigger(
+                hour=scheduler.market_snapshot_hour,
+                minute=scheduler.market_snapshot_minute,
+                timezone=utc8,
+            ),
+            id="build_all_market_snapshots",
+            name="生成涨跌幅榜与四组反弹榜",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=900,
+            replace_existing=True,
+        )
+
+    if scheduler.enable_leaderboard_alert:
+        scheduler.scheduler.add_job(
+            func=scheduler.send_morning_top_gainers,
+            trigger=CronTrigger(
+                hour=scheduler.leaderboard_alert_hour,
+                minute=scheduler.leaderboard_alert_minute,
+                timezone=utc8,
+            ),
+            id="send_morning_top_gainers",
+            name="发送晨间涨幅榜快照",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+            replace_existing=True,
+        )
+
+
+def _register_risk_jobs(scheduler, *, utc8):
     scheduler.scheduler.add_job(
         func=scheduler.check_risk_before_sleep,
         trigger=CronTrigger(hour=23, minute=0, timezone=utc8),
@@ -128,7 +172,6 @@ def register_scheduler_jobs(scheduler, *, utc8):
         misfire_grace_time=300,
         replace_existing=True,
     )
-
     scheduler.scheduler.add_job(
         func=scheduler.review_noon_loss_at_night,
         trigger=CronTrigger(
@@ -143,7 +186,6 @@ def register_scheduler_jobs(scheduler, *, utc8):
         misfire_grace_time=300,
         replace_existing=True,
     )
-
     scheduler.scheduler.add_job(
         func=partial(run_noon_loss_check, scheduler),
         trigger=CronTrigger(
@@ -159,137 +201,19 @@ def register_scheduler_jobs(scheduler, *, utc8):
         replace_existing=True,
     )
 
-    if scheduler.enable_leaderboard_alert:
-        scheduler.scheduler.add_job(
-            func=scheduler.send_morning_top_gainers,
-            trigger=CronTrigger(
-                hour=scheduler.leaderboard_alert_hour,
-                minute=scheduler.leaderboard_alert_minute,
-                timezone=utc8,
-            ),
-            id="send_morning_top_gainers",
-            name="晨间涨幅榜",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True,
-        )
-        logger.info(
-            "晨间涨幅榜任务已启动: "
-            f"每天 {scheduler.leaderboard_alert_hour:02d}:{scheduler.leaderboard_alert_minute:02d} 执行"
-        )
-    else:
-        logger.info("晨间涨幅榜任务未启用: ENABLE_LEADERBOARD_ALERT=0")
 
-    if scheduler.enable_rebound_7d_snapshot:
-        scheduler.scheduler.add_job(
-            func=scheduler.snapshot_morning_rebound_7d,
-            trigger=CronTrigger(
-                hour=scheduler.rebound_7d_hour,
-                minute=scheduler.rebound_7d_minute,
-                timezone=utc8,
-            ),
-            id="snapshot_morning_rebound_7d",
-            name="晨间14D反弹榜",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True,
-        )
-        logger.info(
-            "晨间14D反弹榜任务已启动: "
-            f"每天 {scheduler.rebound_7d_hour:02d}:{scheduler.rebound_7d_minute:02d} 执行"
-        )
-    else:
-        logger.info("晨间14D反弹榜任务未启用: ENABLE_REBOUND_7D_SNAPSHOT=0")
-
-    if scheduler.enable_rebound_30d_snapshot:
-        scheduler.scheduler.add_job(
-            func=scheduler.snapshot_morning_rebound_30d,
-            trigger=CronTrigger(
-                hour=scheduler.rebound_30d_hour,
-                minute=scheduler.rebound_30d_minute,
-                timezone=utc8,
-            ),
-            id="snapshot_morning_rebound_30d",
-            name="晨间30D反弹榜",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True,
-        )
-        logger.info(
-            "晨间30D反弹榜任务已启动: "
-            f"每天 {scheduler.rebound_30d_hour:02d}:{scheduler.rebound_30d_minute:02d} 执行"
-        )
-    else:
-        logger.info("晨间30D反弹榜任务未启用: ENABLE_REBOUND_30D_SNAPSHOT=0")
-
-    if scheduler.enable_rebound_60d_snapshot:
-        scheduler.scheduler.add_job(
-            func=scheduler.snapshot_morning_rebound_60d,
-            trigger=CronTrigger(
-                hour=scheduler.rebound_60d_hour,
-                minute=scheduler.rebound_60d_minute,
-                timezone=utc8,
-            ),
-            id="snapshot_morning_rebound_60d",
-            name="晨间60D反弹榜",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True,
-        )
-        logger.info(
-            "晨间60D反弹榜任务已启动: "
-            f"每天 {scheduler.rebound_60d_hour:02d}:{scheduler.rebound_60d_minute:02d} 执行"
-        )
-    else:
-        logger.info("晨间60D反弹榜任务未启用: ENABLE_REBOUND_60D_SNAPSHOT=0")
-
-    if scheduler.enable_rebound_365d_snapshot:
-        scheduler.scheduler.add_job(
-            func=scheduler.snapshot_morning_rebound_365d,
-            trigger=CronTrigger(
-                hour=scheduler.rebound_365d_hour,
-                minute=scheduler.rebound_365d_minute,
-                timezone=utc8,
-            ),
-            id="snapshot_morning_rebound_365d",
-            name="晨间365D反弹榜",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=300,
-            replace_existing=True,
-        )
-        logger.info(
-            "晨间365D反弹榜任务已启动: "
-            f"每天 {scheduler.rebound_365d_hour:02d}:{scheduler.rebound_365d_minute:02d} 执行"
-        )
-    else:
-        logger.info("晨间365D反弹榜任务未启用: ENABLE_REBOUND_365D_SNAPSHOT=0")
-
+def register_scheduler_jobs(scheduler, *, utc8):
+    trades_interval_minutes = _register_sync_jobs(scheduler, utc8=utc8)
+    _register_market_jobs(scheduler, utc8=utc8)
+    _register_risk_jobs(scheduler, utc8=utc8)
     scheduler.scheduler.start()
+
     logger.info(
-        "增量交易同步任务已启动: "
-        f"每 {trades_interval_minutes} 分钟自动更新一次 "
-        f"(triggered_compensation={'on' if scheduler.enable_triggered_trades_compensation else 'off'})"
-    )
-    logger.info(
-        f"未平仓同步任务已启动: 每 {scheduler.open_positions_update_interval_minutes} 分钟自动更新一次 "
-        f"(lookback_days={scheduler.open_positions_lookback_days})"
-    )
-    if not scheduler.enable_user_stream:
-        logger.info("余额监控任务已启动: 每 1 分钟自动更新一次")
-    else:
-        logger.info("余额监控任务由用户数据流接管")
-    logger.info("睡前风控检查已启动: 每天 23:00 执行")
-    logger.info(
-        "午间浮亏检查已启动: "
-        f"每天 {scheduler.noon_loss_check_hour:02d}:{scheduler.noon_loss_check_minute:02d} 执行"
-    )
-    logger.info(
-        "午间止损夜间复盘已启动: "
-        f"每天 {scheduler.noon_review_hour:02d}:{scheduler.noon_review_minute:02d} 执行, "
-        f"target_day_offset={scheduler.noon_review_target_day_offset}"
+        "后台调度已启动: "
+        f"trades={trades_interval_minutes}min, "
+        f"positions={scheduler.open_positions_update_interval_minutes}min, "
+        f"balance_transfer={scheduler.balance_sync_interval_minutes}min, "
+        f"daily_klines={scheduler.daily_kline_update_hour:02d}:{scheduler.daily_kline_update_minute:02d}, "
+        f"market_snapshots={scheduler.market_snapshot_hour:02d}:{scheduler.market_snapshot_minute:02d}, "
+        f"global_rolling_weight={scheduler.background_weight_budget_per_60s}/60s"
     )

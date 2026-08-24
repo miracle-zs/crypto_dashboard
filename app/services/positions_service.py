@@ -11,8 +11,7 @@ from app.core.cache import TTLCache
 from app.core.symbols import normalize_futures_symbol
 from app.core.time import UTC8
 from app.logger import logger
-from app.repositories import SnapshotRepository, SyncRepository
-from app.services.market_price_service import MarketPriceService
+from app.repositories import DailyKlineRepository, SnapshotRepository, SyncRepository
 
 
 class PositionsService:
@@ -80,9 +79,13 @@ class PositionsService:
                 self._latest_signature = signature
             return self._latest_version
 
-    async def build_open_positions_response(self, db, client, since_version: int | None = None):
+    async def build_open_positions_response(self, db, client=None, since_version: int | None = None):
+        # ``client`` remains as a compatibility argument, but page reads must never
+        # emit Binance requests. Prices come from the locally refreshed daily cache.
+        del client
         sync_repo = SyncRepository(db)
         snapshot_repo = SnapshotRepository(db)
+        daily_kline_repo = DailyKlineRepository(db)
         profit_alert_threshold_pct = float(os.getenv("PROFIT_ALERT_THRESHOLD_PCT", "20") or 20)
         now = datetime.now(UTC8)
         today_snapshot_date = now.strftime("%Y-%m-%d")
@@ -162,7 +165,20 @@ class PositionsService:
                 self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
             else:
                 symbols_full = [self._normalize_symbol(pos["symbol"]) for pos in raw_positions]
-                mark_prices = await run_in_thread(MarketPriceService.get_mark_price_map, symbols_full, client)
+                daily_market_view = await run_in_thread(
+                    partial(daily_kline_repo.load, symbols_full)
+                )
+                mark_prices = {}
+                for symbol_full in symbols_full:
+                    rows = daily_market_view.get(symbol_full) or []
+                    if not rows:
+                        continue
+                    try:
+                        price = float(rows[-1]["close"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if price > 0:
+                        mark_prices[symbol_full] = price
 
                 positions = []
                 per_symbol_notional = defaultdict(float)

@@ -21,10 +21,12 @@ from app.jobs.trades_compensation_jobs import (
     sync_trades_compensation_job,
 )
 from app.jobs.market_snapshot_jobs import (
+    build_and_save_all_market_snapshots_job,
     build_rebound_snapshot_job,
     build_top_gainers_snapshot_job,
     get_rebound_snapshot_job,
     get_top_gainers_snapshot_job,
+    refresh_daily_kline_cache_job,
     send_morning_top_gainers_job,
     snapshot_morning_rebound_job,
 )
@@ -42,7 +44,14 @@ from app.core.scheduler_binding import SCHEDULER_CONFIG_FIELDS, apply_scheduler_
 from app.core.scheduler_runtime import get_scheduler_singleton, should_start_scheduler_runtime
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
-from app.repositories import RiskRepository, SnapshotRepository, SyncRepository, TradeRepository
+from app.repositories import (
+    DailyKlineRepository,
+    RiskRepository,
+    SnapshotRepository,
+    SyncRepository,
+    TradeRepository,
+)
+from app.binance_client import BinanceFuturesRestClient
 from app.services.market_price_service import MarketPriceService
 
 load_dotenv()
@@ -70,6 +79,7 @@ class TradeDataScheduler:
         self.risk_repo = RiskRepository(self.db)
         self.snapshot_repo = SnapshotRepository(self.db)
         self.trade_repo = TradeRepository(self.db)
+        self.daily_kline_repo = DailyKlineRepository(self.db)
 
         # 从环境变量获取配置
         api_key = os.getenv('BINANCE_API_KEY')
@@ -80,8 +90,13 @@ class TradeDataScheduler:
             self.processor = None
         else:
             self.processor = TradeDataProcessor(api_key, api_secret)
+            self.processor.daily_kline_repo = self.daily_kline_repo
 
         self._apply_scheduler_config(config)
+        BinanceFuturesRestClient.configure_global_request_budget(
+            enabled=True,
+            per_minute=self.background_weight_budget_per_60s,
+        )
         self.runtime_controller = JobRuntimeController(lock_wait_seconds=self.api_job_lock_wait_seconds)
         self._pending_compensation_since_ms: dict[str, int] = {}
 
@@ -130,15 +145,34 @@ class TradeDataScheduler:
         window_end = leaderboard_dt + timedelta(minutes=self.leaderboard_guard_after_minutes)
         return window_start <= now <= window_end
 
-    def sync_trades_data(self, force_full: bool = False, emit_metric: bool = True):
+    def sync_trades_data(
+        self,
+        force_full: bool = False,
+        emit_metric: bool = True,
+        validation_lookback_hours: int | None = None,
+        full_lookback_days: int | None = None,
+    ):
         """同步交易数据到数据库"""
         if not emit_metric:
-            return self._sync_trades_data_impl(force_full=force_full)
+            if validation_lookback_hours is None and full_lookback_days is None:
+                return self._sync_trades_data_impl(force_full=force_full)
+            return self._sync_trades_data_impl(
+                force_full=force_full,
+                validation_lookback_hours=validation_lookback_hours,
+                full_lookback_days=full_lookback_days,
+            )
 
         job_status = "success"
         with measure_ms("scheduler.sync_trades_data", mode="full" if force_full else "incremental") as metric:
             try:
-                ok = self._sync_trades_data_impl(force_full=force_full)
+                if validation_lookback_hours is None and full_lookback_days is None:
+                    ok = self._sync_trades_data_impl(force_full=force_full)
+                else:
+                    ok = self._sync_trades_data_impl(
+                        force_full=force_full,
+                        validation_lookback_hours=validation_lookback_hours,
+                        full_lookback_days=full_lookback_days,
+                    )
                 if ok is False:
                     job_status = "error"
             except Exception:
@@ -148,11 +182,35 @@ class TradeDataScheduler:
                 log_job_metric(job_name="sync_trades_data", status=job_status, snapshot=metric)
         return job_status == "success"
 
-    def _sync_trades_data_impl(self, force_full: bool = False):
-        return run_sync_trades_data_impl(self, force_full=force_full)
+    def _sync_trades_data_impl(
+        self,
+        force_full: bool = False,
+        validation_lookback_hours: int | None = None,
+        full_lookback_days: int | None = None,
+    ):
+        if validation_lookback_hours is None and full_lookback_days is None:
+            return run_sync_trades_data_impl(self, force_full=force_full)
+        return run_sync_trades_data_impl(
+            self,
+            force_full=force_full,
+            validation_lookback_hours=validation_lookback_hours,
+            full_lookback_days=full_lookback_days,
+        )
 
-    def _resolve_sync_window(self, *, force_full: bool, last_entry_time: str | None) -> tuple[int, int, bool]:
-        return resolve_sync_window(self, force_full=force_full, last_entry_time=last_entry_time, utc8=UTC8)
+    def _resolve_sync_window(
+        self,
+        *,
+        force_full: bool,
+        last_entry_time: str | None,
+        full_lookback_days: int | None = None,
+    ) -> tuple[int, int, bool]:
+        return resolve_sync_window(
+            self,
+            force_full=force_full,
+            last_entry_time=last_entry_time,
+            utc8=UTC8,
+            full_lookback_days=full_lookback_days,
+        )
 
     def _fetch_and_analyze_closed_trades(
         self,
@@ -176,6 +234,8 @@ class TradeDataScheduler:
         success_symbols: list[str],
         failure_symbols: dict[str, str],
         until: int,
+        cursor_updates: dict | None = None,
+        income_cursor: dict | None = None,
     ) -> tuple[float, int]:
         return persist_closed_trades_and_watermarks(
             self,
@@ -184,6 +244,8 @@ class TradeDataScheduler:
             success_symbols=success_symbols,
             failure_symbols=failure_symbols,
             until=until,
+            cursor_updates=cursor_updates,
+            income_cursor=income_cursor,
         )
 
     def sync_open_positions_data(self):
@@ -258,12 +320,19 @@ class TradeDataScheduler:
             symbol_since_ms=symbol_since_ms,
         )
 
-    def sync_trades_full(self):
+    def sync_trades_full(self, *, lookback_days: int | None = None):
         """全量同步交易数据"""
         status = "success"
         with measure_ms("scheduler.sync_trades_full") as metric:
             try:
-                ok = self.sync_trades_data(force_full=True, emit_metric=False)
+                if lookback_days is None:
+                    ok = self.sync_trades_data(force_full=True, emit_metric=False)
+                else:
+                    ok = self.sync_trades_data(
+                        force_full=True,
+                        emit_metric=False,
+                        full_lookback_days=max(1, int(lookback_days)),
+                    )
                 if ok is False:
                     status = "error"
             except Exception:
@@ -272,6 +341,13 @@ class TradeDataScheduler:
             finally:
                 log_job_metric(job_name="sync_trades_full", status=status, snapshot=metric)
         return status == "success"
+
+    def validate_recent_trade_history(self):
+        """Validate only the recent 24-48h window; never scan all symbols."""
+        return self.sync_trades_data(
+            force_full=False,
+            validation_lookback_hours=self.history_validation_lookback_hours,
+        )
 
     def _get_mark_price_map(self, symbols: list[str]) -> dict[str, float]:
         """批量获取标记价格（优先 premiumIndex，其次 ticker/price）。"""
@@ -325,6 +401,12 @@ class TradeDataScheduler:
 
     def _build_top_gainers_snapshot(self):
         return build_top_gainers_snapshot_job(self, UTC8)
+
+    def refresh_daily_kline_cache(self):
+        return refresh_daily_kline_cache_job(self)
+
+    def build_and_save_all_market_snapshots(self):
+        return build_and_save_all_market_snapshots_job(self, UTC8)
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
         """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
@@ -401,7 +483,11 @@ class TradeDataScheduler:
 
     def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
         """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_7d_snapshot)
+        return get_rebound_snapshot_job(
+            self,
+            source=source,
+            load_snapshot=self.snapshot_repo.get_latest_rebound_7d_snapshot,
+        )
 
     def snapshot_morning_rebound_7d(self):
         """每天早上07:30生成14D反弹幅度Top榜快照并入库。"""
@@ -417,7 +503,11 @@ class TradeDataScheduler:
 
     def get_rebound_30d_snapshot(self, source: str = "30D反弹榜接口"):
         """获取30D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_30d_snapshot)
+        return get_rebound_snapshot_job(
+            self,
+            source=source,
+            load_snapshot=self.snapshot_repo.get_latest_rebound_30d_snapshot,
+        )
 
     def snapshot_morning_rebound_30d(self):
         """每天早上生成30D反弹幅度Top榜快照并入库。"""
@@ -433,7 +523,11 @@ class TradeDataScheduler:
 
     def get_rebound_60d_snapshot(self, source: str = "60D反弹榜接口"):
         """获取60D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_60d_snapshot)
+        return get_rebound_snapshot_job(
+            self,
+            source=source,
+            load_snapshot=self.snapshot_repo.get_latest_rebound_60d_snapshot,
+        )
 
     def snapshot_morning_rebound_60d(self):
         """每天早上生成60D反弹幅度Top榜快照并入库。"""
@@ -449,7 +543,11 @@ class TradeDataScheduler:
 
     def get_rebound_365d_snapshot(self, source: str = "365D反弹榜接口"):
         """获取365D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(self, source=source, build_snapshot=self._build_rebound_365d_snapshot)
+        return get_rebound_snapshot_job(
+            self,
+            source=source,
+            load_snapshot=self.snapshot_repo.get_latest_rebound_365d_snapshot,
+        )
 
     def snapshot_morning_rebound_365d(self):
         """每天早上生成365D反弹幅度Top榜快照并入库。"""
@@ -494,7 +592,7 @@ class TradeDataScheduler:
         """获取下次运行时间"""
         job = self.scheduler.get_job('sync_trades_incremental')
         if not job:
-            job = self.scheduler.get_job('sync_trades_full_daily')
+            job = self.scheduler.get_job('sync_trades_full_weekly')
         if job:
             return job.next_run_time
         return None

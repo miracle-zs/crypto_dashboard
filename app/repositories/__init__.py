@@ -1,4 +1,5 @@
 from .risk_repository import RiskRepository
+from .daily_kline_repository import DailyKlineRepository
 from .settings_repository import SettingsRepository
 from .sync_read_repository import SyncReadRepository
 from .snapshot_repository import SnapshotRepository
@@ -17,6 +18,7 @@ __all__ = [
     "SyncReadRepository",
     "SyncWriteRepository",
     "RiskRepository",
+    "DailyKlineRepository",
     "TradeReadRepository",
     "TradeWriteRepository",
     "WatchNotesRepository",

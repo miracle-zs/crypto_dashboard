@@ -39,11 +39,13 @@
 - **夜间止损复盘**: 每天 **23:02 (UTC+8, 可配)** 复盘午间建议币种，统计“若不砍仓”到夜间的实际亏损与差值，支持按天对比。
 
 ### 🏆 4. 每日涨幅榜快照与复盘 (Leaderboard Snapshot)
-- **每日固定快照**: 默认每天 **07:40 (UTC+8)** 生成涨幅榜快照并入库（`leaderboard_snapshots`）。
+- **共享日线缓存**: **06:15 (UTC+8)** 以滚动 60 秒 200 权重上限回填/增量更新 `daily_klines`；首次读取 365 根，之后每币只补最新 2 根。
+- **一次生成五榜**: **07:00 (UTC+8)** 只请求一次全市场 ticker，再从同一份本地数据生成涨跌幅榜及 14D / 30D / 60D / 365D 反弹榜。
+- **快照通知**: **07:30 (UTC+8)** 直接读取已保存快照发送通知，不触发历史或逐币 K 线请求。
 - **历史回看**: 支持按日期查看历史快照（今天、昨天、近7天等），便于盘前/盘后复盘。
 - **持仓联动**: 榜单会标记“已持仓”币种，帮助快速识别“榜上标的 vs 当前仓位”的重叠。
 - **非实时设计**: 榜单页默认读取数据库快照，不依赖实时计算，稳定且可追溯。
-- **多周期反弹榜**: 默认每天 **07:30 (UTC+8)** 生成 14D / 30D / 60D 三套“当前价相对区间最低价涨幅”TopN 快照并入库（14D 保留 `rebound-7d` 兼容路径）。
+- **多周期反弹榜**: 14D 保留 `rebound-7d` 兼容路径，四个窗口的计算阶段均为零 REST 请求。
 
 ### ⚡ 5. 极致性能与体验
 - **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
@@ -131,15 +133,20 @@ BINANCE_API_SECRET=your_api_secret_here
 # 系统配置 (可选)
 # 交易增量同步基础间隔 (分钟)
 # 当 ENABLE_TRIGGERED_TRADES_COMPENSATION=0 时生效
-UPDATE_INTERVAL_MINUTES=1
+UPDATE_INTERVAL_MINUTES=3
 # 启用“未平仓变化触发的闭仓补偿同步”（默认开启）
 ENABLE_TRIGGERED_TRADES_COMPENSATION=1
 # 启用触发补偿时，增量兜底任务间隔（分钟，默认1440=每天一次）
 TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES=1440
-# 触发补偿默认回补窗口（分钟，默认1440=1天）
-TRADES_COMPENSATION_LOOKBACK_MINUTES=1440
+# 触发补偿与各端点游标重叠窗口（分钟）
+TRADES_COMPENSATION_LOOKBACK_MINUTES=30
+SYNC_LOOKBACK_MINUTES=30
+SYMBOL_SYNC_OVERLAP_MINUTES=30
+# 普通轮询
+OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES=5
+BALANCE_SYNC_INTERVAL_MINUTES=15
 # 同步回溯天数
-DAYS_TO_FETCH=90
+DAYS_TO_FETCH=60
 # 爆仓额外损失收入类型（参与净PnL扣减，逗号分隔）
 # 默认 INSURANCE_CLEAR；保留 COMMISSION/FUNDING_FEE 固定参与
 EXTRA_LOSS_INCOME_TYPES=INSURANCE_CLEAR
@@ -149,43 +156,39 @@ SCHEDULER_TIMEZONE=Asia/Shanghai
 # Server酱通知 (可选)
 SERVERCHAN_SENDKEY=your_serverchan_key_here
 
-# 晨间涨幅榜任务 (可选，默认开启，每天 07:40 UTC+8)
+# 市场数据流水线：06:15 更新日线，07:00 生成快照，07:30 发送通知
+DAILY_KLINE_UPDATE_HOUR=6
+DAILY_KLINE_UPDATE_MINUTE=15
+MARKET_SNAPSHOT_HOUR=7
+MARKET_SNAPSHOT_MINUTE=0
+HISTORICAL_TASK_WEIGHT_BUDGET_PER_60S=200
+BACKGROUND_WEIGHT_BUDGET_PER_60S=250
 ENABLE_LEADERBOARD_ALERT=1
 LEADERBOARD_ALERT_HOUR=7
-LEADERBOARD_ALERT_MINUTE=40
+LEADERBOARD_ALERT_MINUTE=30
 LEADERBOARD_TOP_N=10
 # 最小24h成交额筛选，单位 USDT（默认 5000 万）
 LEADERBOARD_MIN_QUOTE_VOLUME=50000000
 # 候选币种上限（0=不设上限，默认120）
 LEADERBOARD_MAX_SYMBOLS=120
 
-# 晨间14D反弹榜任务 (可选，默认开启，每天 07:30 UTC+8)
-# 规则：计算 current_price 相对 14天最低价 的涨幅，按涨幅降序取TopN
-# 说明：变量名保留 REBOUND_7D_* 为兼容历史配置，语义对应14D
+# 四个反弹榜由 07:00 的同一个本地计算任务生成
+# 变量名保留 REBOUND_7D_*，语义对应14D
 ENABLE_REBOUND_7D_SNAPSHOT=1
-REBOUND_7D_HOUR=7
-REBOUND_7D_MINUTE=30
 REBOUND_7D_TOP_N=10
-# 14D反弹榜逐币种K线并发（默认6）
-REBOUND_7D_KLINE_WORKERS=6
-# 14D反弹榜每分钟API权重预算（默认900，建议 < 1200）
-REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE=900
-
-# 晨间30D反弹榜任务（默认开启，每天 07:32 UTC+8）
 ENABLE_REBOUND_30D_SNAPSHOT=1
-REBOUND_30D_HOUR=7
-REBOUND_30D_MINUTE=32
 REBOUND_30D_TOP_N=10
-REBOUND_30D_KLINE_WORKERS=6
-REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE=900
-
-# 晨间60D反弹榜任务（默认开启，每天 07:34 UTC+8）
 ENABLE_REBOUND_60D_SNAPSHOT=1
-REBOUND_60D_HOUR=7
-REBOUND_60D_MINUTE=34
 REBOUND_60D_TOP_N=10
-REBOUND_60D_KLINE_WORKERS=6
-REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE=900
+ENABLE_REBOUND_365D_SNAPSHOT=1
+REBOUND_365D_TOP_N=10
+
+# 每天 02:10 仅校验最近 48 小时；周日默认执行一次最近 60 天全量校验
+HISTORY_VALIDATION_HOUR=2
+HISTORY_VALIDATION_MINUTE=10
+HISTORY_VALIDATION_LOOKBACK_HOURS=48
+ENABLE_DAILY_FULL_SYNC=1
+ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC=0
 
 # 午间止损夜间复盘任务 (可选，默认每天 23:02 UTC+8)
 NOON_REVIEW_HOUR=23
@@ -200,7 +203,7 @@ DASHBOARD_ADMIN_TOKEN=replace-with-a-strong-random-token
 
 说明：
 - `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
-- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；新增 `REBOUND_30D_*`、`REBOUND_60D_*` 用于多周期快照。
+- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；四组反弹榜共享本地日线，不再配置逐币 K 线并发。
 - `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
 - 启用 `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 后，交易增量会采用“低频兜底 + 触发补偿”模式，建议将 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 设为 `1440`（每天一次）。
 - `TRADES_COMPENSATION_LOOKBACK_MINUTES` 仅在触发补偿未提供 symbol 级精确起点时生效。
@@ -258,14 +261,18 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   - `ENABLE_TRIGGERED_TRADES_COMPENSATION=0` 时，每 `UPDATE_INTERVAL_MINUTES` 分钟执行
   - `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 时，每 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 分钟执行（通常设为每天一次兜底）
 - `sync_trades_compensation_pending`：当未平仓减少（检测到可能平仓）时触发补偿同步
-- `sync_balance`：每 1 分钟同步余额（启用用户数据流时跳过）
+- `sync_open_positions`：每 5 分钟做一次持仓 REST 校验
+- `sync_balance`：每 15 分钟同步余额与 TRANSFER income（启用用户数据流时跳过）
+- `validate_recent_trade_history`：每天 02:10 仅校验最近 24～48 小时
+- `sync_trades_full_weekly`：默认每周日 03:30 校验最近 `DAYS_TO_FETCH=60` 天；该任务忽略 `START_DATE`
+- `refresh_daily_klines`：每天 06:15 回填缺失日线，或只补每币最新 1～2 根
+- `build_all_market_snapshots`：每天 07:00 只请求一次全市场 ticker，再从本地日线生成涨跌幅榜与 14/30/60/365D 四组反弹榜
 - `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
 - `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）
 - `review_noon_loss_night`：每天 23:02 执行午间止损夜间复盘（UTC+8，可通过 `NOON_REVIEW_HOUR/MINUTE` 调整）
-- `send_morning_top_gainers`：每天 07:40 生成晨间涨幅榜快照（UTC+8，可关闭）
-- `snapshot_morning_rebound_7d`：每天 07:30 生成晨间14D反弹榜快照（UTC+8，可关闭）
-- `snapshot_morning_rebound_30d`：每天 07:32 生成晨间30D反弹榜快照（UTC+8，可关闭）
-- `snapshot_morning_rebound_60d`：每天 07:34 生成晨间60D反弹榜快照（UTC+8，可关闭）
+- `send_morning_top_gainers`：每天 07:30 仅读取已生成快照并发送通知（UTC+8，可关闭）
+
+页面读取 `/api/open-positions`、涨幅榜及反弹榜时只访问数据库/本地缓存，不会触发 Binance 历史同步或行情 REST 请求。
 
 ### 6. Hardening 验证报告
 - 2026-02-18 一周加固执行与验证记录：`docs/plans/2026-02-18-hardening-verification-report.md`

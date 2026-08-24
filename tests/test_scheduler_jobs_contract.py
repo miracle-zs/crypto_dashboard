@@ -35,6 +35,93 @@ def test_scheduler_still_registers_existing_job_ids(monkeypatch):
     assert "check_losses_noon" in calls
 
 
+def test_scheduler_registers_one_market_data_pipeline_and_no_per_window_scans(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_USER_STREAM", "0")
+    monkeypatch.setenv("ENABLE_DAILY_FULL_SYNC", "0")
+    scheduler = TradeDataScheduler()
+    jobs = {}
+
+    def fake_add_job(*args, **kwargs):
+        if kwargs.get("id"):
+            jobs[kwargs["id"]] = kwargs
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+    scheduler.start()
+
+    assert "refresh_daily_klines" in jobs
+    assert "build_all_market_snapshots" in jobs
+    assert "send_morning_top_gainers" in jobs
+    assert "validate_recent_trade_history" in jobs
+    assert "snapshot_morning_rebound_7d" not in jobs
+    assert "snapshot_morning_rebound_30d" not in jobs
+    assert "snapshot_morning_rebound_60d" not in jobs
+    assert "snapshot_morning_rebound_365d" not in jobs
+    assert "sync_trades_full_daily" not in jobs
+    assert int(jobs["sync_balance"]["trigger"].interval.total_seconds() // 60) == 15
+
+
+def test_scheduler_enables_bounded_weekly_full_sync_by_default(monkeypatch):
+    from functools import partial
+
+    from app.scheduler import TradeDataScheduler
+
+    monkeypatch.setenv("BINANCE_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_API_SECRET", "s")
+    monkeypatch.delenv("ENABLE_DAILY_FULL_SYNC", raising=False)
+    monkeypatch.setenv("DAYS_TO_FETCH", "60")
+    scheduler = TradeDataScheduler()
+    jobs = {}
+
+    def fake_add_job(*args, **kwargs):
+        if kwargs.get("id"):
+            jobs[kwargs["id"]] = kwargs
+        return None
+
+    scheduler.scheduler.add_job = fake_add_job
+    scheduler.scheduler.start = lambda: None
+    scheduler.start()
+
+    weekly = jobs["sync_trades_full_weekly"]
+    assert isinstance(weekly["func"], partial)
+    assert weekly["func"].keywords == {"lookback_days": 60}
+    assert "day_of_week='sun'" in str(weekly["trigger"])
+
+
+def test_weekly_full_window_ignores_custom_start_date():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from app.jobs.sync_pipeline_jobs import resolve_sync_window
+
+    utc8 = ZoneInfo("Asia/Shanghai")
+    scheduler = SimpleNamespace(
+        start_date="2026-02-01",
+        end_date=None,
+        days_to_fetch=60,
+        sync_lookback_minutes=30,
+    )
+
+    since, until, is_full = resolve_sync_window(
+        scheduler,
+        force_full=True,
+        last_entry_time=None,
+        utc8=utc8,
+        full_lookback_days=60,
+    )
+
+    expected_window_ms = 60 * 24 * 60 * 60 * 1000
+    custom_start_ms = int(datetime(2026, 2, 1, 23, tzinfo=utc8).timestamp() * 1000)
+    assert is_full is True
+    assert abs((until - since) - expected_window_ms) < 2_000
+    assert since > custom_start_ms
+
+
 def test_scheduler_trades_incremental_uses_fallback_interval_when_triggered_enabled(monkeypatch):
     from app.scheduler import TradeDataScheduler
 
@@ -406,6 +493,73 @@ def test_full_sync_crops_each_symbol_to_income_activity_range():
 
     assert captured["symbol_since_map"] == {"BTCUSDT": 140_000}
     assert captured["symbol_until_map"] == {"BTCUSDT": 360_000}
+
+
+def test_incremental_pipeline_uses_endpoint_cursors_and_active_symbols_only():
+    from types import SimpleNamespace
+
+    from app.jobs.sync_pipeline_jobs import fetch_and_analyze_closed_trades
+
+    captured = {}
+
+    class FakeRepo:
+        def get_sync_cursor(self, stream):
+            assert stream == "income"
+            return {"last_id": 1, "last_time_ms": 1_000_000}
+
+        def get_symbol_sync_watermarks(self, symbols):
+            return {symbol: 900_000 for symbol in symbols}
+
+        def get_sync_cursors(self, stream, symbols):
+            return {
+                symbol: {"last_id": 2 if stream == "orders" else 3, "last_time_ms": 900_000}
+                for symbol in symbols
+            }
+
+    class FakeProcessor:
+        def get_incremental_income_activity(self, since, until):
+            captured["income_window"] = (since, until)
+            return (
+                ["BTCUSDT"],
+                {"BTCUSDT": -1.0},
+                {"BTCUSDT": (800_000, 950_000)},
+                {"last_id": 11, "last_time_ms": 950_000},
+            )
+
+        def analyze_orders(self, **kwargs):
+            captured["analyze"] = kwargs
+            return (
+                __import__("pandas").DataFrame(),
+                ["BTCUSDT"],
+                {},
+                {
+                    "BTCUSDT": {
+                        "orders": {"last_id": 12, "last_time_ms": 960_000},
+                        "trades": {"last_id": 13, "last_time_ms": 970_000},
+                    }
+                },
+            )
+
+    scheduler = SimpleNamespace(
+        processor=FakeProcessor(),
+        sync_repo=FakeRepo(),
+        symbol_sync_overlap_minutes=10,
+        use_time_filter=True,
+    )
+
+    result = fetch_and_analyze_closed_trades(
+        scheduler,
+        since=0,
+        until=2_000_000,
+        is_full_sync_run=False,
+    )
+
+    assert captured["income_window"] == (400_000, 2_000_000)
+    assert captured["analyze"]["traded_symbols"] == ["BTCUSDT"]
+    assert captured["analyze"]["return_cursor_updates"] is True
+    assert set(captured["analyze"]["order_cursors"]) == {"BTCUSDT"}
+    assert result[6]["BTCUSDT"]["trades"]["last_id"] == 13
+    assert result[7]["last_id"] == 11
 
 
 def test_request_trades_compensation_merges_symbols_with_earliest_since(monkeypatch):

@@ -1,10 +1,20 @@
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
+from app.core.binance_request_budget import (
+    BulkRequestAborted,
+    RollingWeightLimiter,
+    WeightedRequestSession,
+    binance_request_weight,
+    calculate_request_weight,
+)
 from app.logger import logger
+
+
+DAY_MS = 86_400_000
+DEFAULT_REBOUND_WINDOWS = (14, 30, 60, 365)
 
 _EXCHANGE_SYMBOLS_CACHE = {"symbols": None, "expires_at": 0.0}
 _EXCHANGE_SYMBOLS_LOCK = threading.Lock()
@@ -19,7 +29,7 @@ def _resolve_exchange_symbols_cache_ttl() -> float:
     return max(0.0, value)
 
 
-def _get_usdt_perpetual_symbol_meta(scheduler):
+def _get_usdt_perpetual_symbol_meta(scheduler, *, client=None):
     now = time.time()
     with _EXCHANGE_SYMBOLS_LOCK:
         cached_symbols = _EXCHANGE_SYMBOLS_CACHE.get("symbols")
@@ -27,7 +37,8 @@ def _get_usdt_perpetual_symbol_meta(scheduler):
         if cached_symbols and now < expires_at:
             return dict(cached_symbols)
 
-    exchange_info = scheduler.processor.get_exchange_info(client=scheduler.processor.client)
+    exchange_client = client or scheduler.processor.client
+    exchange_info = scheduler.processor.get_exchange_info(client=exchange_client)
     if not exchange_info or "symbols" not in exchange_info:
         raise RuntimeError("无法获取 exchangeInfo")
 
@@ -41,9 +52,7 @@ def _get_usdt_perpetual_symbol_meta(scheduler):
             or str(item.get("status", "")).upper() != "TRADING"
         ):
             continue
-        symbols[str(symbol)] = {
-            "onboard_date": item.get("onboardDate"),
-        }
+        symbols[str(symbol)] = {"onboard_date": item.get("onboardDate")}
     if not symbols:
         raise RuntimeError("无可用USDT永续交易对")
 
@@ -63,8 +72,7 @@ def _is_listing_daily_candle(open_time_ms: int, onboard_date_ms) -> bool:
         onboard_ts = int(onboard_date_ms)
     except (TypeError, ValueError):
         return False
-    day_ms = 86_400_000
-    return open_time_ms <= onboard_ts < open_time_ms + day_ms
+    return open_time_ms <= onboard_ts < open_time_ms + DAY_MS
 
 
 def _filter_listing_daily_candle(klines, onboard_date_ms):
@@ -83,10 +91,9 @@ def _filter_listing_daily_candle(klines, onboard_date_ms):
 def _extract_highs_from_klines(klines):
     highs = []
     for kline in klines:
-        if not isinstance(kline, list) or len(kline) < 3:
-            continue
+        value = kline.get("high") if isinstance(kline, dict) else kline[2] if len(kline) >= 3 else None
         try:
-            high_price = float(kline[2])
+            high_price = float(value)
         except (TypeError, ValueError):
             continue
         if high_price > 0:
@@ -111,149 +118,199 @@ def _build_drawdown_fields(*, current_price: float, highs_7d, highs_window):
     }
 
 
-def build_top_gainers_snapshot(scheduler, utc8):
-    """构建涨跌幅榜快照（不处理锁与冷却）。"""
-    stage_started_at = time.perf_counter()
-    now_utc = datetime.now(timezone.utc)
-    midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
-
-    usdt_perpetual_meta = _get_usdt_perpetual_symbol_meta(scheduler)
-    usdt_perpetual_symbols = set(usdt_perpetual_meta.keys())
-
-    ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/24hr")
-    if not ticker_data or not isinstance(ticker_data, list):
-        raise RuntimeError("无法获取 24hr ticker")
-
-    candidates = []
-    for item in ticker_data:
-        symbol = item.get("symbol")
-        if not symbol or symbol not in usdt_perpetual_symbols:
+def _normalize_daily_rows(symbol: str, raw_klines, *, now_ms: int) -> list[dict]:
+    rows = []
+    for kline in raw_klines or []:
+        if not isinstance(kline, list) or len(kline) < 5:
             continue
         try:
-            last_price = float(item.get("lastPrice", 0.0))
+            open_time = int(kline[0])
+            close_time = int(kline[6]) if len(kline) > 6 else open_time + DAY_MS - 1
+            rows.append(
+                {
+                    "symbol": str(symbol).upper(),
+                    "open_time": open_time,
+                    "open": float(kline[1]),
+                    "high": float(kline[2]),
+                    "low": float(kline[3]),
+                    "close": float(kline[4]),
+                    "is_closed": close_time < int(now_ms),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return rows
+
+
+def update_daily_kline_cache(
+    scheduler,
+    *,
+    history_days: int = 365,
+    max_weight_per_60s: int = 200,
+    now_ms: int | None = None,
+    limiter: RollingWeightLimiter | None = None,
+):
+    """Backfill missing symbols once, then upsert only the latest two daily bars."""
+    if not getattr(scheduler, "daily_kline_repo", None):
+        raise RuntimeError("daily_kline_repo 未配置")
+    if not scheduler.processor:
+        raise RuntimeError("API密钥未配置")
+
+    started_at = time.perf_counter()
+    resolved_now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    job_limiter = limiter or RollingWeightLimiter(max_weight_per_60s)
+    session = WeightedRequestSession(scheduler.processor.client, limiter=job_limiter)
+    symbol_meta = _get_usdt_perpetual_symbol_meta(scheduler, client=session)
+    symbols = sorted(symbol_meta)
+    latest_by_symbol = scheduler.daily_kline_repo.latest_open_times(symbols)
+
+    updated_rows = 0
+    backfill_symbols = 0
+    incremental_symbols = 0
+    failed_symbols = []
+    try:
+        for index, symbol in enumerate(symbols, start=1):
+            latest_open_time = latest_by_symbol.get(symbol)
+            if latest_open_time is None:
+                params = {
+                    "symbol": symbol,
+                    "interval": "1d",
+                    "limit": max(1, int(history_days)),
+                }
+                backfill_symbols += 1
+            else:
+                params = {
+                    "symbol": symbol,
+                    "interval": "1d",
+                    "startTime": int(latest_open_time),
+                    "limit": 2,
+                }
+                incremental_symbols += 1
+
+            raw_klines = session.public_get("/fapi/v1/klines", params)
+            if raw_klines is None:
+                failed_symbols.append(symbol)
+                continue
+            filtered = _filter_listing_daily_candle(
+                raw_klines,
+                symbol_meta.get(symbol, {}).get("onboard_date"),
+            )
+            normalized = _normalize_daily_rows(symbol, filtered, now_ms=resolved_now_ms)
+            updated_rows += scheduler.daily_kline_repo.upsert(normalized)
+
+            if index % 20 == 0 or index == len(symbols):
+                logger.info(
+                    "日K线缓存进度: "
+                    f"{index}/{len(symbols)}, rows={updated_rows}, "
+                    f"actual_weight={session.total_weight}"
+                )
+    except BulkRequestAborted:
+        logger.error(
+            "日K线缓存任务因 Binance 429/418 立即终止: "
+            f"processed={backfill_symbols + incremental_symbols}, actual_weight={session.total_weight}"
+        )
+        raise
+
+    result = {
+        "symbols": len(symbols),
+        "backfill_symbols": backfill_symbols,
+        "incremental_symbols": incremental_symbols,
+        "failed_symbols": failed_symbols,
+        "updated_rows": updated_rows,
+        "request_count": len(session.requests),
+        "request_weight": session.total_weight,
+        "peak_limit_per_60s": int(max_weight_per_60s),
+        "elapsed_seconds": time.perf_counter() - started_at,
+    }
+    logger.info(
+        "日K线缓存更新完成: "
+        f"symbols={result['symbols']}, backfill={backfill_symbols}, "
+        f"incremental={incremental_symbols}, rows={updated_rows}, "
+        f"requests={result['request_count']}, actual_weight={result['request_weight']}, "
+        f"rolling_limit={max_weight_per_60s}/60s"
+    )
+    return result
+
+
+def _ticker_last_price(item) -> float | None:
+    try:
+        price = float(item.get("lastPrice", item.get("price", 0.0)))
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
+
+
+def calculate_top_gainers_snapshot(
+    *,
+    ticker_data,
+    daily_klines_by_symbol,
+    utc8,
+    now_utc: datetime,
+    min_quote_volume: float,
+    max_symbols: int,
+    top_n: int,
+):
+    """Pure leaderboard calculation over one local market view."""
+    midnight_utc = now_utc.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    midnight_utc_ms = int(midnight_utc.timestamp() * 1000)
+    candidates = []
+    for item in ticker_data or []:
+        symbol = str(item.get("symbol") or "")
+        rows = daily_klines_by_symbol.get(symbol) or []
+        if not symbol or not rows:
+            continue
+        current_price = _ticker_last_price(item)
+        try:
             quote_volume = float(item.get("quoteVolume", 0.0))
         except (TypeError, ValueError):
             continue
-
-        if last_price <= 0:
+        if current_price is None or quote_volume < float(min_quote_volume):
             continue
-        if quote_volume < scheduler.leaderboard_min_quote_volume:
-            continue
-
-        candidates.append({
-            "symbol": symbol,
-            "last_price": last_price,
-            "quote_volume": quote_volume,
-        })
-
-    candidates.sort(key=lambda x: x["quote_volume"], reverse=True)
-    if scheduler.leaderboard_max_symbols > 0:
-        candidates = candidates[: scheduler.leaderboard_max_symbols]
-    logger.info(
-        "晨间涨幅榜候选统计: "
-        f"candidates={len(candidates)}, "
-        f"min_quote_volume={scheduler.leaderboard_min_quote_volume:.0f}, "
-        f"max_symbols={scheduler.leaderboard_max_symbols}"
-    )
-
-    leaderboard = []
-    progress_step = 20
-    total_candidates = len(candidates)
-    if total_candidates > 0:
-        min_interval = max(0.02, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
-        per_worker_rpm = max(1.0, 60.0 / min_interval)
-        workers_by_budget = max(1, int(scheduler.leaderboard_weight_budget_per_minute // per_worker_rpm))
-        worker_count = min(total_candidates, scheduler.leaderboard_kline_workers, workers_by_budget)
-        estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
-        estimated_total_weight = 1 + 40 + total_candidates
-        logger.info(
-            "晨间涨幅榜并发计划: "
-            f"workers={worker_count}, "
-            f"min_interval={min_interval:.2f}s, "
-            f"budget={scheduler.leaderboard_weight_budget_per_minute}/min, "
-            f"est_peak={estimated_peak_weight_per_min}/min, "
-            f"est_total_weight={estimated_total_weight}"
+        candidates.append(
+            {
+                "symbol": symbol,
+                "last_price": current_price,
+                "quote_volume": quote_volume,
+            }
         )
 
-        thread_local = threading.local()
+    candidates.sort(key=lambda item: item["quote_volume"], reverse=True)
+    if int(max_symbols) > 0:
+        candidates = candidates[: int(max_symbols)]
 
-        def _kline_task(item: dict):
-            if scheduler._is_api_cooldown_active(source="涨幅榜-逐币种计算"):
-                return item, None
-            worker_client = getattr(thread_local, "client", None)
-            if worker_client is None:
-                worker_client = scheduler.processor._create_worker_client()
-                thread_local.client = worker_client
-            open_price = scheduler.processor.get_price_change_from_utc_start(
-                symbol=item["symbol"],
-                timestamp=midnight_utc_ms,
-                client=worker_client,
-            )
-            daily_klines = worker_client.public_get(
-                "/fapi/v1/klines",
-                {"symbol": item["symbol"], "interval": "1d", "limit": 7},
-            ) or []
-            intraday_klines = worker_client.public_get(
-                "/fapi/v1/klines",
-                {"symbol": item["symbol"], "interval": "1h", "startTime": midnight_utc_ms, "limit": 24},
-            ) or []
-            filtered_daily_klines = _filter_listing_daily_candle(
-                daily_klines,
-                usdt_perpetual_meta.get(item["symbol"], {}).get("onboard_date"),
-            )
-            drawdown_fields = _build_drawdown_fields(
-                current_price=item["last_price"],
-                highs_7d=_extract_highs_from_klines(filtered_daily_klines[-7:]),
-                highs_window=_extract_highs_from_klines(intraday_klines),
-            )
-            return item, open_price, drawdown_fields
+    leaderboard = []
+    for item in candidates:
+        rows = daily_klines_by_symbol[item["symbol"]]
+        current_candle = next(
+            (row for row in reversed(rows) if int(row["open_time"]) == midnight_utc_ms),
+            None,
+        )
+        if current_candle is None:
+            continue
+        open_price = float(current_candle["open"])
+        if open_price <= 0:
+            continue
+        drawdown_fields = _build_drawdown_fields(
+            current_price=item["last_price"],
+            highs_7d=_extract_highs_from_klines(rows[-7:]),
+            highs_window=_extract_highs_from_klines([current_candle]),
+        )
+        leaderboard.append(
+            {
+                "symbol": item["symbol"],
+                "change": (item["last_price"] / open_price - 1.0) * 100.0,
+                "volume": item["quote_volume"],
+                "last_price": item["last_price"],
+                **drawdown_fields,
+            }
+        )
 
-        processed = 0
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(_kline_task, item) for item in candidates]
-            for future in as_completed(futures):
-                processed += 1
-                try:
-                    item, open_price, drawdown_fields = future.result()
-                except Exception as exc:
-                    logger.warning(f"涨幅榜逐币种计算异常: {exc}")
-                    if processed % progress_step == 0 or processed == total_candidates:
-                        logger.info(
-                            "晨间涨幅榜进度: "
-                            f"{processed}/{total_candidates}, "
-                            f"effective={len(leaderboard)}, "
-                            f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                        )
-                    continue
-
-                if open_price is not None and open_price > 0:
-                    pct_change = (item["last_price"] / open_price - 1) * 100
-                    leaderboard.append(
-                        {
-                            "symbol": item["symbol"],
-                            "change": pct_change,
-                            "volume": item["quote_volume"],
-                            "last_price": item["last_price"],
-                            **drawdown_fields,
-                        }
-                    )
-
-                if processed % progress_step == 0 or processed == total_candidates:
-                    logger.info(
-                        "晨间涨幅榜进度: "
-                        f"{processed}/{total_candidates}, "
-                        f"effective={len(leaderboard)}, "
-                        f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                    )
-
-    leaderboard.sort(key=lambda x: x["change"], reverse=True)
-    top_list = leaderboard[: scheduler.leaderboard_top_n]
-    losers_list = sorted(leaderboard, key=lambda x: x["change"])[: scheduler.leaderboard_top_n]
-
-    snapshot = {
-        "snapshot_date": datetime.now(utc8).strftime("%Y-%m-%d"),
-        "snapshot_time": datetime.now(utc8).strftime("%Y-%m-%d %H:%M:%S"),
+    leaderboard.sort(key=lambda row: row["change"], reverse=True)
+    top_list = leaderboard[: int(top_n)]
+    losers_list = sorted(leaderboard, key=lambda row: row["change"])[: int(top_n)]
+    return {
+        "snapshot_date": datetime.now(utc8).strftime("%Y-%m-%d") if now_utc is None else now_utc.astimezone(utc8).strftime("%Y-%m-%d"),
+        "snapshot_time": now_utc.astimezone(utc8).strftime("%Y-%m-%d %H:%M:%S"),
         "window_start_utc": midnight_utc.strftime("%Y-%m-%d %H:%M:%S"),
         "candidates": len(candidates),
         "effective": len(leaderboard),
@@ -262,175 +319,181 @@ def build_top_gainers_snapshot(scheduler, utc8):
         "losers_rows": losers_list,
         "all_rows": leaderboard,
     }
-    logger.info(
-        "晨间涨幅榜快照构建完成: "
-        f"candidates={snapshot['candidates']}, "
-        f"effective={snapshot['effective']}, "
-        f"top={snapshot['top']}, "
-        f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
+
+
+def calculate_rebound_snapshots(
+    *,
+    ticker_data,
+    daily_klines_by_symbol,
+    utc8,
+    now_utc: datetime,
+    top_n_by_window: dict[int, int],
+    windows=DEFAULT_REBOUND_WINDOWS,
+):
+    """Purely calculate all rebound windows from the same local rows and prices."""
+    prices = {}
+    for item in ticker_data or []:
+        symbol = str(item.get("symbol") or "")
+        price = _ticker_last_price(item)
+        if symbol and price is not None and symbol in daily_klines_by_symbol:
+            prices[symbol] = price
+
+    midnight_utc = now_utc.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    snapshots = {}
+    for window_days in windows:
+        days = int(window_days)
+        cutoff_ms = int((midnight_utc - timedelta(days=max(0, days - 1))).timestamp() * 1000)
+        metric_field = f"rebound_{days}d_pct"
+        low_field = f"low_{days}d"
+        low_time_field = f"low_{days}d_at_utc"
+        rebound_rows = []
+
+        for symbol in sorted(prices):
+            window_rows = [
+                row
+                for row in daily_klines_by_symbol.get(symbol, [])
+                if int(row["open_time"]) >= cutoff_ms
+            ]
+            valid_rows = [row for row in window_rows if float(row.get("low", 0.0)) > 0]
+            if not valid_rows:
+                continue
+            low_row = min(valid_rows, key=lambda row: float(row["low"]))
+            low_price = float(low_row["low"])
+            current_price = prices[symbol]
+            rebound_rows.append(
+                {
+                    "symbol": symbol,
+                    "current_price": current_price,
+                    low_field: low_price,
+                    low_time_field: datetime.fromtimestamp(
+                        int(low_row["open_time"]) / 1000,
+                        tz=timezone.utc,
+                    ).strftime("%Y-%m-%d %H:%M:%S"),
+                    metric_field: (current_price / low_price - 1.0) * 100.0,
+                    **_build_drawdown_fields(
+                        current_price=current_price,
+                        highs_7d=_extract_highs_from_klines(valid_rows[-7:]),
+                        highs_window=_extract_highs_from_klines(valid_rows),
+                    ),
+                }
+            )
+
+        rebound_rows.sort(key=lambda row: row[metric_field], reverse=True)
+        top_list = rebound_rows[: int(top_n_by_window.get(days, 10))]
+        snapshots[days] = {
+            "snapshot_date": now_utc.astimezone(utc8).strftime("%Y-%m-%d"),
+            "snapshot_time": now_utc.astimezone(utc8).strftime("%Y-%m-%d %H:%M:%S"),
+            "window_start_utc": (midnight_utc - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S"),
+            "candidates": len(prices),
+            "effective": len(rebound_rows),
+            "top": len(top_list),
+            "rows": top_list,
+            "all_rows": rebound_rows,
+        }
+    return snapshots
+
+
+def _load_daily_market_view(scheduler, *, now_utc: datetime):
+    repo = getattr(scheduler, "daily_kline_repo", None)
+    if repo is None:
+        raise RuntimeError("daily_kline_repo 未配置")
+    since_ms = int((now_utc.astimezone(timezone.utc) - timedelta(days=366)).timestamp() * 1000)
+    market_view = repo.load(since_open_time=since_ms)
+    if not market_view:
+        raise RuntimeError("本地日K线缓存为空，请先执行日K线更新任务")
+    return market_view
+
+
+def build_all_market_snapshots(scheduler, utc8, *, now_utc: datetime | None = None):
+    """Fetch one all-market ticker, then calculate all five snapshots locally."""
+    resolved_now_utc = now_utc or datetime.now(timezone.utc)
+    market_view = _load_daily_market_view(scheduler, now_utc=resolved_now_utc)
+    session = WeightedRequestSession(scheduler.processor.client)
+    ticker_data = session.public_get("/fapi/v1/ticker/24hr")
+    if not ticker_data or not isinstance(ticker_data, list):
+        raise RuntimeError("无法获取全市场 24hr ticker")
+
+    leaderboard = calculate_top_gainers_snapshot(
+        ticker_data=ticker_data,
+        daily_klines_by_symbol=market_view,
+        utc8=utc8,
+        now_utc=resolved_now_utc,
+        min_quote_volume=scheduler.leaderboard_min_quote_volume,
+        max_symbols=scheduler.leaderboard_max_symbols,
+        top_n=scheduler.leaderboard_top_n,
     )
+    top_n_by_window = {
+        14: scheduler.rebound_7d_top_n,
+        30: scheduler.rebound_30d_top_n,
+        60: scheduler.rebound_60d_top_n,
+        365: scheduler.rebound_365d_top_n,
+    }
+    rebounds = calculate_rebound_snapshots(
+        ticker_data=ticker_data,
+        daily_klines_by_symbol=market_view,
+        utc8=utc8,
+        now_utc=resolved_now_utc,
+        top_n_by_window=top_n_by_window,
+    )
+    logger.info(
+        "市场快照数据任务完成: "
+        f"ticker_requests={len(session.requests)}, actual_weight={session.total_weight}, "
+        "rebound_calculation_rest_requests=0"
+    )
+    return {
+        "leaderboard": leaderboard,
+        "rebounds": rebounds,
+        "request_count": len(session.requests),
+        "request_weight": session.total_weight,
+    }
+
+
+def build_top_gainers_snapshot(scheduler, utc8):
+    """Compatibility entry point backed only by the local daily-kline cache."""
+    now_utc = datetime.now(timezone.utc)
+    market_view = _load_daily_market_view(scheduler, now_utc=now_utc)
+    session = WeightedRequestSession(scheduler.processor.client)
+    ticker_data = session.public_get("/fapi/v1/ticker/24hr")
+    if not ticker_data or not isinstance(ticker_data, list):
+        raise RuntimeError("无法获取 24hr ticker")
+    snapshot = calculate_top_gainers_snapshot(
+        ticker_data=ticker_data,
+        daily_klines_by_symbol=market_view,
+        utc8=utc8,
+        now_utc=now_utc,
+        min_quote_volume=scheduler.leaderboard_min_quote_volume,
+        max_symbols=scheduler.leaderboard_max_symbols,
+        top_n=scheduler.leaderboard_top_n,
+    )
+    snapshot["request_weight"] = session.total_weight
     return snapshot
 
 
-def build_rebound_snapshot(scheduler, *, utc8, window_days: int, top_n: int, kline_workers: int, weight_budget_per_minute: int, label: str):
-    """构建反弹幅度榜快照（不处理锁与冷却）。"""
-    stage_started_at = time.perf_counter()
+def build_rebound_snapshot(
+    scheduler,
+    *,
+    utc8,
+    window_days: int,
+    top_n: int,
+    kline_workers: int,
+    weight_budget_per_minute: int,
+    label: str,
+):
+    """Compatibility entry point; no per-symbol K-line requests are emitted."""
+    del kline_workers, weight_budget_per_minute, label
     now_utc = datetime.now(timezone.utc)
-    window_start_utc = now_utc - timedelta(days=window_days)
-
-    usdt_perpetual_meta = _get_usdt_perpetual_symbol_meta(scheduler)
-    usdt_perpetual_symbols = set(usdt_perpetual_meta.keys())
-
-    ticker_data = scheduler.processor.client.public_get("/fapi/v1/ticker/price")
-    if not ticker_data:
-        raise RuntimeError("无法获取 ticker/price")
-    if isinstance(ticker_data, dict):
-        ticker_data = [ticker_data]
-
-    candidates = []
-    for item in ticker_data:
-        symbol = item.get("symbol")
-        if not symbol or symbol not in usdt_perpetual_symbols:
-            continue
-        try:
-            current_price = float(item.get("price", 0.0))
-        except (TypeError, ValueError):
-            continue
-        if current_price <= 0:
-            continue
-        candidates.append({"symbol": symbol, "current_price": current_price})
-
-    candidates.sort(key=lambda x: x["symbol"])
-    logger.info(f"{label}候选统计: candidates={len(candidates)}, top_n={top_n}")
-
-    rebound_rows = []
-    progress_step = 20
-    total_candidates = len(candidates)
-    if total_candidates > 0:
-        min_interval = max(0.02, float(os.getenv("BINANCE_MIN_REQUEST_INTERVAL", "0.3")))
-        per_worker_rpm = max(1.0, 60.0 / min_interval)
-        workers_by_budget = max(1, int(weight_budget_per_minute // per_worker_rpm))
-        worker_count = min(total_candidates, kline_workers, workers_by_budget)
-        estimated_peak_weight_per_min = int(worker_count * per_worker_rpm)
-        estimated_total_weight = 1 + 1 + total_candidates
-        logger.info(
-            f"{label}并发计划: "
-            f"workers={worker_count}, "
-            f"min_interval={min_interval:.2f}s, "
-            f"budget={weight_budget_per_minute}/min, "
-            f"est_peak={estimated_peak_weight_per_min}/min, "
-            f"est_total_weight={estimated_total_weight}"
-        )
-
-        thread_local = threading.local()
-        metric_field = f"rebound_{window_days}d_pct"
-        low_field = f"low_{window_days}d"
-        low_time_field = f"low_{window_days}d_at_utc"
-        kline_limit = max(14, int(window_days))
-
-        def _kline_task(item: dict):
-            if scheduler._is_api_cooldown_active(source=f"{label}-逐币种计算"):
-                return item, None
-
-            worker_client = getattr(thread_local, "client", None)
-            if worker_client is None:
-                worker_client = scheduler.processor._create_worker_client()
-                thread_local.client = worker_client
-
-            try:
-                klines = worker_client.public_get(
-                    "/fapi/v1/klines",
-                    {"symbol": item["symbol"], "interval": "1d", "limit": kline_limit},
-                ) or []
-            except Exception:
-                return item, None
-
-            filtered_klines = _filter_listing_daily_candle(
-                klines,
-                usdt_perpetual_meta.get(item["symbol"], {}).get("onboard_date"),
-            )
-
-            lows = []
-            for kline in filtered_klines:
-                try:
-                    low_price = float(kline[3])
-                    open_time = int(kline[0])
-                except (TypeError, ValueError):
-                    continue
-                if low_price <= 0:
-                    continue
-                lows.append((low_price, open_time))
-
-            if not lows:
-                return item, None
-
-            low_price, low_ts = min(lows, key=lambda entry: entry[0])
-            rebound_pct = (item["current_price"] / low_price - 1.0) * 100.0
-            low_at_utc = datetime.fromtimestamp(low_ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            drawdown_fields = _build_drawdown_fields(
-                current_price=item["current_price"],
-                highs_7d=_extract_highs_from_klines(filtered_klines[-7:]),
-                highs_window=_extract_highs_from_klines(filtered_klines),
-            )
-            return item, {
-                low_field: low_price,
-                low_time_field: low_at_utc,
-                metric_field: rebound_pct,
-                **drawdown_fields,
-            }
-
-        processed = 0
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(_kline_task, item) for item in candidates]
-            for future in as_completed(futures):
-                processed += 1
-                try:
-                    item, payload = future.result()
-                except Exception as exc:
-                    logger.warning(f"{label}逐币种计算异常: {exc}")
-                    payload = None
-                    item = None
-
-                if item and payload:
-                    rebound_rows.append(
-                        {
-                            "symbol": item["symbol"],
-                            "current_price": item["current_price"],
-                            low_field: payload[low_field],
-                            low_time_field: payload[low_time_field],
-                            metric_field: payload[metric_field],
-                            "drawdown_from_7d_high_pct": payload.get("drawdown_from_7d_high_pct"),
-                            "drawdown_from_window_high_pct": payload.get("drawdown_from_window_high_pct"),
-                        }
-                    )
-
-                if processed % progress_step == 0 or processed == total_candidates:
-                    logger.info(
-                        f"{label}进度: "
-                        f"{processed}/{total_candidates}, "
-                        f"effective={len(rebound_rows)}, "
-                        f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-                    )
-
-    metric_field = f"rebound_{window_days}d_pct"
-    rebound_rows.sort(key=lambda x: x[metric_field], reverse=True)
-    top_list = rebound_rows[:top_n]
-
-    snapshot = {
-        "snapshot_date": datetime.now(utc8).strftime("%Y-%m-%d"),
-        "snapshot_time": datetime.now(utc8).strftime("%Y-%m-%d %H:%M:%S"),
-        "window_start_utc": window_start_utc.strftime("%Y-%m-%d %H:%M:%S"),
-        "candidates": len(candidates),
-        "effective": len(rebound_rows),
-        "top": len(top_list),
-        "rows": top_list,
-        "all_rows": rebound_rows,
-    }
-    logger.info(
-        f"{label}快照构建完成: "
-        f"candidates={snapshot['candidates']}, "
-        f"effective={snapshot['effective']}, "
-        f"top={snapshot['top']}, "
-        f"elapsed={time.perf_counter() - stage_started_at:.1f}s"
-    )
+    market_view = _load_daily_market_view(scheduler, now_utc=now_utc)
+    session = WeightedRequestSession(scheduler.processor.client)
+    ticker_data = session.public_get("/fapi/v1/ticker/24hr")
+    if not ticker_data or not isinstance(ticker_data, list):
+        raise RuntimeError("无法获取全市场 ticker")
+    snapshot = calculate_rebound_snapshots(
+        ticker_data=ticker_data,
+        daily_klines_by_symbol=market_view,
+        utc8=utc8,
+        now_utc=now_utc,
+        top_n_by_window={int(window_days): int(top_n)},
+        windows=(int(window_days),),
+    )[int(window_days)]
+    snapshot["request_weight"] = session.total_weight
     return snapshot

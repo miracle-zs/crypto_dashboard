@@ -11,6 +11,7 @@ from .trade_api_gateway import (
     fetch_all_orders,
     fetch_income_history,
     fetch_real_positions,
+    fetch_user_trades,
 )
 from .trade_etl_service import (
     analyze_orders,
@@ -32,6 +33,7 @@ __all__ = [
     "SystemApiService",
     "fetch_income_history",
     "fetch_all_orders",
+    "fetch_user_trades",
     "fetch_account_balance",
     "fetch_real_positions",
     "analyze_orders",

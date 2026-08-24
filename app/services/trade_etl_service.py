@@ -16,15 +16,28 @@ def extract_symbol_closed_positions(
     until: int,
     use_time_filter: bool = True,
     fee_totals_by_symbol: Optional[Dict[str, float]] = None,
-) -> tuple[List[Dict], float]:
+    order_cursor: Optional[Dict] = None,
+    trade_cursor: Optional[Dict] = None,
+    cursor_overlap_minutes: int = 30,
+    return_cursor_update: bool = False,
+):
     started_at = time.perf_counter()
     worker_client = processor._create_worker_client()
+
+    effective_since = int(since)
+    cursor_times = []
+    for cursor in (order_cursor, trade_cursor):
+        if cursor and cursor.get("last_time_ms") is not None:
+            cursor_times.append(int(cursor["last_time_ms"]))
+    if cursor_times:
+        overlap_ms = max(10, int(cursor_overlap_minutes)) * 60 * 1000
+        effective_since = max(int(since), min(cursor_times) - overlap_ms)
 
     if use_time_filter:
         orders = processor.get_all_orders(
             symbol,
             limit=1000,
-            start_time=since,
+            start_time=effective_since,
             end_time=until,
             client=worker_client,
             fail_on_error=True,
@@ -39,12 +52,45 @@ def extract_symbol_closed_positions(
             fail_on_error=True,
         )
 
-    if not orders:
-        return [], time.perf_counter() - started_at
+    trades = []
+    if return_cursor_update:
+        trades = processor.get_user_trades(
+            symbol,
+            limit=1000,
+            start_time=effective_since if use_time_filter else None,
+            end_time=until if use_time_filter else None,
+            client=worker_client,
+            fail_on_error=True,
+        )
 
-    filled_orders = [order for order in orders if float(order["executedQty"]) > 0 and order["updateTime"] >= since]
+    cursor_update = {"orders": None, "trades": None}
+    if orders:
+        order_ids = [int(row["orderId"]) for row in orders if row.get("orderId") is not None]
+        order_times = [int(row["updateTime"]) for row in orders if row.get("updateTime") is not None]
+        cursor_update["orders"] = {
+            "last_id": max(order_ids) if order_ids else None,
+            "last_time_ms": max(order_times) if order_times else None,
+        }
+    if trades:
+        trade_ids = [int(row["id"]) for row in trades if row.get("id") is not None]
+        trade_times = [int(row["time"]) for row in trades if row.get("time") is not None]
+        cursor_update["trades"] = {
+            "last_id": max(trade_ids) if trade_ids else None,
+            "last_time_ms": max(trade_times) if trade_times else None,
+        }
+
+    if not orders:
+        result = ([], time.perf_counter() - started_at)
+        return (*result, cursor_update) if return_cursor_update else result
+
+    filled_orders = [
+        order
+        for order in orders
+        if float(order["executedQty"]) > 0 and order["updateTime"] >= effective_since
+    ]
     if len(filled_orders) < 1:
-        return [], time.perf_counter() - started_at
+        result = ([], time.perf_counter() - started_at)
+        return (*result, cursor_update) if return_cursor_update else result
     filled_orders.sort(key=lambda item: item["updateTime"])
 
     if fee_totals_by_symbol is not None:
@@ -54,7 +100,8 @@ def extract_symbol_closed_positions(
         fees_map = processor.get_fees_for_symbol(symbol, since, until, client=worker_client)
 
     positions = processor.match_orders_to_positions(filled_orders, symbol, fees_map, presorted=True)
-    return positions, time.perf_counter() - started_at
+    result = (positions, time.perf_counter() - started_at)
+    return (*result, cursor_update) if return_cursor_update else result
 
 
 def _prefetch_fee_totals(
@@ -104,13 +151,44 @@ def _collect_positions_for_symbols(
     symbol_until_map: Optional[Dict[str, int]],
     fee_totals_by_symbol: Dict[str, float],
     worker_count: int,
-) -> tuple[List[Dict], List[str], Dict[str, str], int, int, List[tuple[str, float, int]]]:
+    order_cursors: Optional[Dict[str, Dict]] = None,
+    trade_cursors: Optional[Dict[str, Dict]] = None,
+    cursor_overlap_minutes: int = 30,
+    return_cursor_updates: bool = False,
+):
     all_positions: List[Dict] = []
     success_count = 0
     failure_count = 0
     symbol_timings: List[tuple[str, float, int]] = []
     success_symbols: List[str] = []
     failure_symbols: Dict[str, str] = {}
+    cursor_updates: Dict[str, Dict] = {}
+
+    def _extract(symbol: str, symbol_since: int, symbol_until: int):
+        kwargs = {
+            "symbol": symbol,
+            "since": symbol_since,
+            "until": symbol_until,
+            "use_time_filter": use_time_filter,
+            "fee_totals_by_symbol": fee_totals_by_symbol,
+        }
+        if return_cursor_updates:
+            kwargs.update(
+                {
+                    "order_cursor": (order_cursors or {}).get(symbol),
+                    "trade_cursor": (trade_cursors or {}).get(symbol),
+                    "cursor_overlap_minutes": cursor_overlap_minutes,
+                    "return_cursor_update": True,
+                }
+            )
+        return processor._extract_symbol_closed_positions(**kwargs)
+
+    def _unpack(result):
+        if return_cursor_updates:
+            positions, elapsed, cursor_update = result
+            return positions, elapsed, cursor_update
+        positions, elapsed = result
+        return positions, elapsed, None
 
     if worker_count == 1:
         for idx, symbol in enumerate(symbols, 1):
@@ -118,13 +196,11 @@ def _collect_positions_for_symbols(
             try:
                 symbol_since = symbol_since_map.get(symbol, since) if symbol_since_map else since
                 symbol_until = symbol_until_map.get(symbol, until) if symbol_until_map else until
-                positions, elapsed = processor._extract_symbol_closed_positions(
-                    symbol=symbol,
-                    since=symbol_since,
-                    until=symbol_until,
-                    use_time_filter=use_time_filter,
-                    fee_totals_by_symbol=fee_totals_by_symbol,
+                positions, elapsed, cursor_update = _unpack(
+                    _extract(symbol, symbol_since, symbol_until)
                 )
+                if cursor_update:
+                    cursor_updates[symbol] = cursor_update
                 symbol_timings.append((symbol, elapsed, len(positions)))
                 success_count += 1
                 success_symbols.append(symbol)
@@ -139,12 +215,10 @@ def _collect_positions_for_symbols(
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             future_map = {
                 executor.submit(
-                    processor._extract_symbol_closed_positions,
+                    _extract,
                     symbol,
                     symbol_since_map.get(symbol, since) if symbol_since_map else since,
                     symbol_until_map.get(symbol, until) if symbol_until_map else until,
-                    use_time_filter,
-                    fee_totals_by_symbol,
                 ): symbol
                 for symbol in symbols
             }
@@ -152,7 +226,9 @@ def _collect_positions_for_symbols(
             for idx, future in enumerate(as_completed(future_map), 1):
                 symbol = future_map[future]
                 try:
-                    positions, elapsed = future.result()
+                    positions, elapsed, cursor_update = _unpack(future.result())
+                    if cursor_update:
+                        cursor_updates[symbol] = cursor_update
                     symbol_timings.append((symbol, elapsed, len(positions)))
                     success_count += 1
                     success_symbols.append(symbol)
@@ -165,7 +241,15 @@ def _collect_positions_for_symbols(
                     failure_symbols[symbol] = str(exc)
                     logger.error(f"[{idx}/{len(symbols)}] Processing {symbol} failed: {exc}")
 
-    return all_positions, success_symbols, failure_symbols, success_count, failure_count, symbol_timings
+    return (
+        all_positions,
+        success_symbols,
+        failure_symbols,
+        success_count,
+        failure_count,
+        symbol_timings,
+        cursor_updates,
+    )
 
 
 def _prefetch_open_prices(
@@ -177,21 +261,47 @@ def _prefetch_open_prices(
     price_keys = sorted({(pos["symbol"], processor.get_utc_day_start(pos["entry_time"])) for pos in all_positions})
     open_price_cache: Dict[tuple[str, int], Optional[float]] = {}
     price_timings: List[tuple[str, float, bool]] = []
-    price_worker_count = processor._resolve_workers(len(price_keys), max_workers=processor.max_price_workers)
+    daily_kline_repo = getattr(processor, "daily_kline_repo", None)
+    if daily_kline_repo is not None and price_keys:
+        symbols = sorted({symbol for symbol, _day_start in price_keys})
+        local_view = daily_kline_repo.load(
+            symbols,
+            since_open_time=min(day_start for _symbol, day_start in price_keys),
+        )
+        for symbol, day_start_ms in price_keys:
+            row = next(
+                (
+                    item
+                    for item in local_view.get(symbol, [])
+                    if int(item.get("open_time", -1)) == int(day_start_ms)
+                ),
+                None,
+            )
+            if row is not None:
+                try:
+                    open_price_cache[(symbol, day_start_ms)] = float(row["open"])
+                except (KeyError, TypeError, ValueError):
+                    pass
+
+    missing_price_keys = [key for key in price_keys if key not in open_price_cache]
+    price_worker_count = processor._resolve_workers(
+        len(missing_price_keys),
+        max_workers=processor.max_price_workers,
+    )
 
     if price_worker_count == 1:
-        for symbol, day_start_ms in price_keys:
+        for symbol, day_start_ms in missing_price_keys:
             fetched_symbol, fetched_day_start, price, elapsed = processor._fetch_open_price_for_key(
                 symbol=symbol,
                 utc_day_start_ms=day_start_ms,
             )
             open_price_cache[(fetched_symbol, fetched_day_start)] = price
             price_timings.append((fetched_symbol, elapsed, price is not None))
-    else:
+    elif price_worker_count > 1:
         with ThreadPoolExecutor(max_workers=price_worker_count) as executor:
             future_map = {
                 executor.submit(processor._fetch_open_price_for_key, symbol, day_start_ms): (symbol, day_start_ms)
-                for symbol, day_start_ms in price_keys
+                for symbol, day_start_ms in missing_price_keys
             }
             for future in as_completed(future_map):
                 symbol, day_start_ms = future_map[future]
@@ -209,7 +319,8 @@ def _prefetch_open_prices(
         slowest_price = sorted(price_timings, key=lambda item: item[1], reverse=True)[:5]
         slowest_price_str = ", ".join(f"{symbol}:{elapsed:.2f}s" for symbol, elapsed, _ok in slowest_price)
         logger.info(
-            f"Open price cache: keys={len(price_keys)}, hits={hit_count}, workers={price_worker_count}, "
+            f"Open price cache: keys={len(price_keys)}, local_hits={len(price_keys) - len(missing_price_keys)}, "
+            f"rest_hits={hit_count}, workers={price_worker_count}, "
             f"elapsed={price_prefetch_elapsed:.2f}s, slowest=[{slowest_price_str}]"
         )
 
@@ -227,7 +338,11 @@ def analyze_orders(
     symbol_until_map: Optional[Dict[str, int]] = None,
     prefetched_fee_totals: Optional[Dict[str, float]] = None,
     return_symbol_status: bool = False,
-) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
+    order_cursors: Optional[Dict[str, Dict]] = None,
+    trade_cursors: Optional[Dict[str, Dict]] = None,
+    cursor_overlap_minutes: int = 30,
+    return_cursor_updates: bool = False,
+):
     local_prefetched_fee_totals = prefetched_fee_totals
     if traded_symbols is None:
         income_records = processor._fetch_income_history(since=since, until=until)
@@ -241,6 +356,8 @@ def analyze_orders(
         logger.warning("No trading history found in the specified period")
         empty_df = pd.DataFrame()
         if return_symbol_status:
+            if return_cursor_updates:
+                return empty_df, [], {}, {}
             return empty_df, [], {}
         return empty_df
 
@@ -262,6 +379,7 @@ def analyze_orders(
         success_count,
         failure_count,
         symbol_timings,
+        cursor_updates,
     ) = _collect_positions_for_symbols(
         processor,
         symbols=symbols,
@@ -272,6 +390,10 @@ def analyze_orders(
         symbol_until_map=symbol_until_map,
         fee_totals_by_symbol=fee_totals_by_symbol,
         worker_count=worker_count,
+        order_cursors=order_cursors,
+        trade_cursors=trade_cursors,
+        cursor_overlap_minutes=cursor_overlap_minutes,
+        return_cursor_updates=return_cursor_updates,
     )
     _log_closed_etl_stats(
         success_count=success_count,
@@ -286,6 +408,8 @@ def analyze_orders(
         logger.warning("No closed positions found")
         empty_df = pd.DataFrame()
         if return_symbol_status:
+            if return_cursor_updates:
+                return empty_df, success_symbols, failure_symbols, cursor_updates
             return empty_df, success_symbols, failure_symbols
         return empty_df
 
@@ -305,6 +429,8 @@ def analyze_orders(
     )
 
     if return_symbol_status:
+        if return_cursor_updates:
+            return df, success_symbols, failure_symbols, cursor_updates
         return df, success_symbols, failure_symbols
     return df
 

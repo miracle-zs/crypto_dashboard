@@ -73,3 +73,100 @@ def test_fetch_income_history_raises_when_requested():
             until=2000,
             fail_on_error=True,
         )
+
+
+def test_fetch_user_trades_deduplicates_trade_ids_with_overlap():
+    fetch_user_trades = getattr(_MODULE, "fetch_user_trades", None)
+    assert callable(fetch_user_trades)
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def signed_get(self, endpoint, params=None):
+            self.calls.append((endpoint, dict(params or {})))
+            return [
+                {"id": 7, "time": 1500, "orderId": 70},
+                {"id": 7, "time": 1500, "orderId": 70},
+                {"id": 8, "time": 1600, "orderId": 80},
+            ]
+
+    client = FakeClient()
+    rows = fetch_user_trades(
+        client=client,
+        symbol="BTCUSDT",
+        start_time=1000,
+        end_time=2000,
+        limit=1000,
+        fail_on_error=True,
+    )
+
+    assert [row["id"] for row in rows] == [7, 8]
+    assert client.calls == [
+        (
+            "/fapi/v1/userTrades",
+            {
+                "symbol": "BTCUSDT",
+                "limit": 1000,
+                "startTime": 1000,
+                "endTime": 2000,
+            },
+        )
+    ]
+
+
+def test_all_orders_paginates_same_timestamp_with_order_id():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def signed_get(self, endpoint, params=None):
+            params = dict(params or {})
+            self.calls.append(params)
+            if "orderId" not in params:
+                return [
+                    {"orderId": 1, "updateTime": 1500},
+                    {"orderId": 2, "updateTime": 1500},
+                ]
+            return [{"orderId": 3, "updateTime": 1500}]
+
+    client = FakeClient()
+    rows = fetch_all_orders(
+        client=client,
+        symbol="BTCUSDT",
+        start_time=1000,
+        end_time=2000,
+        limit=2,
+        fail_on_error=True,
+    )
+
+    assert [row["orderId"] for row in rows] == [1, 2, 3]
+    assert client.calls[1]["orderId"] == 3
+
+
+def test_user_trades_paginates_with_from_id_without_time_params():
+    fetch_user_trades = _MODULE.fetch_user_trades
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def signed_get(self, endpoint, params=None):
+            params = dict(params or {})
+            self.calls.append(params)
+            if "fromId" not in params:
+                return [{"id": 1, "time": 1500}, {"id": 2, "time": 1500}]
+            return [{"id": 3, "time": 1600}]
+
+    client = FakeClient()
+    rows = fetch_user_trades(
+        client=client,
+        symbol="BTCUSDT",
+        start_time=1000,
+        end_time=2000,
+        limit=2,
+        fail_on_error=True,
+    )
+
+    assert [row["id"] for row in rows] == [1, 2, 3]
+    assert client.calls[1] == {"symbol": "BTCUSDT", "limit": 2, "fromId": 3}

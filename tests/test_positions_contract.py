@@ -11,3 +11,15 @@ def test_open_positions_contract_shape(client):
     assert "as_of" in body
     assert "positions" in body
     assert "summary" in body
+
+
+def test_open_positions_page_has_no_binance_dependency():
+    from app.main import app
+
+    route = next(route for route in app.routes if getattr(route, "path", None) == "/api/open-positions")
+    dependency_names = {
+        getattr(dependency.call, "__name__", "")
+        for dependency in route.dependant.dependencies
+    }
+
+    assert "get_public_rest" not in dependency_names

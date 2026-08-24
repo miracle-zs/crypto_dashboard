@@ -124,6 +124,7 @@ def fetch_all_orders(
     while current_start <= end_time:
         current_end = min(end_time, current_start + max_window_ms)
         window_start = current_start
+        next_order_id = None
 
         while True:
             params = {
@@ -132,6 +133,8 @@ def fetch_all_orders(
                 "startTime": window_start,
                 "endTime": current_end,
             }
+            if next_order_id is not None:
+                params["orderId"] = next_order_id
 
             batch = client.signed_get(endpoint, params)
             if batch is None:
@@ -151,14 +154,13 @@ def fetch_all_orders(
             if len(batch) < limit:
                 break
 
-            last_update = int(batch[-1].get("updateTime", window_start))
-            if last_update <= window_start:
-                window_start += 1
-            else:
-                window_start = last_update + 1
-
-            if window_start > current_end:
+            last_order_id = batch[-1].get("orderId")
+            if last_order_id is None:
                 break
+            candidate_order_id = int(last_order_id) + 1
+            if next_order_id is not None and candidate_order_id <= next_order_id:
+                break
+            next_order_id = candidate_order_id
 
         current_start = current_end + 1
 
@@ -166,6 +168,99 @@ def fetch_all_orders(
         logger.debug(f"No orders in time range for {symbol}")
 
     return all_orders
+
+
+def fetch_user_trades(
+    *,
+    client,
+    symbol: str,
+    limit: int = 1000,
+    start_time: int = None,
+    end_time: int = None,
+    from_trade_id: int = None,
+    fail_on_error: bool = False,
+) -> List[Dict]:
+    """Fetch account trades for one active symbol and deduplicate by trade ID."""
+    endpoint = "/fapi/v1/userTrades"
+    base_params = {"symbol": symbol, "limit": int(limit)}
+    if start_time is None and end_time is None:
+        if from_trade_id is not None:
+            base_params["fromId"] = int(from_trade_id)
+        result = client.signed_get(endpoint, base_params)
+        if result is None:
+            if fail_on_error:
+                raise RuntimeError(f"userTrades request failed for {symbol}")
+            return []
+        seen = set()
+        output = []
+        for trade in result or []:
+            trade_id = trade.get("id")
+            if trade_id is not None and trade_id in seen:
+                continue
+            if trade_id is not None:
+                seen.add(trade_id)
+            output.append(trade)
+        return output
+
+    if start_time is None:
+        start_time = max(0, int(end_time) - (7 * 24 * 60 * 60 * 1000) + 1)
+    if end_time is None:
+        end_time = int(time.time() * 1000)
+
+    max_window_ms = (7 * 24 * 60 * 60 * 1000) - 1
+    current_start = int(start_time)
+    until = int(end_time)
+    seen_trade_ids = set()
+    trades: List[Dict] = []
+    while current_start <= until:
+        current_end = min(until, current_start + max_window_ms)
+        next_trade_id = None
+        while True:
+            if next_trade_id is None:
+                params = {
+                    **base_params,
+                    "startTime": current_start,
+                    "endTime": current_end,
+                }
+            else:
+                # Binance forbids combining fromId with startTime/endTime.
+                params = {**base_params, "fromId": next_trade_id}
+            batch = client.signed_get(endpoint, params)
+            if batch is None:
+                if fail_on_error:
+                    raise RuntimeError(
+                        f"userTrades request failed for {symbol}, window=[{current_start},{current_end}]"
+                    )
+                break
+            for trade in batch or []:
+                try:
+                    trade_time = int(trade.get("time"))
+                except (TypeError, ValueError):
+                    trade_time = current_start
+                if trade_time < current_start or trade_time > current_end:
+                    continue
+                trade_id = trade.get("id")
+                if trade_id is not None and trade_id in seen_trade_ids:
+                    continue
+                if trade_id is not None:
+                    seen_trade_ids.add(trade_id)
+                trades.append(trade)
+            if not batch or len(batch) < int(limit):
+                break
+            last_trade_id = batch[-1].get("id")
+            if last_trade_id is None:
+                break
+            candidate_trade_id = int(last_trade_id) + 1
+            if next_trade_id is not None and candidate_trade_id <= next_trade_id:
+                break
+            next_trade_id = candidate_trade_id
+            try:
+                if int(batch[-1].get("time")) > current_end:
+                    break
+            except (TypeError, ValueError):
+                pass
+        current_start = current_end + 1
+    return trades
 
 
 def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:

@@ -38,6 +38,23 @@ def test_init_database_schema_sets_user_version_on_new_db(tmp_path):
     assert _get_user_version(db_path) == CURRENT_SCHEMA_VERSION
     assert "wallet_balance" in _get_table_columns(db_path, "balance_history")
     assert "is_long_term" in _get_table_columns(db_path, "open_positions")
+    assert {
+        "symbol",
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "is_closed",
+        "updated_at",
+    } == _get_table_columns(db_path, "daily_klines")
+    assert {
+        "stream",
+        "symbol",
+        "last_id",
+        "last_time_ms",
+        "updated_at",
+    } == _get_table_columns(db_path, "sync_cursors")
 
 
 def test_init_database_schema_upgrades_legacy_db_when_user_version_zero(tmp_path):

@@ -32,6 +32,7 @@ from app.services.trade_api_gateway import (
     fetch_all_orders,
     fetch_income_history,
     fetch_real_positions,
+    fetch_user_trades,
 )
 from app.services.trade_etl_service import (
     analyze_orders as analyze_orders_service,
@@ -266,6 +267,27 @@ class TradeDataProcessor:
             fail_on_error=fail_on_error,
         )
 
+    def get_user_trades(
+        self,
+        symbol: str,
+        limit: int = 1000,
+        start_time: int = None,
+        end_time: int = None,
+        from_trade_id: int = None,
+        client: Optional[BinanceFuturesRestClient] = None,
+        fail_on_error: bool = False,
+    ) -> List[Dict]:
+        client = client or self.client
+        return fetch_user_trades(
+            client=client,
+            symbol=symbol,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time,
+            from_trade_id=from_trade_id,
+            fail_on_error=fail_on_error,
+        )
+
     def get_exchange_info(self, client: Optional[BinanceFuturesRestClient] = None) -> dict:
         """Get exchange information"""
         client = client or self.client
@@ -436,17 +458,10 @@ class TradeDataProcessor:
         until: int,
         client: Optional[BinanceFuturesRestClient] = None,
     ) -> tuple[List[str], Dict[str, float], Dict[str, tuple[int, int]]]:
-        client = client or self.client
-        logger.info("Fetching traded symbols from income history...")
-        result = self._fetch_income_history(
+        symbols_list, fee_totals, activity_ranges, _cursor = self.get_incremental_income_activity(
             since=since,
             until=until,
             client=client,
-            fail_on_error=True,
-        )
-        symbols_list, fee_totals, activity_ranges = summarize_income_records_with_ranges(
-            result,
-            extra_loss_income_types=self.extra_loss_income_types,
         )
 
         if symbols_list:
@@ -456,6 +471,40 @@ class TradeDataProcessor:
 
         return symbols_list, fee_totals, activity_ranges
 
+    def get_incremental_income_activity(
+        self,
+        since: int,
+        until: int,
+        client: Optional[BinanceFuturesRestClient] = None,
+    ):
+        """Fetch all income types once and return activity plus the income cursor."""
+        client = client or self.client
+        logger.info("Fetching incremental activity from one all-type income pass...")
+        records = self._fetch_income_history(
+            since=since,
+            until=until,
+            client=client,
+            income_type=None,
+            fail_on_error=True,
+        )
+        symbols_list, fee_totals, activity_ranges = summarize_income_records_with_ranges(
+            records,
+            extra_loss_income_types=self.extra_loss_income_types,
+        )
+        ids = []
+        for record in records:
+            try:
+                ids.append(int(record.get("tranId")))
+            except (TypeError, ValueError):
+                pass
+        # A successful empty response still advances the covered time window.
+        # The configured overlap protects late-arriving records on the next run.
+        cursor = {
+            "last_id": max(ids) if ids else None,
+            "last_time_ms": int(until),
+        }
+        return symbols_list, fee_totals, activity_ranges, cursor
+
     def _extract_symbol_closed_positions(
         self,
         symbol: str,
@@ -463,7 +512,11 @@ class TradeDataProcessor:
         until: int,
         use_time_filter: bool = True,
         fee_totals_by_symbol: Optional[Dict[str, float]] = None,
-    ) -> tuple[List[Dict], float]:
+        order_cursor: Optional[Dict] = None,
+        trade_cursor: Optional[Dict] = None,
+        cursor_overlap_minutes: int = 30,
+        return_cursor_update: bool = False,
+    ):
         """Extract and transform closed positions for one symbol."""
         return extract_symbol_closed_positions_service(
             self,
@@ -472,6 +525,10 @@ class TradeDataProcessor:
             until=until,
             use_time_filter=use_time_filter,
             fee_totals_by_symbol=fee_totals_by_symbol,
+            order_cursor=order_cursor,
+            trade_cursor=trade_cursor,
+            cursor_overlap_minutes=cursor_overlap_minutes,
+            return_cursor_update=return_cursor_update,
         )
 
     def analyze_orders(
@@ -484,7 +541,11 @@ class TradeDataProcessor:
         symbol_until_map: Optional[Dict[str, int]] = None,
         prefetched_fee_totals: Optional[Dict[str, float]] = None,
         return_symbol_status: bool = False,
-    ) -> pd.DataFrame | Tuple[pd.DataFrame, List[str], Dict[str, str]]:
+        order_cursors: Optional[Dict[str, Dict]] = None,
+        trade_cursors: Optional[Dict[str, Dict]] = None,
+        cursor_overlap_minutes: int = 30,
+        return_cursor_updates: bool = False,
+    ):
         """Analyze orders and convert to DataFrame."""
         return analyze_orders_service(
             self,
@@ -496,6 +557,10 @@ class TradeDataProcessor:
             symbol_until_map=symbol_until_map,
             prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=return_symbol_status,
+            order_cursors=order_cursors,
+            trade_cursors=trade_cursors,
+            cursor_overlap_minutes=cursor_overlap_minutes,
+            return_cursor_updates=return_cursor_updates,
         )
 
     @staticmethod

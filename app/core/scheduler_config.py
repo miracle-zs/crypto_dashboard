@@ -53,6 +53,7 @@ class SchedulerConfig:
     update_interval_minutes: int
     trades_incremental_fallback_interval_minutes: int
     open_positions_update_interval_minutes: int
+    balance_sync_interval_minutes: int
     start_date: str | None
     end_date: str | None
     sync_lookback_minutes: int
@@ -78,6 +79,15 @@ class SchedulerConfig:
     leaderboard_alert_minute: int
     leaderboard_guard_before_minutes: int
     leaderboard_guard_after_minutes: int
+    daily_kline_update_hour: int
+    daily_kline_update_minute: int
+    market_snapshot_hour: int
+    market_snapshot_minute: int
+    historical_task_weight_budget_per_60s: int
+    background_weight_budget_per_60s: int
+    history_validation_hour: int
+    history_validation_minute: int
+    history_validation_lookback_hours: int
     enable_rebound_7d_snapshot: bool
     rebound_7d_top_n: int
     rebound_7d_kline_workers: int
@@ -127,28 +137,30 @@ def load_scheduler_config() -> SchedulerConfig:
     open_positions_full_default_minute = (daily_full_sync_minute + 20) % 60
 
     rebound_7d_kline_workers = _env_int("REBOUND_7D_KLINE_WORKERS", 6, minimum=1)
-    rebound_7d_weight_budget_per_minute = _env_int(
-        "REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE", 900, minimum=60
+    rebound_7d_weight_budget_per_minute = min(
+        200,
+        _env_int("REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE", 200, minimum=1),
     )
     rebound_7d_hour = _env_int("REBOUND_7D_HOUR", 7, minimum=0)
     rebound_7d_minute = _env_int("REBOUND_7D_MINUTE", 30, minimum=0)
 
     return SchedulerConfig(
         scheduler_timezone=os.getenv("SCHEDULER_TIMEZONE", "Asia/Shanghai"),
-        days_to_fetch=_env_int("DAYS_TO_FETCH", 30, minimum=1),
+        days_to_fetch=_env_int("DAYS_TO_FETCH", 60, minimum=1),
         update_interval_minutes=update_interval_minutes,
         trades_incremental_fallback_interval_minutes=trades_incremental_fallback_interval_minutes,
         open_positions_update_interval_minutes=_env_int(
             "OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES",
-            update_interval_minutes,
+            5,
             minimum=1,
         ),
+        balance_sync_interval_minutes=_env_int("BALANCE_SYNC_INTERVAL_MINUTES", 15, minimum=1),
         start_date=os.getenv("START_DATE"),
         end_date=os.getenv("END_DATE"),
-        sync_lookback_minutes=_env_int("SYNC_LOOKBACK_MINUTES", 1440, minimum=1),
-        symbol_sync_overlap_minutes=_env_int("SYMBOL_SYNC_OVERLAP_MINUTES", 1440, minimum=1),
+        sync_lookback_minutes=_env_int("SYNC_LOOKBACK_MINUTES", 30, minimum=1),
+        symbol_sync_overlap_minutes=_env_int("SYMBOL_SYNC_OVERLAP_MINUTES", 30, minimum=10),
         open_positions_lookback_days=_env_int("OPEN_POSITIONS_LOOKBACK_DAYS", 3, minimum=1),
-        enable_daily_open_positions_full_sync=_env_bool("ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC", True),
+        enable_daily_open_positions_full_sync=_env_bool("ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC", False),
         open_positions_full_lookback_days=_env_int("OPEN_POSITIONS_FULL_LOOKBACK_DAYS", 60, minimum=1),
         open_positions_full_sync_hour=_env_int(
             "OPEN_POSITIONS_FULL_SYNC_HOUR",
@@ -171,11 +183,31 @@ def load_scheduler_config() -> SchedulerConfig:
         leaderboard_min_quote_volume=_env_float("LEADERBOARD_MIN_QUOTE_VOLUME", 50_000_000, minimum=0.0),
         leaderboard_max_symbols=_env_int("LEADERBOARD_MAX_SYMBOLS", 120, minimum=0),
         leaderboard_kline_workers=_env_int("LEADERBOARD_KLINE_WORKERS", 6, minimum=1),
-        leaderboard_weight_budget_per_minute=_env_int("LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE", 900, minimum=60),
+        leaderboard_weight_budget_per_minute=min(
+            200,
+            _env_int("LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE", 200, minimum=1),
+        ),
         leaderboard_alert_hour=_env_int("LEADERBOARD_ALERT_HOUR", 7, minimum=0) % 24,
-        leaderboard_alert_minute=_env_int("LEADERBOARD_ALERT_MINUTE", 40, minimum=0) % 60,
+        leaderboard_alert_minute=_env_int("LEADERBOARD_ALERT_MINUTE", 30, minimum=0) % 60,
         leaderboard_guard_before_minutes=_env_int("LEADERBOARD_GUARD_BEFORE_MINUTES", 2, minimum=0),
         leaderboard_guard_after_minutes=_env_int("LEADERBOARD_GUARD_AFTER_MINUTES", 5, minimum=0),
+        daily_kline_update_hour=_env_int("DAILY_KLINE_UPDATE_HOUR", 6, minimum=0) % 24,
+        daily_kline_update_minute=_env_int("DAILY_KLINE_UPDATE_MINUTE", 15, minimum=0) % 60,
+        market_snapshot_hour=_env_int("MARKET_SNAPSHOT_HOUR", 7, minimum=0) % 24,
+        market_snapshot_minute=_env_int("MARKET_SNAPSHOT_MINUTE", 0, minimum=0) % 60,
+        historical_task_weight_budget_per_60s=min(
+            200,
+            _env_int("HISTORICAL_TASK_WEIGHT_BUDGET_PER_60S", 200, minimum=1),
+        ),
+        background_weight_budget_per_60s=min(
+            250,
+            _env_int("BACKGROUND_WEIGHT_BUDGET_PER_60S", 250, minimum=1),
+        ),
+        history_validation_hour=_env_int("HISTORY_VALIDATION_HOUR", 2, minimum=0) % 24,
+        history_validation_minute=_env_int("HISTORY_VALIDATION_MINUTE", 10, minimum=0) % 60,
+        history_validation_lookback_hours=_env_int(
+            "HISTORY_VALIDATION_LOOKBACK_HOURS", 48, minimum=24
+        ),
         enable_rebound_7d_snapshot=_env_bool("ENABLE_REBOUND_7D_SNAPSHOT", True),
         rebound_7d_top_n=_env_int("REBOUND_7D_TOP_N", 10, minimum=1),
         rebound_7d_kline_workers=rebound_7d_kline_workers,
@@ -185,30 +217,39 @@ def load_scheduler_config() -> SchedulerConfig:
         enable_rebound_30d_snapshot=_env_bool("ENABLE_REBOUND_30D_SNAPSHOT", True),
         rebound_30d_top_n=_env_int("REBOUND_30D_TOP_N", 10, minimum=1),
         rebound_30d_kline_workers=_env_int("REBOUND_30D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_30d_weight_budget_per_minute=_env_int(
-            "REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE",
-            rebound_7d_weight_budget_per_minute,
-            minimum=60,
+        rebound_30d_weight_budget_per_minute=min(
+            200,
+            _env_int(
+                "REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE",
+                rebound_7d_weight_budget_per_minute,
+                minimum=1,
+            ),
         ),
         rebound_30d_hour=_env_int("REBOUND_30D_HOUR", rebound_7d_hour, minimum=0) % 24,
         rebound_30d_minute=_env_int("REBOUND_30D_MINUTE", rebound_7d_minute + 2, minimum=0) % 60,
         enable_rebound_60d_snapshot=_env_bool("ENABLE_REBOUND_60D_SNAPSHOT", True),
         rebound_60d_top_n=_env_int("REBOUND_60D_TOP_N", 10, minimum=1),
         rebound_60d_kline_workers=_env_int("REBOUND_60D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_60d_weight_budget_per_minute=_env_int(
-            "REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE",
-            rebound_7d_weight_budget_per_minute,
-            minimum=60,
+        rebound_60d_weight_budget_per_minute=min(
+            200,
+            _env_int(
+                "REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE",
+                rebound_7d_weight_budget_per_minute,
+                minimum=1,
+            ),
         ),
         rebound_60d_hour=_env_int("REBOUND_60D_HOUR", rebound_7d_hour, minimum=0) % 24,
         rebound_60d_minute=_env_int("REBOUND_60D_MINUTE", rebound_7d_minute + 4, minimum=0) % 60,
         enable_rebound_365d_snapshot=_env_bool("ENABLE_REBOUND_365D_SNAPSHOT", True),
         rebound_365d_top_n=_env_int("REBOUND_365D_TOP_N", 10, minimum=1),
         rebound_365d_kline_workers=_env_int("REBOUND_365D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_365d_weight_budget_per_minute=_env_int(
-            "REBOUND_365D_WEIGHT_BUDGET_PER_MINUTE",
-            rebound_7d_weight_budget_per_minute,
-            minimum=60,
+        rebound_365d_weight_budget_per_minute=min(
+            200,
+            _env_int(
+                "REBOUND_365D_WEIGHT_BUDGET_PER_MINUTE",
+                rebound_7d_weight_budget_per_minute,
+                minimum=1,
+            ),
         ),
         rebound_365d_hour=_env_int("REBOUND_365D_HOUR", rebound_7d_hour, minimum=0) % 24,
         rebound_365d_minute=_env_int("REBOUND_365D_MINUTE", rebound_7d_minute + 6, minimum=0) % 60,
@@ -222,5 +263,5 @@ def load_scheduler_config() -> SchedulerConfig:
         profit_alert_threshold_pct=_env_float("PROFIT_ALERT_THRESHOLD_PCT", 20.0, minimum=0.0),
         api_job_lock_wait_seconds=_env_int("API_JOB_LOCK_WAIT_SECONDS", 8, minimum=0),
         enable_triggered_trades_compensation=_env_bool("ENABLE_TRIGGERED_TRADES_COMPENSATION", True),
-        trades_compensation_lookback_minutes=_env_int("TRADES_COMPENSATION_LOOKBACK_MINUTES", 1440, minimum=1),
+        trades_compensation_lookback_minutes=_env_int("TRADES_COMPENSATION_LOOKBACK_MINUTES", 30, minimum=10),
     )

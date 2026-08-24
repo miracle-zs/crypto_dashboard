@@ -40,6 +40,51 @@ class SyncReadRepository:
             watermarks[row["symbol"]] = row["last_success_end_ms"]
         return watermarks
 
+    def get_sync_cursor(self, stream: str, symbol: str = ""):
+        conn = self.db._get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT last_id, last_time_ms
+                FROM sync_cursors
+                WHERE stream = ? AND symbol = ?
+                """,
+                (str(stream), str(symbol or "").upper()),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return {
+            "last_id": int(row["last_id"]) if row["last_id"] is not None else None,
+            "last_time_ms": int(row["last_time_ms"]) if row["last_time_ms"] is not None else None,
+        }
+
+    def get_sync_cursors(self, stream: str, symbols):
+        normalized = sorted({str(symbol).upper() for symbol in symbols or [] if symbol})
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        conn = self.db._get_connection()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT symbol, last_id, last_time_ms
+                FROM sync_cursors
+                WHERE stream = ? AND symbol IN ({placeholders})
+                """,
+                (str(stream), *normalized),
+            ).fetchall()
+        finally:
+            conn.close()
+        result = {symbol: None for symbol in normalized}
+        for row in rows:
+            result[str(row["symbol"])] = {
+                "last_id": int(row["last_id"]) if row["last_id"] is not None else None,
+                "last_time_ms": int(row["last_time_ms"]) if row["last_time_ms"] is not None else None,
+            }
+        return result
+
     def get_statistics(self):
         return self.trade_repo.get_statistics()
 

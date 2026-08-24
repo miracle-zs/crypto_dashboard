@@ -7,11 +7,22 @@ from app.logger import logger
 from app.services.sync_planning_service import build_symbol_since_map
 
 
-def resolve_sync_window(scheduler, *, force_full: bool, last_entry_time: str | None, utc8):
+def resolve_sync_window(
+    scheduler,
+    *,
+    force_full: bool,
+    last_entry_time: str | None,
+    utc8,
+    full_lookback_days: int | None = None,
+):
     is_full_sync_run = force_full
     if force_full:
         is_full_sync_run = True
-        if scheduler.start_date:
+        if full_lookback_days is not None:
+            bounded_days = max(1, int(full_lookback_days))
+            since = int((datetime.now(utc8) - timedelta(days=bounded_days)).timestamp() * 1000)
+            logger.info(f"周期全量校验 - 固定回溯最近 {bounded_days} 天")
+        elif scheduler.start_date:
             try:
                 start_dt = datetime.strptime(scheduler.start_date, "%Y-%m-%d").replace(tzinfo=utc8)
                 start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
@@ -59,14 +70,29 @@ def fetch_and_analyze_closed_trades(
     stage_started = time.perf_counter()
     prefetched_fee_totals = None
     symbol_activity_ranges = {}
-    if hasattr(scheduler.processor, "get_traded_symbols_fee_totals_and_ranges"):
+    income_cursor = None
+    income_since = int(since)
+    if not is_full_sync_run and hasattr(scheduler.sync_repo, "get_sync_cursor"):
+        previous_income_cursor = scheduler.sync_repo.get_sync_cursor("income")
+        if previous_income_cursor and previous_income_cursor.get("last_time_ms") is not None:
+            overlap_ms = max(10, int(scheduler.symbol_sync_overlap_minutes)) * 60 * 1000
+            income_since = max(int(since), int(previous_income_cursor["last_time_ms"]) - overlap_ms)
+
+    if hasattr(scheduler.processor, "get_incremental_income_activity"):
+        (
+            traded_symbols,
+            prefetched_fee_totals,
+            symbol_activity_ranges,
+            income_cursor,
+        ) = scheduler.processor.get_incremental_income_activity(income_since, until)
+    elif hasattr(scheduler.processor, "get_traded_symbols_fee_totals_and_ranges"):
         traded_symbols, prefetched_fee_totals, symbol_activity_ranges = (
-            scheduler.processor.get_traded_symbols_fee_totals_and_ranges(since, until)
+            scheduler.processor.get_traded_symbols_fee_totals_and_ranges(income_since, until)
         )
     elif hasattr(scheduler.processor, "get_traded_symbols_and_fee_totals"):
-        traded_symbols, prefetched_fee_totals = scheduler.processor.get_traded_symbols_and_fee_totals(since, until)
+        traded_symbols, prefetched_fee_totals = scheduler.processor.get_traded_symbols_and_fee_totals(income_since, until)
     else:
-        traded_symbols = scheduler.processor.get_traded_symbols(since, until)
+        traded_symbols = scheduler.processor.get_traded_symbols(income_since, until)
     symbols_elapsed = time.perf_counter() - stage_started
     symbol_count = len(traded_symbols)
     logger.info(f"拉取活跃交易币种完成: count={symbol_count}, elapsed={symbols_elapsed:.2f}s")
@@ -79,7 +105,7 @@ def fetch_and_analyze_closed_trades(
         symbol_since_map, warmed_symbols = build_symbol_since_map(
             traded_symbols=traded_symbols,
             watermarks=watermarks,
-            since=since,
+            since=income_since,
             overlap_minutes=scheduler.symbol_sync_overlap_minutes,
         )
         logger.info(
@@ -107,8 +133,18 @@ def fetch_and_analyze_closed_trades(
         )
 
     if traded_symbols:
+        order_cursors = (
+            scheduler.sync_repo.get_sync_cursors("orders", traded_symbols)
+            if not is_full_sync_run and hasattr(scheduler.sync_repo, "get_sync_cursors")
+            else {}
+        )
+        trade_cursors = (
+            scheduler.sync_repo.get_sync_cursors("trades", traded_symbols)
+            if not is_full_sync_run and hasattr(scheduler.sync_repo, "get_sync_cursors")
+            else {}
+        )
         analysis_result = scheduler.processor.analyze_orders(
-            since=since,
+            since=income_since,
             until=until,
             traded_symbols=traded_symbols,
             use_time_filter=scheduler.use_time_filter,
@@ -116,19 +152,37 @@ def fetch_and_analyze_closed_trades(
             symbol_until_map=symbol_until_map,
             prefetched_fee_totals=prefetched_fee_totals,
             return_symbol_status=True,
+            order_cursors=order_cursors,
+            trade_cursors=trade_cursors,
+            cursor_overlap_minutes=scheduler.symbol_sync_overlap_minutes,
+            return_cursor_updates=True,
         )
-        if not isinstance(analysis_result, (tuple, list)) or len(analysis_result) != 3:
+        if not isinstance(analysis_result, (tuple, list)) or len(analysis_result) not in (3, 4):
             raise RuntimeError(f"analyze_orders返回结构异常: type={type(analysis_result)}, value={analysis_result}")
-        df, success_symbols, failure_symbols = analysis_result
+        if len(analysis_result) == 4:
+            df, success_symbols, failure_symbols, cursor_updates = analysis_result
+        else:
+            df, success_symbols, failure_symbols = analysis_result
+            cursor_updates = {}
     else:
         df = pd.DataFrame()
         success_symbols = []
         failure_symbols = {}
+        cursor_updates = {}
         logger.info("无活跃币种，跳过闭仓ETL分析")
 
     analyze_elapsed = time.perf_counter() - stage_started
     logger.info(f"闭仓ETL完成: rows={len(df)}, elapsed={analyze_elapsed:.2f}s")
-    return df, success_symbols, failure_symbols, symbol_count, symbols_elapsed, analyze_elapsed
+    return (
+        df,
+        success_symbols,
+        failure_symbols,
+        symbol_count,
+        symbols_elapsed,
+        analyze_elapsed,
+        cursor_updates,
+        income_cursor,
+    )
 
 
 def persist_closed_trades_and_watermarks(
@@ -139,6 +193,8 @@ def persist_closed_trades_and_watermarks(
     success_symbols: list[str],
     failure_symbols: dict[str, str],
     until: int,
+    cursor_updates: dict | None = None,
+    income_cursor: dict | None = None,
 ) -> tuple[float, int]:
     save_trades_elapsed = 0.0
     trades_saved = 0
@@ -168,4 +224,36 @@ def persist_closed_trades_and_watermarks(
         scheduler.sync_repo.update_symbol_sync_failure_batch(failures=failure_symbols, end_ms=until)
         save_trades_elapsed += time.perf_counter() - stage_started
         logger.warning(f"同步水位未推进(失败): failed_symbols={len(failure_symbols)}")
+    if hasattr(scheduler.sync_repo, "upsert_sync_cursors"):
+        cursor_rows = []
+        successful_set = {str(symbol).upper() for symbol in success_symbols}
+        for symbol, updates in (cursor_updates or {}).items():
+            normalized_symbol = str(symbol).upper()
+            if normalized_symbol not in successful_set:
+                continue
+            for stream in ("orders", "trades"):
+                cursor = (updates or {}).get(stream)
+                if cursor:
+                    cursor_rows.append(
+                        {
+                            "stream": stream,
+                            "symbol": normalized_symbol,
+                            "last_id": cursor.get("last_id"),
+                            "last_time_ms": cursor.get("last_time_ms"),
+                        }
+                    )
+        if income_cursor and not failure_symbols:
+            cursor_rows.append(
+                {
+                    "stream": "income",
+                    "symbol": "",
+                    "last_id": income_cursor.get("last_id"),
+                    "last_time_ms": income_cursor.get("last_time_ms"),
+                }
+            )
+        if cursor_rows:
+            stage_started = time.perf_counter()
+            scheduler.sync_repo.upsert_sync_cursors(cursor_rows)
+            save_trades_elapsed += time.perf_counter() - stage_started
+            logger.info(f"端点游标推进: rows={len(cursor_rows)}")
     return save_trades_elapsed, trades_saved

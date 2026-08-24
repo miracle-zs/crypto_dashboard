@@ -91,6 +91,53 @@ class SyncWriteRepository:
         conn.close()
         return len(rows)
 
+    def upsert_sync_cursors(self, rows):
+        normalized = []
+        for row in rows or []:
+            stream = str(row.get("stream") or "").strip()
+            if not stream:
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            last_id = row.get("last_id")
+            last_time_ms = row.get("last_time_ms")
+            normalized.append(
+                (
+                    stream,
+                    symbol,
+                    int(last_id) if last_id is not None else None,
+                    int(last_time_ms) if last_time_ms is not None else None,
+                )
+            )
+        if not normalized:
+            return 0
+
+        conn = self.db._get_connection()
+        try:
+            conn.executemany(
+                """
+                INSERT INTO sync_cursors (
+                    stream, symbol, last_id, last_time_ms, updated_at
+                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(stream, symbol) DO UPDATE SET
+                    last_id = CASE
+                        WHEN excluded.last_id IS NULL THEN sync_cursors.last_id
+                        WHEN sync_cursors.last_id IS NULL THEN excluded.last_id
+                        ELSE MAX(sync_cursors.last_id, excluded.last_id)
+                    END,
+                    last_time_ms = CASE
+                        WHEN excluded.last_time_ms IS NULL THEN sync_cursors.last_time_ms
+                        WHEN sync_cursors.last_time_ms IS NULL THEN excluded.last_time_ms
+                        ELSE MAX(sync_cursors.last_time_ms, excluded.last_time_ms)
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                normalized,
+            )
+            conn.commit()
+            return len(normalized)
+        finally:
+            conn.close()
+
     def save_trades(self, df, overwrite: bool = False):
         return self.db.save_trades(df, overwrite=overwrite)
 

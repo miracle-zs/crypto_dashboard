@@ -17,33 +17,35 @@ def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
         return max(minimum, default)
 
 
-def _configure_full_sync_request_budget() -> bool:
+def _configure_full_sync_request_budget(max_weight_per_60s: int = 200) -> bool:
     enabled = str(os.getenv("FULL_SYNC_REQUEST_BUDGET_ENABLED", "1")).strip().lower() in ("1", "true", "yes")
     if not enabled:
         return False
 
-    budget_per_minute = _read_int_env("FULL_SYNC_REQUEST_BUDGET_PER_MINUTE", 900, minimum=60)
-    path_weights = {
-        "/fapi/v1/allOrders": _read_int_env("FULL_SYNC_WEIGHT_ALL_ORDERS", 20, minimum=1),
-        "/fapi/v1/klines": _read_int_env("FULL_SYNC_WEIGHT_KLINES", 2, minimum=1),
-        "/fapi/v1/income": _read_int_env("FULL_SYNC_WEIGHT_INCOME", 30, minimum=1),
-    }
+    configured_budget = _read_int_env(
+        "FULL_SYNC_REQUEST_BUDGET_PER_MINUTE",
+        max_weight_per_60s,
+        minimum=1,
+    )
+    budget_per_minute = min(200, int(max_weight_per_60s), configured_budget)
     BinanceFuturesRestClient.configure_global_request_budget(
         enabled=True,
         per_minute=budget_per_minute,
-        path_weights=path_weights,
     )
     logger.info(
-        "全量同步请求预算器已启用: "
-        f"budget={budget_per_minute}/min, "
-        f"weights={{allOrders:{path_weights['/fapi/v1/allOrders']}, "
-        f"klines:{path_weights['/fapi/v1/klines']}, "
-        f"income:{path_weights['/fapi/v1/income']}}}"
+        "历史同步滚动请求预算器已启用: "
+        f"budget={budget_per_minute}/rolling-60s, weights=unified-endpoint-rules"
     )
     return True
 
 
-def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
+def run_sync_trades_data_impl(
+    scheduler,
+    *,
+    force_full: bool = False,
+    validation_lookback_hours: int | None = None,
+    full_lookback_days: int | None = None,
+):
     """同步交易数据到数据库（实际执行逻辑）"""
     if not scheduler.processor:
         logger.warning("无法同步: API密钥未配置")
@@ -73,19 +75,33 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
 
     try:
         logger.info("=" * 50)
-        run_mode = "全量" if force_full else "增量"
+        run_mode = "全量" if force_full else "近期校验" if validation_lookback_hours else "增量"
         logger.info(f"开始同步交易数据... mode={run_mode}")
-        if force_full:
-            budget_enabled = _configure_full_sync_request_budget()
+        if force_full or validation_lookback_hours is not None:
+            budget_enabled = _configure_full_sync_request_budget(
+                scheduler.historical_task_weight_budget_per_60s
+            )
 
         # 更新同步状态为进行中
         scheduler.sync_repo.update_sync_status(status="syncing")
 
         last_entry_time = scheduler.sync_repo.get_last_entry_time()
-        since, until, is_full_sync_run = scheduler._resolve_sync_window(
-            force_full=force_full,
-            last_entry_time=last_entry_time,
-        )
+        if full_lookback_days is None:
+            since, until, is_full_sync_run = scheduler._resolve_sync_window(
+                force_full=force_full,
+                last_entry_time=last_entry_time,
+            )
+        else:
+            since, until, is_full_sync_run = scheduler._resolve_sync_window(
+                force_full=force_full,
+                last_entry_time=last_entry_time,
+                full_lookback_days=full_lookback_days,
+            )
+        if validation_lookback_hours is not None:
+            validation_hours = min(48, max(24, int(validation_lookback_hours)))
+            since = max(0, int(until) - validation_hours * 60 * 60 * 1000)
+            is_full_sync_run = True
+            logger.info(f"近期历史校验窗口: lookback_hours={validation_hours}")
         (
             df,
             success_symbols,
@@ -93,6 +109,8 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
             symbol_count,
             symbols_elapsed,
             analyze_elapsed,
+            cursor_updates,
+            income_cursor,
         ) = scheduler._fetch_and_analyze_closed_trades(
             since=since,
             until=until,
@@ -105,6 +123,8 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
             success_symbols=success_symbols,
             failure_symbols=failure_symbols,
             until=until,
+            cursor_updates=cursor_updates,
+            income_cursor=income_cursor,
         )
 
         if failure_symbols:
@@ -192,6 +212,9 @@ def run_sync_trades_data_impl(scheduler, *, force_full: bool = False):
         return False
     finally:
         if budget_enabled:
-            BinanceFuturesRestClient.configure_global_request_budget(enabled=False)
-            logger.info("全量同步请求预算器已关闭")
+            BinanceFuturesRestClient.configure_global_request_budget(
+                enabled=True,
+                per_minute=scheduler.background_weight_budget_per_60s,
+            )
+            logger.info("历史任务结束，恢复项目整体滚动请求预算")
         scheduler._release_api_job_slot()
