@@ -19,7 +19,7 @@ def resolve_sync_window(
     if force_full:
         is_full_sync_run = True
         if full_lookback_days is not None:
-            bounded_days = max(1, int(full_lookback_days))
+            bounded_days = min(90, max(1, int(full_lookback_days)))
             since = int((datetime.now(utc8) - timedelta(days=bounded_days)).timestamp() * 1000)
             logger.info(f"周期全量校验 - 固定回溯最近 {bounded_days} 天")
         elif scheduler.start_date:
@@ -30,10 +30,12 @@ def resolve_sync_window(
                 logger.info(f"全量更新模式(FORCE_FULL_SYNC) - 从自定义日期 {scheduler.start_date} 开始")
             except ValueError as exc:
                 logger.error(f"日期格式错误: {exc}，使用默认DAYS_TO_FETCH")
-                since = int((datetime.now(utc8) - timedelta(days=scheduler.days_to_fetch)).timestamp() * 1000)
+                effective_days = min(90, int(scheduler.days_to_fetch))
+                since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
         else:
+            effective_days = min(90, int(scheduler.days_to_fetch))
             logger.warning("FORCE_FULL_SYNC=1 但未设置 START_DATE，回退为 DAYS_TO_FETCH 窗口")
-            since = int((datetime.now(utc8) - timedelta(days=scheduler.days_to_fetch)).timestamp() * 1000)
+            since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
     elif last_entry_time:
         try:
             last_dt = datetime.strptime(last_entry_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=utc8)
@@ -41,10 +43,12 @@ def resolve_sync_window(
             logger.info(f"增量更新模式 - 从最近入场时间 {last_entry_time} 回溯 {scheduler.sync_lookback_minutes} 分钟")
         except ValueError as exc:
             logger.error(f"入场时间解析失败: {exc}，使用默认DAYS_TO_FETCH")
-            since = int((datetime.now(utc8) - timedelta(days=scheduler.days_to_fetch)).timestamp() * 1000)
+            effective_days = min(90, int(scheduler.days_to_fetch))
+            since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
     else:
-        logger.info(f"增量冷启动 - 获取最近 {scheduler.days_to_fetch} 天数据")
-        since = int((datetime.now(utc8) - timedelta(days=scheduler.days_to_fetch)).timestamp() * 1000)
+        effective_days = min(90, int(scheduler.days_to_fetch))
+        logger.info(f"增量冷启动 - 获取最近 {effective_days} 天数据")
+        since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
 
     if scheduler.end_date:
         try:

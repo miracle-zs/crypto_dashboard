@@ -16,10 +16,17 @@ def test_open_positions_contract_shape(client):
 def test_open_positions_page_has_no_binance_dependency():
     from app.main import app
 
-    route = next(route for route in app.routes if getattr(route, "path", None) == "/api/open-positions")
+    all_routes = list(app.routes)
+    for r in app.routes:
+        if hasattr(r, "original_router") and hasattr(r.original_router, "routes"):
+            all_routes.extend(r.original_router.routes)
+        elif hasattr(r, "routes"):
+            all_routes.extend(r.routes)
+
+    route = next(route for route in all_routes if getattr(route, "path", None) == "/api/open-positions")
     dependency_names = {
         getattr(dependency.call, "__name__", "")
-        for dependency in route.dependant.dependencies
+        for dependency in getattr(route, "dependant", None) and getattr(route.dependant, "dependencies", []) or []
     }
 
     assert "get_public_rest" not in dependency_names

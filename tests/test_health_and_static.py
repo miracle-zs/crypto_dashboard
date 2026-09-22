@@ -1,7 +1,10 @@
 def test_status_endpoint(client):
     r = client.get("/api/status")
     assert r.status_code == 200
-    assert r.json()["status"] == "online"
+    body = r.json()
+    assert body["status"] == "online"
+    assert "readiness" in body
+    assert "data_quality" in body["sync"]
 
 
 def test_static_dark_css_served(client):

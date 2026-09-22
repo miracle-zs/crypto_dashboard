@@ -102,3 +102,6 @@ class SyncRepository:
 
     def save_transfer_income(self, **kwargs):
         return self._write.save_transfer_income(**kwargs)
+
+    def get_data_quality_summary(self):
+        return self._read.get_data_quality_summary()

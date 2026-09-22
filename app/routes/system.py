@@ -30,9 +30,10 @@ async def read_root(request: Request):
 async def get_status(request: Request, db: Database = Depends(get_db)):
     trade_repo = TradeRepository(db)
     sync_repo = SyncRepository(db)
-    stats, sync_status = await asyncio.gather(
+    stats, sync_status, quality = await asyncio.gather(
         run_in_thread(trade_repo.get_statistics),
         run_in_thread(sync_repo.get_sync_status),
+        run_in_thread(sync_repo.get_data_quality_summary),
     )
 
     scheduler = getattr(request.app.state, "scheduler", None)
@@ -44,6 +45,7 @@ async def get_status(request: Request, db: Database = Depends(get_db)):
 
     return {
         "status": "online",
+        "readiness": quality.get("data_health", "healthy"),
         "configured": is_configured,
         "database": {
             "total_trades": stats.get("total_trades", 0),
@@ -56,6 +58,7 @@ async def get_status(request: Request, db: Database = Depends(get_db)):
             "status": sync_status.get("status", "idle"),
             "next_run_time": next_run_time,
             "error_message": sync_status.get("error_message"),
+            "data_quality": quality,
         },
         "scheduler_running": is_configured,
     }

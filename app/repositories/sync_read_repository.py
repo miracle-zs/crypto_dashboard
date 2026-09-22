@@ -160,3 +160,35 @@ class SyncReadRepository:
         if not row or row["latest_event_time"] is None:
             return None
         return int(row["latest_event_time"])
+
+    def get_data_quality_summary(self):
+        conn = self.db._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) as total_symbols,
+                    SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END) as failed_symbols,
+                    MIN(last_success_end_ms) as oldest_watermark_ms,
+                    MAX(last_success_end_ms) as newest_watermark_ms
+                FROM symbol_sync_state
+                """
+            )
+            row = cursor.fetchone()
+            if not row:
+                return {}
+            total = int(row["total_symbols"] or 0)
+            failed = int(row["failed_symbols"] or 0)
+            health = "healthy"
+            if total > 0 and failed > 0:
+                health = "partial" if failed < total else "degraded"
+            return {
+                "total_tracked_symbols": total,
+                "failed_symbols_count": failed,
+                "data_health": health,
+                "oldest_watermark_ms": row["oldest_watermark_ms"],
+                "newest_watermark_ms": row["newest_watermark_ms"],
+            }
+        finally:
+            conn.close()

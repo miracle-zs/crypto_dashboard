@@ -44,7 +44,7 @@ def _register_sync_jobs(scheduler, *, utc8):
         scheduler.scheduler.add_job(
             func=partial(
                 scheduler.sync_trades_full,
-                lookback_days=scheduler.days_to_fetch,
+                lookback_days=min(90, int(scheduler.days_to_fetch)),
             ),
             trigger=CronTrigger(
                 day_of_week="sun",
