@@ -33,7 +33,16 @@ def binance_request_weight(path: str, params: Mapping[str, object] | None = None
         return 1 if request_params.get("symbol") else 40
     if endpoint == "/fapi/v1/income":
         return 30
-    if endpoint in {"/fapi/v1/allOrders", "/fapi/v1/userTrades"}:
+    if endpoint in {
+        "/fapi/v1/allOrders",
+        "/fapi/v1/userTrades",
+        "/fapi/v1/account",
+        "/fapi/v2/account",
+        "/fapi/v3/account",
+        "/fapi/v1/positionRisk",
+        "/fapi/v2/positionRisk",
+        "/fapi/v3/positionRisk",
+    }:
         return 5
     return 1
 

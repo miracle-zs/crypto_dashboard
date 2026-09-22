@@ -14,17 +14,18 @@ def fetch_income_history(
 ) -> List[Dict]:
     endpoint = "/fapi/v1/income"
     records: List[Dict] = []
-    current_start = since
-    seen_tran_ids = set()
+    seen_keys = set()
     max_iterations = 10000  # Safety limit to prevent infinite loops
     iterations = 0
+    current_page = 1
 
     while iterations < max_iterations:
         iterations += 1
         params = {
-            "startTime": current_start,
+            "startTime": since,
             "endTime": until,
             "limit": 1000,
+            "page": current_page,
         }
         if income_type:
             params["incomeType"] = income_type
@@ -32,36 +33,29 @@ def fetch_income_history(
         if batch is None:
             if fail_on_error:
                 raise RuntimeError(
-                    f"income request failed, window=[{current_start},{until}], income_type={income_type or 'ALL'}"
+                    f"income request failed, window=[{since},{until}], income_type={income_type or 'ALL'}"
                 )
             break
         if not batch:
             break
 
-        # Deduplicate by tranId to handle same-timestamp records
+        # Deduplicate by (incomeType, tranId) to handle same-timestamp and different incomeType records
         new_records = []
         for record in batch:
             tran_id = record.get("tranId")
-            if tran_id is not None and tran_id not in seen_tran_ids:
-                seen_tran_ids.add(tran_id)
-                new_records.append(record)
-            elif tran_id is None:
-                # Records without tranId are kept (shouldn't happen but be safe)
+            if tran_id is not None:
+                key = (record.get("incomeType"), str(tran_id))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    new_records.append(record)
+            else:
                 new_records.append(record)
 
         records.extend(new_records)
         if len(batch) < 1000:
             break
 
-        last_time = int(batch[-1]["time"])
-        # Prevent infinite loop if last_time doesn't advance
-        if last_time + 1 <= current_start:
-            logger.warning(
-                f"Income history pagination stuck at timestamp {last_time}, "
-                f"breaking to prevent infinite loop"
-            )
-            break
-        current_start = last_time + 1
+        current_page += 1
         time.sleep(0.2)
 
     if iterations >= max_iterations:
@@ -273,11 +267,32 @@ def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:
             return None
 
         real_pos = {}
+        mark_prices = {}
         if positions:
             for position in positions:
                 amt = float(position.get("positionAmt", 0))
-                if abs(amt) > 0:
-                    real_pos[position["symbol"]] = amt
+                symbol = position.get("symbol")
+                raw_mp = position.get("markPrice")
+                if symbol and raw_mp is not None:
+                    try:
+                        mp = float(raw_mp)
+                        if mp > 0:
+                            mark_prices[symbol] = mp
+                    except (TypeError, ValueError):
+                        pass
+                if abs(amt) > 0 and symbol:
+                    pos_side = position.get("positionSide")
+                    if pos_side and pos_side in ("LONG", "SHORT"):
+                        key = (symbol, pos_side)
+                    else:
+                        key = symbol
+                    real_pos[key] = amt
+            if mark_prices:
+                try:
+                    from app.services.market_price_service import MarketPriceService
+                    MarketPriceService.set_cached_prices(mark_prices)
+                except Exception:
+                    pass
         return real_pos
     except Exception as exc:
         logger.error(f"Failed to fetch position risk: {exc}")

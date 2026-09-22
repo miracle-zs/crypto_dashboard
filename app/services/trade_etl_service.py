@@ -1,11 +1,14 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from app.logger import logger
 from app.services.trade_income_aggregation import summarize_income_records
+
+UTC8 = timezone(timedelta(hours=8))
 
 
 def extract_symbol_closed_positions(
@@ -83,10 +86,57 @@ def extract_symbol_closed_positions(
         result = ([], time.perf_counter() - started_at)
         return (*result, cursor_update) if return_cursor_update else result
 
+    def _needs_prior_context(orders_list: List[Dict]) -> bool:
+        long_net = 0.0
+        short_net = 0.0
+        for o in sorted(orders_list, key=lambda x: x.get("updateTime", 0)):
+            qty = float(o.get("executedQty", 0.0))
+            if qty <= 0:
+                continue
+            ps = o.get("positionSide", "BOTH")
+            side = o.get("side", "")
+            if ps == "LONG":
+                if side == "BUY":
+                    long_net += qty
+                elif side == "SELL":
+                    long_net -= qty
+                    if long_net < -0.0001:
+                        return True
+            elif ps == "SHORT":
+                if side == "SELL":
+                    short_net += qty
+                elif side == "BUY":
+                    short_net -= qty
+                    if short_net < -0.0001:
+                        return True
+        return False
+
+    if effective_since > since and _needs_prior_context(orders):
+        earlier_orders = processor.get_all_orders(
+            symbol,
+            limit=1000,
+            start_time=since,
+            end_time=effective_since,
+            client=worker_client,
+            fail_on_error=True,
+        )
+        if earlier_orders:
+            seen_ids = set()
+            combined = []
+            for o in earlier_orders + orders:
+                oid = o.get("orderId")
+                if oid is not None:
+                    if oid not in seen_ids:
+                        seen_ids.add(oid)
+                        combined.append(o)
+                else:
+                    combined.append(o)
+            orders = combined
+
     filled_orders = [
         order
         for order in orders
-        if float(order["executedQty"]) > 0 and order["updateTime"] >= effective_since
+        if float(order["executedQty"]) > 0
     ]
     if len(filled_orders) < 1:
         result = ([], time.perf_counter() - started_at)
@@ -100,6 +150,12 @@ def extract_symbol_closed_positions(
         fees_map = processor.get_fees_for_symbol(symbol, since, until, client=worker_client)
 
     positions = processor.match_orders_to_positions(filled_orders, symbol, fees_map, presorted=True)
+    if cursor_times:
+        min_cursor = min(cursor_times)
+        overlap_ms = max(10, int(cursor_overlap_minutes)) * 60 * 1000
+        cutoff_ms = min_cursor - overlap_ms
+        positions = [p for p in positions if p.get("exit_time", 0) >= cutoff_ms]
+
     result = (positions, time.perf_counter() - started_at)
     return (*result, cursor_update) if return_cursor_update else result
 
@@ -454,6 +510,25 @@ def extract_open_positions_for_symbol(
         fail_on_error=True,
     )
     if not orders:
+        if abs(real_net_qty) > 0.0001:
+            base = symbol[:-4] if symbol.endswith("USDT") else symbol
+            side_str = "LONG" if real_net_qty > 0 else "SHORT"
+            tz = getattr(processor, "UTC8", UTC8)
+            dt = datetime.fromtimestamp(since / 1000, tz=tz)
+            fallback_pos = [
+                {
+                    "date": dt.strftime("%Y%m%d"),
+                    "symbol": base,
+                    "side": side_str,
+                    "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_price": 0.0,
+                    "qty": abs(real_net_qty),
+                    "entry_amount": 0.0,
+                    "order_id": 0,
+                    "is_incomplete": True,
+                }
+            ]
+            return fallback_pos, time.perf_counter() - started_at
         return [], time.perf_counter() - started_at
 
     filled_orders = [order for order in orders if float(order["executedQty"]) > 0 and order["updateTime"] >= since]
@@ -525,6 +600,23 @@ def extract_open_positions_for_symbol(
 
     side_str = "LONG" if real_net_qty > 0 else "SHORT"
     output = processor._build_open_position_output(symbol, side_str, final_entries)
+    if not output and abs(real_net_qty) > 0.0001:
+        base = symbol[:-4] if symbol.endswith("USDT") else symbol
+        tz = getattr(processor, "UTC8", UTC8)
+        dt = datetime.fromtimestamp(since / 1000, tz=tz)
+        output = [
+            {
+                "date": dt.strftime("%Y%m%d"),
+                "symbol": base,
+                "side": side_str,
+                "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "entry_price": 0.0,
+                "qty": abs(real_net_qty),
+                "entry_amount": 0.0,
+                "order_id": 0,
+                "is_incomplete": True,
+            }
+        ]
     return output, time.perf_counter() - started_at
 
 
@@ -540,33 +632,43 @@ def get_open_positions(
         logger.warning("Skip open positions refresh because PositionRisk failed")
         return None
 
-    traded_symbols = traded_symbols or []
-    all_target_symbols = set(traded_symbols) if traded_symbols else set()
-    all_target_symbols.update(real_positions_map.keys())
-    if not all_target_symbols:
+    # Support both string keys (e.g. 'BTCUSDT') and tuple keys (e.g. ('BTCUSDT', 'LONG'))
+    active_items = []
+    for key, amt in real_positions_map.items():
+        if abs(amt) > 0:
+            sym = key[0] if isinstance(key, tuple) else key
+            active_items.append((sym, amt))
+
+    known_syms = {item[0] for item in active_items}
+    for sym in (traded_symbols or []):
+        if sym not in known_syms:
+            amt = real_positions_map.get(sym, 0.0)
+            if abs(amt) > 0:
+                active_items.append((sym, amt))
+                known_syms.add(sym)
+
+    if not active_items:
         return []
 
-    active_symbols = sorted(symbol for symbol in all_target_symbols if real_positions_map.get(symbol, 0.0) != 0)
-    if not active_symbols:
-        return []
+    active_items.sort(key=lambda x: x[0])
 
     open_positions_workers = getattr(
         processor,
         "max_open_positions_workers",
         getattr(processor, "max_etl_workers", 1),
     )
-    worker_count = processor._resolve_workers(len(active_symbols), max_workers=open_positions_workers)
+    worker_count = processor._resolve_workers(len(active_items), max_workers=open_positions_workers)
     open_positions: List[Dict] = []
     success_count = 0
     failure_count = 0
     symbol_timings: List[tuple[str, float, int]] = []
 
     if worker_count == 1:
-        for symbol in active_symbols:
+        for symbol, amt in active_items:
             try:
                 positions, elapsed = processor._extract_open_positions_for_symbol(
                     symbol=symbol,
-                    real_net_qty=real_positions_map[symbol],
+                    real_net_qty=amt,
                     since=since,
                     until=until,
                 )
@@ -589,12 +691,12 @@ def get_open_positions(
         future_map = {
             executor.submit(
                 processor._extract_open_positions_for_symbol,
-                symbol,
-                real_positions_map[symbol],
-                since,
-                until,
+                symbol=symbol,
+                real_net_qty=amt,
+                since=since,
+                until=until,
             ): symbol
-            for symbol in active_symbols
+            for symbol, amt in active_items
         }
         for future in as_completed(future_map):
             symbol = future_map[future]

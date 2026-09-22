@@ -1,9 +1,24 @@
+import time
+from typing import Dict, Tuple
+
 from app.logger import logger
 
 
 class MarketPriceService:
-    @staticmethod
-    def get_mark_price_map(symbols, client):
+    _cached_prices: Dict[str, float] = {}
+    _cached_at: float = 0.0
+
+    @classmethod
+    def get_latest_cached_prices(cls) -> Tuple[Dict[str, float], float]:
+        return dict(cls._cached_prices), cls._cached_at
+
+    @classmethod
+    def set_cached_prices(cls, prices: Dict[str, float], timestamp: float | None = None):
+        cls._cached_prices.update(prices)
+        cls._cached_at = timestamp or time.time()
+
+    @classmethod
+    def get_mark_price_map(cls, symbols, client):
         if not symbols:
             return {}
 
@@ -57,4 +72,6 @@ class MarketPriceService:
             except Exception as exc:
                 logger.warning(f"Failed to fetch mark prices via ticker/price: {exc}")
 
+        if resolved:
+            cls.set_cached_prices(resolved)
         return resolved

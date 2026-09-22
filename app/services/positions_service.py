@@ -165,20 +165,31 @@ class PositionsService:
                 self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
             else:
                 symbols_full = [self._normalize_symbol(pos["symbol"]) for pos in raw_positions]
-                daily_market_view = await run_in_thread(
-                    partial(daily_kline_repo.load, symbols_full)
-                )
+                from app.services.market_price_service import MarketPriceService
+                cached_prices, price_as_of_ts = MarketPriceService.get_latest_cached_prices()
+
                 mark_prices = {}
+                missing_symbols = []
                 for symbol_full in symbols_full:
-                    rows = daily_market_view.get(symbol_full) or []
-                    if not rows:
-                        continue
-                    try:
-                        price = float(rows[-1]["close"])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if price > 0:
-                        mark_prices[symbol_full] = price
+                    if symbol_full in cached_prices and cached_prices[symbol_full] > 0:
+                        mark_prices[symbol_full] = cached_prices[symbol_full]
+                    else:
+                        missing_symbols.append(symbol_full)
+
+                if missing_symbols:
+                    daily_market_view = await run_in_thread(
+                        partial(daily_kline_repo.load, missing_symbols)
+                    )
+                    for symbol_full in missing_symbols:
+                        rows = daily_market_view.get(symbol_full) or []
+                        if not rows:
+                            continue
+                        try:
+                            price = float(rows[-1]["close"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if price > 0:
+                            mark_prices[symbol_full] = price
 
                 positions = []
                 per_symbol_notional = defaultdict(float)
@@ -298,10 +309,17 @@ class PositionsService:
                     "profit_alert_threshold_pct": profit_alert_threshold_pct
                 }
 
+                price_as_of = (
+                    datetime.fromtimestamp(price_as_of_ts, tz=UTC8).isoformat()
+                    if price_as_of_ts > 0
+                    else None
+                )
                 payload = {
                     "as_of": now.isoformat(),
+                    "price_as_of": price_as_of,
+                    "stale": (now.timestamp() - price_as_of_ts > 900) if price_as_of_ts > 0 else True,
                     "positions": positions,
-                    "summary": summary
+                    "summary": summary,
                 }
                 self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
 

@@ -64,6 +64,7 @@ def run_balance_sync_job(scheduler) -> str:
             scheduler.trade_repo.save_balance_history(current_margin, current_wallet)
             logger.info(f"余额已更新: {current_margin:.2f} USDT (Wallet: {current_wallet:.2f})")
         else:
+            status = "error"
             logger.warning("获取余额失败，balance为 None")
     except Exception as exc:
         status = "error"
