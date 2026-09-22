@@ -167,19 +167,53 @@ class TradeReadRepository:
         start_time = kwargs.get("start_time")
         end_time = kwargs.get("end_time")
         limit = kwargs.get("limit")
+        max_points = kwargs.get("max_points", 1000)
 
         conn = self.db._get_connection()
         cursor = conn.cursor()
-        query = "SELECT timestamp, balance, wallet_balance FROM balance_history WHERE 1=1"
+        where_clauses = ["1=1"]
         params = []
 
         if start_time:
-            query += " AND timestamp >= ?"
-            params.append(start_time.isoformat().replace("T", " "))
+            where_clauses.append("timestamp >= ?")
+            params.append(
+                start_time.strftime("%Y-%m-%d %H:%M:%S")
+                if hasattr(start_time, "strftime")
+                else str(start_time).replace("T", " ")
+            )
         if end_time:
-            query += " AND timestamp <= ?"
-            params.append(end_time.isoformat().replace("T", " "))
+            where_clauses.append("timestamp <= ?")
+            params.append(
+                end_time.strftime("%Y-%m-%d %H:%M:%S")
+                if hasattr(end_time, "strftime")
+                else str(end_time).replace("T", " ")
+            )
 
+        where_sql = " AND ".join(where_clauses)
+
+        # Check total count to decide if SQL downsampling is needed
+        if max_points and max_points > 0 and not limit:
+            cursor.execute(f"SELECT COUNT(*) FROM balance_history WHERE {where_sql}", tuple(params))
+            total_count = cursor.fetchone()[0] or 0
+
+            if total_count > max_points * 1.5:
+                step = max(1, round(total_count / max_points))
+                query = f"""
+                    SELECT timestamp, balance, wallet_balance FROM (
+                        SELECT timestamp, balance, wallet_balance,
+                               ROW_NUMBER() OVER (ORDER BY timestamp ASC) as rn
+                        FROM balance_history
+                        WHERE {where_sql}
+                    ) WHERE (rn % ?) = 1 OR rn = ?
+                    ORDER BY timestamp ASC
+                """
+                downsample_params = list(params) + [step, total_count]
+                cursor.execute(query, downsample_params)
+                rows = cursor.fetchall()
+                conn.close()
+                return [dict(row) for row in rows]
+
+        query = f"SELECT timestamp, balance, wallet_balance FROM balance_history WHERE {where_sql}"
         query += " ORDER BY timestamp DESC"
         if limit:
             query += " LIMIT ?"

@@ -24,7 +24,10 @@ class BalanceService:
             start_time = end_time - timedelta(hours=2)
 
         history_data = await run_in_thread(
-            trade_repo.get_balance_history, start_time=start_time, end_time=end_time
+            trade_repo.get_balance_history,
+            start_time=start_time,
+            end_time=end_time,
+            max_points=1000,
         )
         if not history_data:
             return []

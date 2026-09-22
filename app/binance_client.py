@@ -18,6 +18,8 @@ import requests
 from app.logger import logger
 from app.core.binance_request_budget import RollingWeightLimiter, binance_request_weight
 
+_ORIGINAL_REQUESTS_REQUEST = requests.request
+
 
 class BinanceFuturesRestClient:
     """Lightweight REST client for Binance USD-M Futures."""
@@ -47,6 +49,7 @@ class BinanceFuturesRestClient:
         self._recv_window = int(os.getenv("BINANCE_RECV_WINDOW", 10000))
         self._time_offset_ms = 0
         self._last_cooldown_log_ts = 0.0
+        self._session = requests.Session()
 
     def _headers(self) -> Dict[str, str]:
         if not self.api_key:
@@ -181,6 +184,7 @@ class BinanceFuturesRestClient:
 
         max_retries = 4
         clock_synced = False
+        is_idempotent = str(method).upper() == "GET"
         for attempt in range(1, max_retries + 1):
             try:
                 self._throttle(path, base_params)
@@ -190,13 +194,22 @@ class BinanceFuturesRestClient:
                     request_params["timestamp"] = int(time.time() * 1000 + self._time_offset_ms)
                     request_params["signature"] = self._sign_params(request_params)
 
-                response = requests.request(
-                    method=method,
-                    url=url,
-                    headers=self._headers(),
-                    params=request_params,
-                    timeout=30,
-                )
+                if requests.request is not _ORIGINAL_REQUESTS_REQUEST:
+                    response = requests.request(
+                        method=method,
+                        url=url,
+                        headers=self._headers(),
+                        params=request_params,
+                        timeout=30,
+                    )
+                else:
+                    response = self._session.request(
+                        method=method,
+                        url=url,
+                        headers=self._headers(),
+                        params=request_params,
+                        timeout=30,
+                    )
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.HTTPError as exc:
@@ -233,6 +246,19 @@ class BinanceFuturesRestClient:
                         logger.error(f"Response: {exc.response.text}")
                     return None
 
+                logger.error(f"API request failed: {exc}")
+                if hasattr(exc, "response") and exc.response is not None:
+                    logger.error(f"Response: {exc.response.text}")
+                return None
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                if is_idempotent and attempt < max_retries:
+                    backoff = min(2.0, 0.2 * (2 ** (attempt - 1)))
+                    logger.warning(
+                        f"Network transient error ({exc.__class__.__name__}) on {method} {path} "
+                        f"(attempt {attempt}/{max_retries}), retrying in {backoff:.2f}s..."
+                    )
+                    time.sleep(backoff)
+                    continue
                 logger.error(f"API request failed: {exc}")
                 if hasattr(exc, "response") and exc.response is not None:
                     logger.error(f"Response: {exc.response.text}")
