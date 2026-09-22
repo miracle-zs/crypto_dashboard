@@ -10,8 +10,7 @@ from app.logger import logger
 
 def _register_sync_jobs(scheduler, *, utc8):
     scheduler.scheduler.add_job(partial(run_sync_open_positions, scheduler), "date")
-    if not scheduler.enable_user_stream:
-        scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
+    scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
 
     trades_interval_minutes = (
         scheduler.trades_incremental_fallback_interval_minutes
@@ -102,6 +101,19 @@ def _register_sync_jobs(scheduler, *, utc8):
             misfire_grace_time=60,
             replace_existing=True,
         )
+    else:
+        fallback_interval = max(30, int(scheduler.balance_sync_interval_minutes))
+        scheduler.scheduler.add_job(
+            func=scheduler.sync_balance_data,
+            trigger=IntervalTrigger(minutes=fallback_interval),
+            id="sync_balance_fallback",
+            name="同步账户余额与TRANSFER流水(WS兜底对账)",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+            replace_existing=True,
+        )
+
 
     return trades_interval_minutes
 

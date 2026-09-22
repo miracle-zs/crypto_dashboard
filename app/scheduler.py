@@ -4,6 +4,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from typing import Optional
 import os
 from dotenv import load_dotenv
 import pandas as pd
@@ -109,8 +110,8 @@ class TradeDataScheduler:
     def _try_enter_api_job_slot(self, source: str) -> bool:
         return self.runtime_controller.try_acquire(source=source)
 
-    def _release_api_job_slot(self):
-        self.runtime_controller.release()
+    def _release_api_job_slot(self, source: Optional[str] = None):
+        self.runtime_controller.release(source=source)
 
     def _format_ms_to_utc8(self, ts_ms: int) -> str:
         """将毫秒时间戳格式化为 UTC+8 可读时间。"""

@@ -67,7 +67,12 @@
    - 在 `tests/test_positions_contract.py` 中增加契约字段断言，全量 193 测试通过。
    - 提交并推送至 `origin/main`（commit `c1960ca`），线上服务器拉取并重启 Gunicorn。
    - 线上 curl 实测验证通过：返回 `price_as_of: 2026-09-22T17:30:42+08:00`, `stale: False`。
-2. **用户流重连与任务隔离决策分析**：
-   - 针对用户流断线重连（R2）和并发锁（C2）给出了详尽的架构分析与落地方案建议。
+3. **Stage 5（WebSocket 自愈、分级并发隔离锁与双模协同）实现完成**：
+   - **R2 WebSocket 自愈机制**：在 `app/user_stream.py` 中引入 `_run_supervisor` 守护线程与指数退避（2s -> 4s -> ... -> 60s），在断开时自动刷新 `listenKey` 重连；引入每 25 分钟保活校验，若失效主动触发重建；`stop()` 时主动调用 `DELETE /fapi/v1/listenKey` 释放服务端资源。
+   - **双模调度协同**：在 `app/jobs/scheduler_startup_jobs.py` 中，启用 WS 时依然在启动时同步初始余额与 TRANSFER 出入金流水，并保留 30 分钟一次的低频 REST 兜底对账任务，杜绝出入金漏单与单点失效。
+   - **C2 分级任务并发隔离锁**：在 `app/core/job_runtime.py` 中实现 Tiered Job Lock，分离重任务互斥锁（`_heavy_job_lock`，用于全量同步、大步长补偿回填）与轻任务锁（`_light_job_lock`，用于持仓与余额刷新），重任务之间互斥防重叠，轻任务秒级执行不被饿死。
+   - **可见性增强**：在 `app/main.py` 和 `app/routes/system.py` 中向 `/api/status` 暴露 `user_stream` 的启用与在线连接状态（`enabled`, `connected`, `last_event_time_ms`）。
+   - **测试验证**：新增 `test_user_stream_reconnect.py` 与 `test_tiered_job_lock.py`，全量 199 个测试与 8 个审计探针全部全绿通过。
+
 
 

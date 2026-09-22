@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI):
         if enable_user_stream:
             user_stream = BinanceUserDataStream(api_key=api_key, db=app.state.db)
             user_stream.start()
+            app.state.user_stream = user_stream
+        else:
+            app.state.user_stream = None
     else:
         app.state.scheduler = None
         app.state.db = get_db_singleton()
@@ -83,6 +86,7 @@ async def lifespan(app: FastAPI):
         app.state.scheduler = None
         if user_stream:
             user_stream.stop()
+        app.state.user_stream = None
         app.state.db = None
 
 

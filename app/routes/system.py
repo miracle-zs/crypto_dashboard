@@ -43,6 +43,13 @@ async def get_status(request: Request, db: Database = Depends(get_db)):
         next_run = scheduler.get_next_run_time()
         next_run_time = next_run.isoformat() if next_run else None
 
+    user_stream = getattr(request.app.state, "user_stream", None)
+    user_stream_info = {
+        "enabled": user_stream is not None,
+        "connected": user_stream.is_connected if user_stream else False,
+        "last_event_time_ms": user_stream.last_event_time_ms if user_stream else 0,
+    }
+
     return {
         "status": "online",
         "readiness": quality.get("data_health", "healthy"),
@@ -60,5 +67,7 @@ async def get_status(request: Request, db: Database = Depends(get_db)):
             "error_message": sync_status.get("error_message"),
             "data_quality": quality,
         },
+        "user_stream": user_stream_info,
         "scheduler_running": is_configured,
     }
+
