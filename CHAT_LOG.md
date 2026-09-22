@@ -30,8 +30,18 @@
   - 路由契约修复：修复现代 FastAPI `_IncludedRouter` 嵌套下的契约测试。
   - **全量测试验证**：190 个本地回归测试全部通过。
 
-- **Stage 3 (已完成)**：
+- **Stage 3 (已完成并提交 `1790a5f`)**：
   - C1：在 `TradeReadRepository.get_balance_history` 中实现 SQLite 窗口函数下采样 (`ROW_NUMBER() OVER`)，在数据量过大时按步长保留均匀分布的 1000 个采样点并首尾锚定，避免前端渲染超大点阵导致崩溃卡顿。
   - T4：在 `BinanceFuturesRestClient` 中集成持久化 `requests.Session()` 复用 TCP 连接，并在幂等 GET 请求上引入指数退避重试，同时兼容测试用例的 `requests.request` mock。
   - **测试验证**：新增 `test_balance_history_sample.py` 与 `test_binance_client_session.py`，全量 193 个测试用例全部通过！
+
+- **Stage 4 (已完成上线部署与全量对账)**：
+  - 代码推送：本地 3 个规范提交已完整推送至 GitHub 主分支 (`origin/main`)。
+  - 生产安全备份：在部署前对远程服务器 (`43.153.134.252`) 的数据库 `data/trades.db` 进行了冷备份 (`trades.db.bak-20260922-155700`)。
+  - 生产发布：通过 git pull 拉取最新代码，运行离线探针全部通过，平滑重启 systemd `crypto_dashboard.service` 服务。
+  - 历史闭仓对账与核验：
+    - 核实了币安官方历史资金流水 `signed_get("/fapi/v1/income", incomeType="REALIZED_PNL")`，确认 2026-08-19 至今币安仅有一笔闭仓交易（TRIAUSDT 于 2026-08-19 21:15:33 闭仓），本地 SQLite 数据库中该记录完整无缺失。
+    - 2026-09-21 至 2026-09-22 新开仓的 4 个币种（CTR, KOMA, MITO, LYN）目前均处于未平仓状态。
+    - 清理了老旧同步中因 >90 天窗口失败产生的 306 个符号旧报错，数据质量健康度恢复为 `healthy`。
+    - `/api/status`、`/api/open-positions`、`/api/balance-history` 等各核心端点全部验证正常，各持仓采用实时标记价格与实时未实现盈亏，余额历史年范围下采样为 1000 点极速秒开。
 
