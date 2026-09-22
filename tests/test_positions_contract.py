@@ -9,6 +9,8 @@ def test_open_positions_contract_shape(client):
     assert r.status_code == 200
     body = r.json()
     assert "as_of" in body
+    assert "price_as_of" in body
+    assert "stale" in body
     assert "positions" in body
     assert "summary" in body
 

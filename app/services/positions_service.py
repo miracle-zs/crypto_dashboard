@@ -337,7 +337,10 @@ class PositionsService:
                 "incremental": True,
                 "changed": True,
                 "as_of": payload.get("as_of"),
+                "price_as_of": payload.get("price_as_of"),
+                "stale": payload.get("stale"),
                 "positions": payload.get("positions", []),
                 "summary": payload.get("summary", {}),
             }
         return payload
+

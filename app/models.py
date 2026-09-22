@@ -113,6 +113,8 @@ class OpenPositionsSummary(BaseModel):
 
 class OpenPositionsResponse(BaseModel):
     as_of: Optional[str] = None
+    price_as_of: Optional[str] = None
+    stale: Optional[bool] = None
     positions: List[OpenPositionItem] = Field(default_factory=list)
     summary: Optional[OpenPositionsSummary] = None
     version: Optional[int] = None
