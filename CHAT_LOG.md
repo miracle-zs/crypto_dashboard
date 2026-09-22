@@ -45,3 +45,29 @@
     - 清理了老旧同步中因 >90 天窗口失败产生的 306 个符号旧报错，数据质量健康度恢复为 `healthy`。
     - `/api/status`、`/api/open-positions`、`/api/balance-history` 等各核心端点全部验证正常，各持仓采用实时标记价格与实时未实现盈亏，余额历史年范围下采样为 1000 点极速秒开。
 
+## 2026-09-22 响应模型字段补齐与后续遗留项决策
+
+### 用户反馈
+> 已确认：
+> - 本地与服务器均为 2e56a41，工作树干净。
+> - 完整测试：193 passed。
+> - 离线审计探针：8 passed。
+> - 线上 /api/status：readiness=healthy、failed_symbols_count=0。
+> - 一年余额查询已优化为 1000 个采样点，实测约 0.31 秒。
+> - 线上数据库备份已存在。
+> 剩余问题：
+> 1. 代码生成了 price_as_of 和 stale，但响应模型没有定义这两个字段，FastAPI 会将其过滤掉。
+> 2. 用户数据流断线后仍只记录日志，没有自动重连；当前服务器 ENABLE_USER_STREAM=0。
+> 3. 服务器仍配置 API_JOB_LOCK_WAIT_SECONDS=0，任务互斥实际关闭。
+
+### 处理进展
+1. **模型字段补齐（已完成并上线）**：
+   - 在 `app/models.py` 的 `OpenPositionsResponse` 中增加 `price_as_of: Optional[str] = None` 与 `stale: Optional[bool] = None`。
+   - 更新 `app/services/positions_service.py` 的增量响应以透传这两个字段。
+   - 在 `tests/test_positions_contract.py` 中增加契约字段断言，全量 193 测试通过。
+   - 提交并推送至 `origin/main`（commit `c1960ca`），线上服务器拉取并重启 Gunicorn。
+   - 线上 curl 实测验证通过：返回 `price_as_of: 2026-09-22T17:30:42+08:00`, `stale: False`。
+2. **用户流重连与任务隔离决策分析**：
+   - 针对用户流断线重连（R2）和并发锁（C2）给出了详尽的架构分析与落地方案建议。
+
+
