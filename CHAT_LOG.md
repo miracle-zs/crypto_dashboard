@@ -92,9 +92,25 @@
 3. **前端 Live Monitor 渲染机制与防抖断层**：
    - 前端 `live-monitor.js` 每 60 秒轮询一次 `/api/balance-history?time_range=1d`，顶部余额卡片（`disp-balance`）直接展示 `balance_history` 最新记录的值。
    - 前端带有时间戳防抖判断：`if (latestTime > lastFetchTime)`。因为后端数据库整整 30 分钟没有插入任何新数据点，前端判断数据未发生变化，导致**界面连续 30 分钟完全静止，余额数字分文不动**。
-4. **动态浮盈未联动到余额卡片**：
-   - 前端每 60 秒拉取的 `/api/open-positions` 其实已经计算出了持仓的最新实时浮动盈亏（`total_unrealized_pnl`），但顶部余额卡片未联动该浮盈进行实时动态权益计算。
+### 处理进展 (Stage 6)
+- **支持浮点数配置**：在 `app/core/scheduler_config.py` 中将 `balance_sync_interval_minutes` 类型升级为 `float`，解析改为 `_env_float("BALANCE_SYNC_INTERVAL_MINUTES", 15.0, minimum=0.1)`。
+- **秒级调度解绑 30 分钟硬编码**：在 `app/jobs/scheduler_startup_jobs.py` 中将触发器改为以秒为单位 `IntervalTrigger(seconds=int(interval * 60))`，移除 `max(30, ...)` 限制。
+- **出入金接口智能节流**：在 `app/jobs/balance_sync_job.py` 中，余额查询每 30 秒执行（仅 5 权重，耗时 0.01s），出入金流水解耦为 5 分钟或钱包变动时拉取（防 30 权重高频消耗）。
+- **前端提频**：`static/js/live-monitor.js` 轮询间隔 `UPDATE_INTERVAL` 缩短为 30 秒。
+- **全量测试与部署**：本地全量 200 个单元测试和 8 个探针全通；提交 `e737770` 已推送到 GitHub `main`；服务器 `.env` 配置 `BALANCE_SYNC_INTERVAL_MINUTES=0.5` 并重启服务。
+- **实测结果**：线上 `balance_history` 每 30 秒准确写入一条新记录，耗时 0.01 秒，前端余额恢复实时跳动刷新。
 
+## 2026-09-23 服务器上其他项目的余额数据采集频率调研
 
+### 用户疑问
+> 服务器上其他两个项目的余额数据采集频率是多少
 
-
+### 排查结论
+- **项目 1：`bubble_buster`**（服务名 `bubble_buster.service`）
+  - 核心配置：`config.ini` 中的 `manager_interval_sec = 60` 与 `readonly_wallet_snapshot_interval_sec = 60`。
+  - 实测数据：查询 `/root/bubble_buster/state.db` 的 `wallet_snapshots` 表，记录严格以 **每 60 秒（1 分钟）** 一次记录最新钱包余额快照。
+  - 辅助机制：同时连接 WebSocket 捕获订单成交与资金变更，REST 校验兜底间隔为 300 秒（5 分钟）。
+- **项目 2：`momentum_alpha`**（服务名 `momentum-alpha.service` 与 `momentum-alpha-user-stream.service`）
+  - 核心逻辑：`/root/momentum_alpha/src/momentum_alpha/scheduler.py` 中的整分钟秒针归零轮询调度（`now.second <= 2`）。
+  - 实测数据：查询 `/root/momentum_alpha/var/runtime.db` 的 `account_snapshots` 表，记录严格在每分钟的第 00 秒整点落盘，**周期为严格的 1 分钟（60 秒）**。
+  - 辅助机制：通过独立的 `momentum-alpha-user-stream.service` 监听 WebSocket `ACCOUNT_UPDATE`，在有成交/资金变动时实时写入 `account_flows`。
