@@ -53,7 +53,7 @@ class SchedulerConfig:
     update_interval_minutes: int
     trades_incremental_fallback_interval_minutes: int
     open_positions_update_interval_minutes: int
-    balance_sync_interval_minutes: int
+    balance_sync_interval_minutes: float
     start_date: str | None
     end_date: str | None
     sync_lookback_minutes: int
@@ -154,7 +154,11 @@ def load_scheduler_config() -> SchedulerConfig:
             5,
             minimum=1,
         ),
-        balance_sync_interval_minutes=_env_int("BALANCE_SYNC_INTERVAL_MINUTES", 15, minimum=1),
+        balance_sync_interval_minutes=_env_float(
+            "BALANCE_SYNC_INTERVAL_MINUTES",
+            15.0,
+            minimum=0.1,
+        ),
         start_date=os.getenv("START_DATE"),
         end_date=os.getenv("END_DATE"),
         sync_lookback_minutes=_env_int("SYNC_LOOKBACK_MINUTES", 30, minimum=1),

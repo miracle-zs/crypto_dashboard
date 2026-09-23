@@ -74,5 +74,27 @@
    - **可见性增强**：在 `app/main.py` 和 `app/routes/system.py` 中向 `/api/status` 暴露 `user_stream` 的启用与在线连接状态（`enabled`, `connected`, `last_event_time_ms`）。
    - **测试验证**：新增 `test_user_stream_reconnect.py` 与 `test_tiered_job_lock.py`，全量 199 个测试与 8 个审计探针全部全绿通过。
 
+## 2026-09-23 监控页面（live-monitor）余额不更新问题排查与根因分析
+
+### 用户疑问
+> monitor页面的余额为什么一直不更新
+
+### 根因复盘与分析
+1. **币安 WebSocket 的数据语义（User Data Stream）**：
+   - 币安合约的 User Data Stream (`ACCOUNT_UPDATE` 账户更新事件) 严格按交易动作触发（如订单成交、手续费/资金费扣除、账户出入金等）。
+   - **币安不会因为持仓币种的市场标记价格（Mark Price）波动而推送 WS 账户更新**。
+   - 用户当前的持仓（CTR, LYN, MITO, KOMA 等 7 笔仓位）近期处于持仓等待状态，没有新订单成交，也没有到达 8 小时一次的资金费结算时刻。因此，系统通过 WebSocket 接入币安后，收到的账户更新事件实际为 0（通过线上数据库 `ws_events` 表计数证实为 0）。
+2. **REST 兜底同步间隔被强制锁定为 >= 30分钟**：
+   - 在 Stage 5 切换到 WebSocket 模式时，`app/jobs/scheduler_startup_jobs.py` 中写道：
+     `fallback_interval = max(30, int(scheduler.balance_sync_interval_minutes))`
+   - 当 `ENABLE_USER_STREAM=1` 时，后台的 REST 余额同步（调用 `/fapi/v3/account` 获取包含最新浮动盈亏的 `totalMarginBalance`）被硬编码为**每 30 分钟才跑一次**。
+   - 查询线上服务器 `balance_history` 表证实，历史余额记录确实为严格的每 30 分钟一条（20:40、21:10、21:40、22:10）。
+3. **前端 Live Monitor 渲染机制与防抖断层**：
+   - 前端 `live-monitor.js` 每 60 秒轮询一次 `/api/balance-history?time_range=1d`，顶部余额卡片（`disp-balance`）直接展示 `balance_history` 最新记录的值。
+   - 前端带有时间戳防抖判断：`if (latestTime > lastFetchTime)`。因为后端数据库整整 30 分钟没有插入任何新数据点，前端判断数据未发生变化，导致**界面连续 30 分钟完全静止，余额数字分文不动**。
+4. **动态浮盈未联动到余额卡片**：
+   - 前端每 60 秒拉取的 `/api/open-positions` 其实已经计算出了持仓的最新实时浮动盈亏（`total_unrealized_pnl`），但顶部余额卡片未联动该浮盈进行实时动态权益计算。
+
+
 
 

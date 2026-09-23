@@ -90,10 +90,11 @@ def _register_sync_jobs(scheduler, *, utc8):
             replace_existing=True,
         )
 
+    balance_sync_seconds = max(5, int(float(scheduler.balance_sync_interval_minutes) * 60))
     if not scheduler.enable_user_stream:
         scheduler.scheduler.add_job(
             func=scheduler.sync_balance_data,
-            trigger=IntervalTrigger(minutes=scheduler.balance_sync_interval_minutes),
+            trigger=IntervalTrigger(seconds=balance_sync_seconds),
             id="sync_balance",
             name="同步账户余额与TRANSFER流水",
             max_instances=1,
@@ -102,15 +103,14 @@ def _register_sync_jobs(scheduler, *, utc8):
             replace_existing=True,
         )
     else:
-        fallback_interval = max(30, int(scheduler.balance_sync_interval_minutes))
         scheduler.scheduler.add_job(
             func=scheduler.sync_balance_data,
-            trigger=IntervalTrigger(minutes=fallback_interval),
+            trigger=IntervalTrigger(seconds=balance_sync_seconds),
             id="sync_balance_fallback",
             name="同步账户余额与TRANSFER流水(WS兜底对账)",
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=120,
+            misfire_grace_time=60,
             replace_existing=True,
         )
 

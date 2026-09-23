@@ -88,3 +88,10 @@ def test_scheduler_config_time_normalization(monkeypatch):
     assert config.leaderboard_alert_minute == 1
     assert config.rebound_7d_minute == 0
     assert config.rebound_365d_minute == 2
+
+
+def test_scheduler_config_balance_sync_float_interval(monkeypatch):
+    monkeypatch.setenv("BALANCE_SYNC_INTERVAL_MINUTES", "0.5")
+    config = load_scheduler_config()
+    assert config.balance_sync_interval_minutes == 0.5
+

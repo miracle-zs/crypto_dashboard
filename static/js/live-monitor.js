@@ -13,7 +13,7 @@
         // -------------------------------------
         // 1. Configuration & State
         // -------------------------------------
-        const UPDATE_INTERVAL = 60000; // 60 seconds
+        const UPDATE_INTERVAL = 30000; // 30 seconds
         const OPEN_POSITIONS_MOBILE_COLLAPSE_LIMIT = 6;
         const DD_LIMIT_PCT = 10;
         let balanceData = []; // Array of {time, value, cumulative_equity}
