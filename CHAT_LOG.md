@@ -126,3 +126,36 @@
 - **是否会达到 2400 限额**：**绝不可能**。仍保有 **1980+ 权重（82.5%）的巨额安全缓冲带**。
 - **历史日志实测**：过去 30 天各个项目的历史日志中，HTTP 429（Too Many Requests）和 HTTP 418（IP Ban）的出现次数为 **0 次**。
 
+## 2026-09-24 读写分离 OperationalReadModel 与状态懒加载重构
+
+### 用户请求
+> 对项目进行重构，实现下面2点，是不是可以提高外部访问前端页面的速度。
+> 1. 读写分离与专用读模型（OperationalReadModel），引入轻量聚合的只读模型，直接读内存与聚合快照，把数据库毫秒级锁竞争降到了接近 0。
+> 2. 状态按需懒加载（Lazy Loading）。
+> 服务器 43.153.134.252（root）
+
+### 实现内容
+- **OperationalReadModel**（`app/core/read_model.py`）：线程安全内存读模型，支持 `get_or_load` / `get_or_load_async` / `publish` / `invalidate` / `version` / `stats`，section 按需懒加载。
+- **写后失效**：`SyncRepository.save_open_positions`、`LeaderboardSnapshotRepository.save_leaderboard_snapshot`、`RiskRepository.save_noon_loss_snapshot` 写成功后 invalidate 对应 section。
+- **热点读路径接入**：`PositionsService`、`LeaderboardService` 改为共享读模型；命中内存时不再打 SQLite。
+- **懒加载**：
+  - 后端：section 首次访问才回源；
+  - 前端 `live-monitor.js`：首屏只拉余额+持仓，观察笔记/午间复盘 idle 后加载；
+  - 前端 `leaderboard.js`：主表渲染后 idle 再拉 14/30/60/365 反弹榜；
+  - 静态资源 `Cache-Control: public, max-age=86400, immutable`（URL 已带 `?v=mtime` 防缓存击穿）。
+- **微基准**：直打聚合 p50≈5.0ms / p95≈6.1ms；读模型命中 p50≈0.000ms / p95≈0.001ms。
+- **测试**：新增 `test_operational_read_model.py`、`test_write_invalidation_read_model.py`；全量 209 通过。
+
+### 线上基线（重构前实测，RTT≈55ms）
+| 路径 | TTFB | 说明 |
+|---|---|---|
+| `/` | 115ms | 36KB HTML |
+| `/api/open-positions` | 121ms | 热点 |
+| `/api/leaderboard` | 281ms | 最慢 |
+| `/api/status` | 216ms | 偏慢 |
+| `/static/dark-unified.css` | 131ms | 无 Cache-Control |
+
+### 结论（是否提升外部访问速度）
+- **能提升，但分层**：读写分离主要砍掉服务端处理时间（排行榜 200ms+ 级 DB/聚合）；懒加载改善首屏关键内容到达时间；静态长缓存改善二次打开。网络 RTT≈55ms 是这两项优化**消不掉**的物理下限。
+- 若要进一步压外部访问延迟，还需：HTTP 压缩、CDN/边缘缓存、HTTP/2、API 响应体积裁剪。
+

@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from app.core.cache import TTLCache
+from app.core.read_model import get_read_model
 from app.core.symbols import normalize_futures_symbol
 from app.core.time import UTC8
 from app.core.async_utils import run_in_thread
@@ -11,7 +11,7 @@ from app.repositories import SnapshotRepository, TradeRepository
 
 class LeaderboardService:
     def __init__(self):
-        self._cache = TTLCache()
+        self._read_model = get_read_model()
         self._cache_ttl_seconds = float(os.getenv("LEADERBOARD_CACHE_TTL_SECONDS", "10") or 10)
 
     @staticmethod
@@ -26,13 +26,19 @@ class LeaderboardService:
             "drawdown_from_window_high_pct": row.get("drawdown_from_window_high_pct"),
         }
 
+    @staticmethod
+    def invalidate_leaderboard_cache() -> None:
+        get_read_model().invalidate(prefix="leaderboard:snapshot:")
+
     async def build_snapshot_response(self, db, date: Optional[str]):
         snapshot_repo = SnapshotRepository(db)
         trade_repo = TradeRepository(db)
         cache_key = f"leaderboard:snapshot:{date or 'latest'}"
-        cached = self._cache.get(cache_key)
+        cached = self._read_model.get(cache_key)
         if cached is not None:
-            return cached
+            age = self._read_model.age_seconds(cache_key)
+            if age is not None and age <= self._cache_ttl_seconds:
+                return cached
         if date:
             try:
                 requested_date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -158,7 +164,7 @@ class LeaderboardService:
                 snapshot_repo.upsert_leaderboard_daily_metrics_for_date, str(snapshot.get("snapshot_date"))
             )
             # upsert metric is a write path; drop leaderboard cache to avoid stale reads
-            self._cache.invalidate(prefix="leaderboard:snapshot:")
+            self._read_model.invalidate(prefix="leaderboard:snapshot:")
 
         metric1 = metric_payload.get("metric1", {}) if metric_payload else {}
         metric2 = metric_payload.get("metric2", {}) if metric_payload else {}
@@ -214,5 +220,5 @@ class LeaderboardService:
         snapshot["hold_48h_metric"] = metric3
         snapshot.pop("all_rows", None)
         payload = {"ok": True, **snapshot}
-        self._cache.set(cache_key, payload, ttl_seconds=self._cache_ttl_seconds)
+        self._read_model.publish(cache_key, payload)
         return payload

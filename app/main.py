@@ -98,6 +98,16 @@ app.state.db = None
 
 
 @app.middleware("http")
+async def static_cache_headers_middleware(request: Request, call_next):
+    """静态资源长缓存：外部访问二次打开几乎不再下载 CSS/JS。"""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=86400, immutable")
+        response.headers.setdefault("Vary", "Accept-Encoding")
+    return response
+
+
+@app.middleware("http")
 async def request_metrics_middleware(request: Request, call_next):
     if not API_METRIC_LOG_ENABLED:
         return await call_next(request)

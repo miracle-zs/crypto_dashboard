@@ -1,3 +1,4 @@
+from app.core.read_model import get_read_model
 from app.repositories.sync_read_repository import SyncReadRepository
 from app.repositories.sync_write_repository import SyncWriteRepository
 
@@ -95,6 +96,8 @@ class SyncRepository:
     def save_open_positions(self, rows):
         saved = self._write.save_open_positions(rows)
         self._open_positions_state_columns = self._write._open_positions_state_columns
+        # 写后失效：下次前端读触发懒加载，而不是打到 SQLite 锁。
+        get_read_model().invalidate(prefix="positions:open:")
         return saved
 
     def get_latest_transfer_event_time(self):

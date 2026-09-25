@@ -1,5 +1,7 @@
 import json
 
+from app.core.read_model import get_read_model
+
 from app.repositories.open_positions_query import fetch_open_positions
 
 
@@ -78,6 +80,7 @@ class RiskRepository:
         )
         conn.commit()
         conn.close()
+        get_read_model().invalidate(prefix="positions:open:")
 
     def get_noon_loss_snapshot_by_date(self, snapshot_date: str):
         conn = self.db._get_connection()

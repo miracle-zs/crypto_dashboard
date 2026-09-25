@@ -195,18 +195,28 @@
         document.querySelector(`.time-range-btn[data-range="${currentTimeRange}"]`).classList.add('bg-cyan-700', 'text-white');
 
         // -------------------------------------
-        // 2. API Data Fetching
+        // 2. API Data Fetching (lazy secondary panels)
         // -------------------------------------
+        let secondaryPanelsLoaded = false;
+
+        function ensureSecondaryPanels() {
+            if (secondaryPanelsLoaded) return;
+            secondaryPanelsLoaded = true;
+            // 次要面板按需懒加载：首屏只拉关键数据，减少外部访问首字节等待。
+            Promise.allSettled([fetchWatchNotes(), fetchNoonReviewHistory()]);
+        }
+
         async function fetchData() {
             const startTime = Date.now();
 
-            // Parallel execution for faster loading
-            const pBalance = fetchBalance();
-            const pPositions = fetchOpenPositions();
-            const pWatchNotes = fetchWatchNotes();
-            const pNoonReviewHistory = fetchNoonReviewHistory();
-
-            await Promise.all([pBalance, pPositions, pWatchNotes, pNoonReviewHistory]);
+            // 首屏关键路径：余额 + 持仓
+            await Promise.all([fetchBalance(), fetchOpenPositions()]);
+            // 次要面板空闲时再拉
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(() => ensureSecondaryPanels(), { timeout: 2000 });
+            } else {
+                setTimeout(ensureSecondaryPanels, 0);
+            }
             updateLastUpdated();
         }
 

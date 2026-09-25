@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from app.core.read_model import get_read_model
+
 
 class LeaderboardSnapshotRepository:
     def __init__(self, db):
@@ -50,6 +52,7 @@ class LeaderboardSnapshotRepository:
         )
         conn.commit()
         conn.close()
+        get_read_model().invalidate(prefix="leaderboard:snapshot:")
 
     @staticmethod
     def _row_to_leaderboard_snapshot(row) -> Dict:

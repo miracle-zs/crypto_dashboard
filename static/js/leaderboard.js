@@ -690,14 +690,24 @@
             renderMetric2(metric2Data);
             renderMetric3(data.change_48h_metric || data.short_48h_metric || data.hold_48h_metric || null);
             await loadMetricsHistory();
-            await Promise.all([14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate)));
+            // 反弹榜为次要区块：主表渲染完成后再懒加载，加快首屏。
+            const scheduleRebound = () => Promise.allSettled(
+                [14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate))
+            );
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(() => scheduleRebound(), { timeout: 1500 });
+            } else {
+                setTimeout(scheduleRebound, 0);
+            }
         } catch (err) {
             statusText.textContent = `请求异常: ${err.message || err}`;
             renderLosersReversal(null);
             renderMetric2(null);
             renderMetric3(null);
             renderMetricsHistory([]);
-            await Promise.all([14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate)));
+            setTimeout(() => Promise.allSettled(
+                [14, 30, 60, 365].map((d) => loadReboundSnapshot(d, selectedDate))
+            ), 0);
         } finally {
             btnRefresh.disabled = false;
             lucide.createIcons();
