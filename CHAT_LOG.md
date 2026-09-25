@@ -159,3 +159,45 @@
 - **能提升，但分层**：读写分离主要砍掉服务端处理时间（排行榜 200ms+ 级 DB/聚合）；懒加载改善首屏关键内容到达时间；静态长缓存改善二次打开。网络 RTT≈55ms 是这两项优化**消不掉**的物理下限。
 - 若要进一步压外部访问延迟，还需：HTTP 压缩、CDN/边缘缓存、HTTP/2、API 响应体积裁剪。
 
+## 2026-09-26 读模型上线部署与前后性能对比
+
+### 用户请求
+> 提交git并推送，然后比较部署前后的web前端访问耗时等性能
+
+### 发布
+- 提交 `416286f` 并推送 GitHub `main`。
+- 服务器 `/root/crypto_dashboard` 执行 `git pull`，重启 `crypto_dashboard.service`；服务启动正常（scheduler / user stream / balance sync 均恢复）。
+
+### 性能对比
+
+**A. 服务端处理（服务器本机 127.0.0.1，已预热读模型）**
+
+| 接口 | 部署后 min | 部署后 avg | 说明 |
+|---|---|---|---|
+| `/api/open-positions` | **3.0ms** | 4.2ms | 读模型内存命中 |
+| `/api/leaderboard` | **3.2ms** | 8.9ms | 首次懒加载 46ms，其后 ~3ms |
+| `/api/status` | 8.3ms | 9.6ms | 未走读模型，仍有小幅 DB |
+| `/` HTML | 2.2ms | 2.5ms | |
+
+对比外网 TTFB−RTT 估算的部署前服务端：open-positions ≈ 60ms+，leaderboard 曾达 200ms+ → **热点接口服务端耗时下降约 15–60 倍**。
+
+**B. 外部访问（本机→43.153.134.252，RTT≈55ms，5–15 样本）**
+
+| 路径 | 部署前 min/avg TTFB | 部署后 min/p50/avg TTFB | 结论 |
+|---|---|---|---|
+| `/api/open-positions` | 117.5 / 153.6 ms | 108.5 / 121.5 / 141.1 ms | min 与 p50 有改善，avg 受网络抖动 |
+| `/api/leaderboard` | 118.3 / 162.5 ms | 112.0 / 133.5 / 149.0 ms | 同上 |
+| `/live-monitor` | 114.6 / 160.5 ms | 109.0 / 128.4 / 147.0 ms | HTML 仍被 RTT 主导 |
+| `/static/dark-unified.css` | 无 Cache-Control | `public, max-age=86400, immutable` | **二次打开浏览器直接命中本地缓存** |
+
+**C. 体验层收益（外部用户可感知）**
+1. **二次访问**：CSS/JS 带 24h immutable 缓存，92KB `live-monitor.js` 不再重复下载。
+2. **首屏关键路径**：live-monitor 先渲染余额+持仓（2 请求），观察笔记/午间复盘 idle 再拉。
+3. **榜单页**：主表先出，14/30/60/365 反弹榜空闲加载。
+4. **轮询更轻**：`/api/open-positions` 服务端 3ms 级，30s 轮询几乎无 DB 锁压力。
+
+### 诚实结论
+- **服务端瓶颈已基本消除**（读模型生效，本地 3ms 级）。
+- **外部首访 TTFB 仍被 ≈55ms RTT + TCP/TLS 握手主导**，这两项优化对外网 min/p50 有小幅改善，但无法突破物理时延。
+- 若目标是「外部用户体感再快一截」，下一步应做：HTTP/2 与 CDN（nginx 已对 HTML/JS gzip，静态已长缓存）。
+
