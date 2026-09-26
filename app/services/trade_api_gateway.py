@@ -287,12 +287,24 @@ def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:
                     else:
                         key = symbol
                     real_pos[key] = amt
+            active_risk_list = [p for p in positions if abs(float(p.get("positionAmt", 0))) > 0]
+            risk_map = {}
+            for p in active_risk_list:
+                s = p.get("symbol")
+                ps = p.get("positionSide")
+                if s and ps in ("LONG", "SHORT"):
+                    risk_map[(s, ps)] = p
+                if s:
+                    risk_map[s] = p
+            setattr(client, "_latest_position_risk", active_risk_list)
+            setattr(client, "_latest_position_risk_map", risk_map)
             if mark_prices:
                 try:
                     from app.services.market_price_service import MarketPriceService
                     MarketPriceService.set_cached_prices(mark_prices)
                 except Exception:
                     pass
+
         return real_pos
     except Exception as exc:
         logger.error(f"Failed to fetch position risk: {exc}")

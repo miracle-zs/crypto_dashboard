@@ -515,20 +515,30 @@ def extract_open_positions_for_symbol(
             side_str = "LONG" if real_net_qty > 0 else "SHORT"
             tz = getattr(processor, "UTC8", UTC8)
             dt = datetime.fromtimestamp(since / 1000, tz=tz)
+            entry_price = 0.0
+            raw_risk = getattr(processor, "_latest_position_risk_map", {})
+            risk_info = raw_risk.get((symbol, side_str)) or raw_risk.get(symbol)
+            if risk_info:
+                try:
+                    entry_price = float(risk_info.get("entryPrice", 0.0))
+                except (ValueError, TypeError):
+                    pass
+            entry_amount = entry_price * abs(real_net_qty)
             fallback_pos = [
                 {
                     "date": dt.strftime("%Y%m%d"),
                     "symbol": base,
                     "side": side_str,
                     "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "entry_price": 0.0,
+                    "entry_price": entry_price,
                     "qty": abs(real_net_qty),
-                    "entry_amount": 0.0,
+                    "entry_amount": entry_amount,
                     "order_id": 0,
                     "is_incomplete": True,
                 }
             ]
             return fallback_pos, time.perf_counter() - started_at
+
         return [], time.perf_counter() - started_at
 
     filled_orders = [order for order in orders if float(order["executedQty"]) > 0 and order["updateTime"] >= since]
@@ -604,20 +614,30 @@ def extract_open_positions_for_symbol(
         base = symbol[:-4] if symbol.endswith("USDT") else symbol
         tz = getattr(processor, "UTC8", UTC8)
         dt = datetime.fromtimestamp(since / 1000, tz=tz)
+        entry_price = 0.0
+        raw_risk = getattr(processor, "_latest_position_risk_map", {})
+        risk_info = raw_risk.get((symbol, side_str)) or raw_risk.get(symbol)
+        if risk_info:
+            try:
+                entry_price = float(risk_info.get("entryPrice", 0.0))
+            except (ValueError, TypeError):
+                pass
+        entry_amount = entry_price * abs(real_net_qty)
         output = [
             {
                 "date": dt.strftime("%Y%m%d"),
                 "symbol": base,
                 "side": side_str,
                 "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "entry_price": 0.0,
+                "entry_price": entry_price,
                 "qty": abs(real_net_qty),
-                "entry_amount": 0.0,
+                "entry_amount": entry_amount,
                 "order_id": 0,
                 "is_incomplete": True,
             }
         ]
     return output, time.perf_counter() - started_at
+
 
 
 def get_open_positions(

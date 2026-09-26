@@ -179,25 +179,28 @@ class SyncWriteRepository:
 
         state_map = {}
         try:
+            cursor.execute("PRAGMA table_info(open_positions)")
+            table_columns = {info[1] for info in cursor.fetchall()}
             if self._open_positions_state_columns is None:
-                cursor.execute("PRAGMA table_info(open_positions)")
-                columns = [info[1] for info in cursor.fetchall()]
                 query_cols = ["symbol", "order_id", "alerted"]
-                if "last_alert_time" in columns:
+                if "last_alert_time" in table_columns:
                     query_cols.append("last_alert_time")
-                if "profit_alerted" in columns:
+                if "profit_alerted" in table_columns:
                     query_cols.append("profit_alerted")
-                if "profit_alert_time" in columns:
+                if "profit_alert_time" in table_columns:
                     query_cols.append("profit_alert_time")
-                if "reentry_alerted" in columns:
+                if "reentry_alerted" in table_columns:
                     query_cols.append("reentry_alerted")
-                if "reentry_alert_time" in columns:
+                if "reentry_alert_time" in table_columns:
                     query_cols.append("reentry_alert_time")
-                if "is_long_term" in columns:
+                if "is_long_term" in table_columns:
                     query_cols.append("is_long_term")
+                if "is_incomplete" in table_columns:
+                    query_cols.append("is_incomplete")
                 self._open_positions_state_columns = tuple(query_cols)
 
             query_cols = list(self._open_positions_state_columns or ("symbol", "order_id", "alerted"))
+
 
             incoming_symbols = sorted({str(pos.get("symbol", "")) for pos in rows if pos.get("symbol")}) if rows else []
             if rows and incoming_symbols:
@@ -237,60 +240,72 @@ class SyncWriteRepository:
             conn.close()
             return 0
 
-        insert_rows = []
+        # Normalize incoming rows: if order_id is 0 or missing, assign distinct synthetic negative ID
+        normalized_rows = []
+        zero_order_indices = {}
         for pos in rows:
+            p = dict(pos)
+            oid = p.get("order_id")
+            if oid is None or int(oid) == 0:
+                sym = str(p.get("symbol", ""))
+                side = str(p.get("side", "")).upper()
+                key = (sym, side)
+                idx = zero_order_indices.get(key, 0) + 1
+                zero_order_indices[key] = idx
+                base_code = 100 if side == "LONG" else (200 if side == "SHORT" else 300)
+                p["order_id"] = -(base_code + idx)
+            else:
+                p["order_id"] = int(oid)
+            normalized_rows.append(p)
+
+        has_incomplete = "is_incomplete" in table_columns
+        insert_rows = []
+        for pos in normalized_rows:
             key = f"{pos['symbol']}_{pos['order_id']}"
             saved_state = state_map.get(key, {})
-            insert_rows.append(
-                (
-                    pos["date"],
-                    pos["symbol"],
-                    pos["side"],
-                    pos["entry_time"],
-                    pos["entry_price"],
-                    pos["qty"],
-                    pos["entry_amount"],
-                    pos["order_id"],
-                    saved_state.get("alerted", 0),
-                    saved_state.get("last_alert_time"),
-                    saved_state.get("profit_alerted", 0),
-                    saved_state.get("profit_alert_time"),
-                    saved_state.get("reentry_alerted", 0),
-                    saved_state.get("reentry_alert_time"),
-                    saved_state.get("is_long_term", 0),
-                )
-            )
+            row_data = [
+                pos["date"],
+                pos["symbol"],
+                pos["side"],
+                pos["entry_time"],
+                pos["entry_price"],
+                pos["qty"],
+                pos["entry_amount"],
+                pos["order_id"],
+                saved_state.get("alerted", 0),
+                saved_state.get("last_alert_time"),
+                saved_state.get("profit_alerted", 0),
+                saved_state.get("profit_alert_time"),
+                saved_state.get("reentry_alerted", 0),
+                saved_state.get("reentry_alert_time"),
+                saved_state.get("is_long_term", 0),
+            ]
+            if has_incomplete:
+                row_data.append(int(pos.get("is_incomplete", 0)))
+            insert_rows.append(tuple(row_data))
 
         if insert_rows:
-            cursor.executemany(
-                """
-                INSERT INTO open_positions (
-                    date, symbol, side, entry_time, entry_price, qty, entry_amount, order_id,
-                    alerted, last_alert_time, profit_alerted, profit_alert_time,
-                    reentry_alerted, reentry_alert_time, is_long_term
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(symbol, order_id) DO UPDATE SET
-                    date = excluded.date,
-                    side = excluded.side,
-                    entry_time = excluded.entry_time,
-                    entry_price = excluded.entry_price,
-                    qty = excluded.qty,
-                    entry_amount = excluded.entry_amount,
-                    alerted = excluded.alerted,
-                    last_alert_time = excluded.last_alert_time,
-                    profit_alerted = excluded.profit_alerted,
-                    profit_alert_time = excluded.profit_alert_time,
-                    reentry_alerted = excluded.reentry_alerted,
-                    reentry_alert_time = excluded.reentry_alert_time,
-                    is_long_term = excluded.is_long_term
-                """,
-                insert_rows,
-            )
+            col_names = [
+                "date", "symbol", "side", "entry_time", "entry_price", "qty", "entry_amount", "order_id",
+                "alerted", "last_alert_time", "profit_alerted", "profit_alert_time",
+                "reentry_alerted", "reentry_alert_time", "is_long_term",
+            ]
+            if has_incomplete:
+                col_names.append("is_incomplete")
+            placeholders = ", ".join(["?"] * len(col_names))
+            set_clauses = [f"{col} = excluded.{col}" for col in col_names if col not in ("symbol", "order_id")]
+            sql = f"""
+            INSERT INTO open_positions ({", ".join(col_names)})
+            VALUES ({placeholders})
+            ON CONFLICT(symbol, order_id) DO UPDATE SET
+                {", ".join(set_clauses)}
+            """
+            cursor.executemany(sql, insert_rows)
 
             active_keys = sorted(
                 {
                     (str(pos["symbol"]), int(pos["order_id"]))
-                    for pos in rows
+                    for pos in normalized_rows
                     if pos.get("symbol") is not None and pos.get("order_id") is not None
                 }
             )
@@ -312,6 +327,76 @@ class SyncWriteRepository:
         conn.commit()
         conn.close()
         return len(rows)
+
+    def save_position_snapshots(self, snapshot_time: str, positions: list) -> int:
+        if not positions:
+            return 0
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            insert_rows = []
+            for p in positions:
+                insert_rows.append(
+                    (
+                        str(snapshot_time),
+                        str(p.get("symbol", "")),
+                        str(p.get("position_side") or p.get("side") or "BOTH"),
+                        float(p.get("qty") or p.get("positionAmt") or 0.0),
+                        float(p.get("entry_price") or p.get("entryPrice") or 0.0),
+                        float(p.get("mark_price") or p.get("markPrice") or 0.0),
+                        float(p.get("unrealized_pnl") or p.get("unRealizedProfit") or 0.0),
+                        float(p.get("liquidation_price") or p.get("liquidationPrice") or 0.0),
+                        int(p.get("leverage") or 0),
+                        str(p.get("margin_type") or p.get("marginType") or "cross"),
+                        int(p.get("is_complete", 1)),
+                    )
+                )
+            cursor.executemany(
+                """
+                INSERT INTO position_snapshots (
+                    snapshot_time, symbol, position_side, qty, entry_price,
+                    mark_price, unrealized_pnl, liquidation_price, leverage,
+                    margin_type, is_complete, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(snapshot_time, symbol, position_side) DO UPDATE SET
+                    qty = excluded.qty,
+                    entry_price = excluded.entry_price,
+                    mark_price = excluded.mark_price,
+                    unrealized_pnl = excluded.unrealized_pnl,
+                    liquidation_price = excluded.liquidation_price,
+                    leverage = excluded.leverage,
+                    margin_type = excluded.margin_type,
+                    is_complete = excluded.is_complete,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                insert_rows,
+            )
+            conn.commit()
+            return len(insert_rows)
+        finally:
+            conn.close()
+
+    def get_latest_position_snapshots(self) -> list:
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT snapshot_time FROM position_snapshots ORDER BY id DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if not row or not row["snapshot_time"]:
+                return []
+            latest_time = row["snapshot_time"]
+            cursor.execute(
+                "SELECT * FROM position_snapshots WHERE snapshot_time = ?",
+                (latest_time,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception:
+            return []
+        finally:
+            conn.close()
+
 
     def save_transfer_income(self, **kwargs):
         event_time = int(kwargs["event_time"])

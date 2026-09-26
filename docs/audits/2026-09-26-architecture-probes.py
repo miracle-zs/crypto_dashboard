@@ -40,9 +40,10 @@ def main():
             rows = [dict(row) for row in conn.execute("SELECT * FROM open_positions")]
         finally:
             conn.close()
-        assert len(rows) == 1 and rows[0]["side"] == "SHORT"
-        assert "is_incomplete" not in rows[0]
-        print("Two incomplete hedge positions collapse to one; incomplete flag is lost")
+        assert len(rows) == 2 and {r["side"] for r in rows} == {"LONG", "SHORT"}
+        assert all(r.get("is_incomplete") == 1 for r in rows)
+        print("Hedge positions preserved and incomplete flag recorded correctly")
+
 
 
 if __name__ == "__main__":

@@ -623,8 +623,13 @@ class TradeDataProcessor:
 
     def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Optional[Dict[str, float]]:
         """Get actual open positions from Binance (Symbol -> NetQty)"""
-        client = client or self.client
-        return fetch_real_positions(client=client)
+        active_client = client or self.client
+        res = fetch_real_positions(client=active_client)
+        if hasattr(active_client, "_latest_position_risk"):
+            self._latest_position_risk = getattr(active_client, "_latest_position_risk")
+            self._latest_position_risk_map = getattr(active_client, "_latest_position_risk_map")
+        return res
+
 
     @staticmethod
     def _consume_fifo_entries(entries: List[Dict], qty_to_close: float):

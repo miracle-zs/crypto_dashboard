@@ -78,6 +78,8 @@ class OpenPositionItem(BaseModel):
     weight: float
     is_long_term: bool = False
     profit_alerted: bool = False
+    is_incomplete: bool = False
+
 
 
 class OpenPositionsSummary(BaseModel):

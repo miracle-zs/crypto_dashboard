@@ -286,7 +286,9 @@ class PositionsService:
                 "unrealized_pnl_pct": unrealized_pnl_pct,
                 "is_long_term": pos.get("is_long_term", 0) == 1,
                 "profit_alerted": pos.get("profit_alerted", 0) == 1,
+                "is_incomplete": pos.get("is_incomplete", 0) in (1, True),
                 "weight": 0.0
+
             })
 
         if total_notional > 0:

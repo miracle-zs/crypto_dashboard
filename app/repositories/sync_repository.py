@@ -100,6 +100,15 @@ class SyncRepository:
         get_read_model().invalidate(prefix="positions:open:")
         return saved
 
+    def save_position_snapshots(self, snapshot_time: str, positions: list) -> int:
+        saved = self._write.save_position_snapshots(snapshot_time, positions)
+        get_read_model().invalidate(prefix="positions:snapshots:")
+        return saved
+
+    def get_latest_position_snapshots(self) -> list:
+        return self._write.get_latest_position_snapshots()
+
+
     def get_latest_transfer_event_time(self):
         return self._read.get_latest_transfer_event_time()
 

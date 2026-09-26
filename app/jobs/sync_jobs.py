@@ -70,6 +70,15 @@ def run_sync_open_positions(
             scheduler.sync_repo.save_open_positions([])
             logger.info("当前无未平仓订单")
 
+        raw_risk_positions = getattr(scheduler.processor, "_latest_position_risk", None)
+        if raw_risk_positions is not None:
+            snapshot_time = datetime.now(UTC8).strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                scheduler.sync_repo.save_position_snapshots(snapshot_time, raw_risk_positions)
+            except Exception as exc:
+                logger.warning(f"保存持仓权威快照失败: {exc}")
+
+
         if getattr(scheduler, "enable_triggered_trades_compensation", False):
             previous_keys = {
                 (str(row.get("symbol") or "").upper(), int(row.get("order_id")))
