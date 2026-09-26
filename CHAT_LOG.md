@@ -252,5 +252,46 @@
      - `GET /api/open-positions`：8 个持仓全部具备真实入场成本与标记价格，无 0 元成本，无 -100% 虚假浮亏。
    - 本地全量回归测试：**221 passed**，0 failure！
 
+## 2026-09-26 深度闭环：第一性原理交易计算链路彻底重构（Open Lots 批次持久化、确定性手续费、架构探针反转）
+
+### 用户反馈与审查差距
+> **还没有全部改好。** 关键差距在交易计算链路：逐笔成交账本已经建立，但当前交易 ETL 仍主要按订单和拉取窗口撮合，没有从账本重放，也没有持久化未平仓批次。因此，开仓早于本次查询起点时，平仓仍可能缺少上下文；手续费也仍可能按批次汇总后分摊。架构探针仍打印了“手续费分摊随批次变化 ... Matcher cannot resume from exit-only input without prior position state”，这意味着之前的改造并没有真正消除这两个缺陷，只是用测试断言把缺陷固定下来了。
+
+### 推进闭环与落地成果
+
+#### 1. Stage 1: 状态语义与可靠性修复 [Commit: d1b1a84]
+- **空持仓快照支持**：在 `SyncWriteRepository` 中，当账户清仓（`positions == []`）时，写入 `symbol='__EMPTY__'` 哨兵快照记录，`get_latest_position_snapshots` 过滤哨兵并返回 `[]`，彻底消除清仓后查询仍显示老旧仓位的 Bug。
+- **WebSocket 仓位增量字典合并**：在 `app/user_stream.py` 中建立 `_position_pnl_map: dict[tuple[str, str], float]`，收到 Binance `ACCOUNT_UPDATE` 时只更新变动的 position，数量为 0 时剔除，避免单仓位变动覆盖抹杀其他 7 个仓位浮盈导致净值跳水。
+- **通知可靠性保障**：在 `app/notifier.py` 中明确返回 `bool`（成功 True，失败/未配 Key False）；在 `app/jobs/alert_jobs.py` 中仅在发送成功时打标 `profit_alerted` / `reentry_alerted`，避免发送失败却永久漏发。
+- **消除日 K 收盘价错误兜底与多币种独立时间戳**：在 `MarketPriceService` 中维护 `_cached_timestamps: dict[str, float]`，在 `PositionsService` 中彻底移除日 K `close` 伪充当前标记价格的逻辑，无标记价格时置 None 并报告 `stale=True`。
+- **任务互斥锁包装器统一**：在 `app/core/job_runtime.py` 中实现 `try_enter_slot(scheduler, source, category)`，兼顾 `JobCategory` 枚举与单元测试中简化的 `_FakeScheduler`。
+
+#### 2. Stage 2: 可恢复未平仓批次与有状态撮合 [Commit: 01c4344]
+- **数据库迁移 v5**：新增 `app/core/db_migrations/v5_open_lots_persistence.py`，创建 `open_lots` 表（`symbol, position_side, side, order_id, price, qty, remaining_qty, time_ms, fee_rate, created_at`）并建立组合索引。
+- **撮合核心有状态化改造**：改造 `app/core/trade_matching.py`，支持 `initial_open_lots` 与 `return_open_lots`。当输入只有 exit 平仓单时，自动根据传入的先验 `open_lots` 进行精确 FIFO 撮合，并输出更新后的 `remaining_open_lots`，彻底根治开仓早于查询窗口导致平仓被静默丢弃的问题。
+- **仓位批次落库与查询**：在 `SyncWriteRepository` 中实现 `save_open_lots` 与 `get_open_lots`，实现跨时间窗口与跨进程的精确未平仓批次恢复。
+- **单元测试验证**：新增 `tests/test_stateful_matcher_with_lots.py`，覆盖只有平仓单输入撮合恢复、部分平仓批次扣减、双向持仓分方向批次隔离以及仓位批次数据库事务持久化。
+
+#### 3. Stage 3: 基于事实账本的确定性同步与反转架构探针 [Commit: 675119e]
+- **ETL 事实佣金直接注入**：改造 `app/services/trade_etl_service.py`，在撮合前从拉取的逐笔成交 `trades` 或存储的 `execution_facts` 账本中精确汇总每笔订单的实际 `commission`，以显式手续费注入撮合器，彻底消灭 `fees_map = {0: total}` 按权重分摊的非幂等缺陷。
+- **ETL 状态批次自动恢复与留存**：在 `trade_etl_service.py` 中自动调用 `repo.get_open_lots()` 传入撮合器，撮合后自动将更新后的批次保存回 `repo.save_open_lots()`。
+- **反转架构探针**：修改 `docs/audits/2026-09-26-architecture-probes.py`，将原本“记录缺陷”的断言全面升级为“验证理想契约”的断言：
+  - 断言 `whole == split == [-1.0, -3.0]`：无论是一次性撮合还是切批分段撮合，手续费严格相等！
+  - 断言 `orders[1:2]` 平仓单能够通过 `initial_open_lots` 成功恢复并生成完整闭仓记录。
+  - 断言 `open_lots` 数据库持久化并在多连接间可靠恢复。
+- **运行验证**：`python docs/audits/2026-09-26-architecture-probes.py` 探针全部绿灯通过，打印 `Fee allocation invariant verified: whole == split`！
+
+#### 4. Stage 4: 测试隔离健全与生产部署验证 [Commit: 7812aff]
+- **测试环境纯洁性隔离**：修复 `tests/test_scheduler_config.py` 在生产环境存在 `.env` 自定义变量（如 `REBOUND_7D_MINUTE=00`）时的环境变量污染问题。
+- **生产环境全量发布**：
+  - 推送代码至 GitHub `origin/main`，并在生产服务器 `43.153.134.252` 执行 `git pull`。
+  - 生产服务器自动应用迁移 v5，建立 `open_lots` 表。
+  - 生产服务器运行全量测试套件：**229 项测试全部通过**（229 passed）！
+  - 架构探针在生产 Python 3.12 虚拟环境中全部通过！
+  - 平滑重启 `crypto_dashboard.service`，进程常驻内存仅 **92.8MB**。
+  - 真实接口实测：
+    - `GET /api/open-positions`：秒级返回当前 9 个真实持仓，标记价格与成本准确，`stale=false`。
+    - `GET /api/balance-history`：下采样平滑返回，无阻塞。
+
 
 
