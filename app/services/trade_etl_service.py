@@ -81,6 +81,12 @@ def extract_symbol_closed_positions(
             "last_id": max(trade_ids) if trade_ids else None,
             "last_time_ms": max(trade_times) if trade_times else None,
         }
+        sync_repo = getattr(processor, "sync_repo", None)
+        if sync_repo is not None and hasattr(sync_repo, "save_execution_facts"):
+            try:
+                sync_repo.save_execution_facts(trades)
+            except Exception as exc:
+                logger.warning(f"Failed to persist execution facts for {symbol}: {exc}")
 
     if not orders:
         result = ([], time.perf_counter() - started_at)

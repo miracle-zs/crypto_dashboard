@@ -173,13 +173,19 @@ class TradeDataProcessor:
     ) -> List[Dict]:
         """Fetch income history once in a paginated way for a time window."""
         client = client or self.client
-        return fetch_income_history(
+        records = fetch_income_history(
             client=client,
             since=since,
             until=until,
             income_type=income_type,
             fail_on_error=fail_on_error,
         )
+        if records and getattr(self, "sync_repo", None):
+            try:
+                self.sync_repo.save_income_facts(records)
+            except Exception as exc:
+                logger.warning(f"Failed to persist income facts: {exc}")
+        return records
 
     def get_transfer_income_records(self, start_time: int, end_time: Optional[int] = None) -> List[Dict]:
         """

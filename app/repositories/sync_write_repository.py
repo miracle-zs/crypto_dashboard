@@ -425,3 +425,156 @@ class SyncWriteRepository:
         conn.commit()
         conn.close()
         return inserted
+
+    def save_execution_facts(self, facts: list, venue: str = "binance_futures") -> int:
+        if not facts:
+            return 0
+        import json
+
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            insert_rows = []
+            for item in facts:
+                trade_id = int(item.get("id") or item.get("trade_id") or 0)
+                order_id = int(item.get("orderId") or item.get("order_id") or 0)
+                symbol = str(item.get("symbol", "")).upper()
+                side = str(item.get("side", "")).upper()
+                position_side = str(item.get("positionSide") or item.get("position_side") or "BOTH").upper()
+                price = float(item.get("price", 0.0))
+                qty = float(item.get("qty", 0.0))
+                realized_pnl = float(item.get("realizedPnl") or item.get("realized_pnl") or 0.0)
+                quote_qty = float(item.get("quoteQty") or item.get("quote_qty") or (price * qty))
+                commission = float(item.get("commission", 0.0))
+                commission_asset = str(item.get("commissionAsset") or item.get("commission_asset") or "USDT").upper()
+                time_ms = int(item.get("time") or item.get("time_ms") or 0)
+                is_buyer = 1 if item.get("buyer") or item.get("is_buyer") else 0
+                is_maker = 1 if item.get("maker") or item.get("is_maker") else 0
+                raw_payload = json.dumps(item, ensure_ascii=False)
+                insert_rows.append(
+                    (
+                        venue, symbol, trade_id, order_id, side, position_side,
+                        price, qty, realized_pnl, quote_qty, commission, commission_asset,
+                        time_ms, is_buyer, is_maker, raw_payload,
+                    )
+                )
+            before_changes = conn.total_changes
+            cursor.executemany(
+                """
+                INSERT INTO execution_facts (
+                    venue, symbol, trade_id, order_id, side, position_side,
+                    price, qty, realized_pnl, quote_qty, commission, commission_asset,
+                    time_ms, is_buyer, is_maker, raw_payload, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(venue, symbol, trade_id) DO NOTHING
+                """,
+                insert_rows,
+            )
+            inserted = conn.total_changes - before_changes
+            conn.commit()
+            return inserted
+        finally:
+            conn.close()
+
+    def get_execution_facts(
+        self,
+        symbol: str = None,
+        since_ms: int = None,
+        until_ms: int = None,
+        venue: str = "binance_futures",
+    ) -> list:
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            conditions = ["venue = ?"]
+            params = [venue]
+            if symbol:
+                conditions.append("symbol = ?")
+                params.append(symbol.upper())
+            if since_ms is not None:
+                conditions.append("time_ms >= ?")
+                params.append(int(since_ms))
+            if until_ms is not None:
+                conditions.append("time_ms <= ?")
+                params.append(int(until_ms))
+            where_clause = " WHERE " + " AND ".join(conditions)
+            sql = f"SELECT * FROM execution_facts{where_clause} ORDER BY time_ms ASC, trade_id ASC"
+            cursor.execute(sql, tuple(params))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def save_income_facts(self, facts: list, venue: str = "binance_futures") -> int:
+        if not facts:
+            return 0
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            insert_rows = []
+            for item in facts:
+                symbol = str(item.get("symbol") or "").upper()
+                income_type = str(item.get("incomeType") or item.get("income_type") or "").upper()
+                income = float(item.get("income", 0.0))
+                asset = str(item.get("asset") or "USDT").upper()
+                time_ms = int(item.get("time") or item.get("time_ms") or 0)
+                tran_id = item.get("tranId") or item.get("tran_id")
+                tran_id_val = int(tran_id) if tran_id not in (None, "") else None
+                trade_id = item.get("tradeId") or item.get("trade_id")
+                trade_id_val = int(trade_id) if trade_id not in (None, "") else None
+                info = str(item.get("info") or "")
+                insert_rows.append(
+                    (
+                        venue, symbol, income_type, income, asset, time_ms,
+                        tran_id_val, trade_id_val, info,
+                    )
+                )
+            before_changes = conn.total_changes
+            cursor.executemany(
+                """
+                INSERT INTO income_facts (
+                    venue, symbol, income_type, income, asset, time_ms,
+                    tran_id, trade_id, info, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(venue, income_type, tran_id) DO NOTHING
+                """,
+                insert_rows,
+            )
+            inserted = conn.total_changes - before_changes
+            conn.commit()
+            return inserted
+
+        finally:
+            conn.close()
+
+    def get_income_facts(
+        self,
+        symbol: str = None,
+        income_type: str = None,
+        since_ms: int = None,
+        until_ms: int = None,
+        venue: str = "binance_futures",
+    ) -> list:
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            conditions = ["venue = ?"]
+            params = [venue]
+            if symbol:
+                conditions.append("symbol = ?")
+                params.append(symbol.upper())
+            if income_type:
+                conditions.append("income_type = ?")
+                params.append(income_type.upper())
+            if since_ms is not None:
+                conditions.append("time_ms >= ?")
+                params.append(int(since_ms))
+            if until_ms is not None:
+                conditions.append("time_ms <= ?")
+                params.append(int(until_ms))
+            where_clause = " WHERE " + " AND ".join(conditions)
+            sql = f"SELECT * FROM income_facts{where_clause} ORDER BY time_ms ASC, id ASC"
+            cursor.execute(sql, tuple(params))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+

@@ -24,10 +24,12 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
                     "qty": order["qty"],
                     "time": order["time"],
                     "order_id": order["order_id"],
+                    "fee_rate": order.get("fee_rate", 0.0),
                 }
             )
         elif order["type"] == "exit" and open_positions:
             exit_qty_remaining = order["qty"]
+            exit_fee_rate = order.get("fee_rate", 0.0)
 
             while exit_qty_remaining > 0 and open_positions:
                 entry = open_positions[0]
@@ -40,6 +42,8 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
 
                 time_held = order["time"] - entry["time"]
                 weight = close_qty * time_held
+                entry_fee_rate = entry.get("fee_rate", 0.0)
+                matched_fee = -(entry_fee_rate * close_qty + exit_fee_rate * close_qty)
 
                 positions.append(
                     {
@@ -55,6 +59,7 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
                         "entry_order_id": entry["order_id"],
                         "exit_order_id": order["order_id"],
                         "is_liquidation": bool(order.get("is_liquidation", False)),
+                        "explicit_fee": matched_fee,
                     }
                 )
 
@@ -76,6 +81,7 @@ def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
         incoming_side = "LONG" if order_side == "BUY" else "SHORT"
         closing_side = "SHORT" if incoming_side == "LONG" else "LONG"
         remaining = order["qty"]
+        order_fee_rate = order.get("fee_rate", 0.0)
 
         while remaining > 0 and open_entries and open_entries[0]["side"] == closing_side:
             entry = open_entries[0]
@@ -86,6 +92,9 @@ def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
                 pnl_before_fees = (entry["price"] - order["price"]) * close_qty
 
             time_held = order["time"] - entry["time"]
+            entry_fee_rate = entry.get("fee_rate", 0.0)
+            matched_fee = -(entry_fee_rate * close_qty + order_fee_rate * close_qty)
+
             positions.append(
                 {
                     "symbol": symbol,
@@ -100,6 +109,7 @@ def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
                     "entry_order_id": entry["order_id"],
                     "exit_order_id": order["order_id"],
                     "is_liquidation": bool(order.get("is_liquidation", False)),
+                    "explicit_fee": matched_fee,
                 }
             )
             entry["qty"] -= close_qty
@@ -115,6 +125,7 @@ def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
                     "qty": remaining,
                     "time": order["time"],
                     "order_id": order["order_id"],
+                    "fee_rate": order_fee_rate,
                 }
             )
 
@@ -136,6 +147,28 @@ def match_orders_to_positions(
     short_positions = []
     one_way_orders = []
 
+    has_explicit_fees = False
+    for o in orders:
+        if o.get("commission") is not None or o.get("fee") is not None:
+            has_explicit_fees = True
+            break
+        oid = o.get("orderId") if o.get("orderId") is not None else o.get("order_id")
+        if oid is not None and oid in fees_map and oid != 0:
+            has_explicit_fees = True
+            break
+
+    def _get_order_fee_rate(o: Dict, executed_qty: float) -> float:
+        if executed_qty <= 0:
+            return 0.0
+        if o.get("commission") is not None:
+            return abs(float(o["commission"])) / executed_qty
+        if o.get("fee") is not None:
+            return abs(float(o["fee"])) / executed_qty
+        oid = o.get("orderId") if o.get("orderId") is not None else o.get("order_id")
+        if oid is not None and oid in fees_map and oid != 0:
+            return abs(float(fees_map[oid])) / executed_qty
+        return 0.0
+
     iterable_orders = orders if presorted else sorted(orders, key=lambda x: x["updateTime"])
     for order in iterable_orders:
         if float(order["executedQty"]) <= 0:
@@ -147,6 +180,9 @@ def match_orders_to_positions(
         price = float(order["avgPrice"])
         order_time = order["updateTime"]
         liquidation = is_liquidation_order(order)
+        fee_rate = _get_order_fee_rate(order, qty)
+
+        order_id = order.get("orderId") if order.get("orderId") is not None else order.get("order_id")
 
         if position_side == "BOTH":
             one_way_orders.append(
@@ -155,15 +191,23 @@ def match_orders_to_positions(
                     "price": price,
                     "qty": qty,
                     "time": order_time,
-                    "order_id": order["orderId"],
+                    "order_id": order_id,
                     "is_liquidation": liquidation,
+                    "fee_rate": fee_rate,
                 }
             )
             continue
 
         if position_side == "LONG" and side == "BUY":
             long_positions.append(
-                {"type": "entry", "price": price, "qty": qty, "time": order_time, "order_id": order["orderId"]}
+                {
+                    "type": "entry",
+                    "price": price,
+                    "qty": qty,
+                    "time": order_time,
+                    "order_id": order_id,
+                    "fee_rate": fee_rate,
+                }
             )
         elif position_side == "LONG" and side == "SELL":
             long_positions.append(
@@ -172,14 +216,22 @@ def match_orders_to_positions(
                     "price": price,
                     "qty": qty,
                     "time": order_time,
-                    "order_id": order["orderId"],
+                    "order_id": order_id,
                     "is_liquidation": liquidation,
+                    "fee_rate": fee_rate,
                 }
             )
 
         if position_side == "SHORT" and side == "SELL":
             short_positions.append(
-                {"type": "entry", "price": price, "qty": qty, "time": order_time, "order_id": order["orderId"]}
+                {
+                    "type": "entry",
+                    "price": price,
+                    "qty": qty,
+                    "time": order_time,
+                    "order_id": order_id,
+                    "fee_rate": fee_rate,
+                }
             )
         elif position_side == "SHORT" and side == "BUY":
             short_positions.append(
@@ -188,8 +240,9 @@ def match_orders_to_positions(
                     "price": price,
                     "qty": qty,
                     "time": order_time,
-                    "order_id": order["orderId"],
+                    "order_id": order_id,
                     "is_liquidation": liquidation,
+                    "fee_rate": fee_rate,
                 }
             )
 
@@ -199,12 +252,23 @@ def match_orders_to_positions(
         + match_one_way_orders(one_way_orders, symbol)
     )
 
-    if all_positions:
+    if has_explicit_fees:
+        for pos in all_positions:
+            pos["fees"] = pos.get("explicit_fee", 0.0)
+            pos["pnl"] = pos["pnl_before_fees"] + pos["fees"]
+            pos.pop("explicit_fee", None)
+    elif all_positions:
         total_weight = sum(pos["weight"] for pos in all_positions)
-        if total_weight > 0:
+        if total_weight > 0 and total_fees != 0:
             for pos in all_positions:
                 fee_allocation = (pos["weight"] / total_weight) * total_fees
                 pos["fees"] = fee_allocation
                 pos["pnl"] = pos["pnl_before_fees"] + fee_allocation
+                pos.pop("explicit_fee", None)
+        else:
+            for pos in all_positions:
+                pos["fees"] = 0.0
+                pos["pnl"] = pos["pnl_before_fees"]
+                pos.pop("explicit_fee", None)
 
     return all_positions

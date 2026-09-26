@@ -92,6 +92,7 @@ class TradeDataScheduler:
         else:
             self.processor = TradeDataProcessor(api_key, api_secret)
             self.processor.daily_kline_repo = self.daily_kline_repo
+            self.processor.sync_repo = self.sync_repo
 
         self._apply_scheduler_config(config)
         BinanceFuturesRestClient.configure_global_request_budget(

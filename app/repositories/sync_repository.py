@@ -108,6 +108,41 @@ class SyncRepository:
     def get_latest_position_snapshots(self) -> list:
         return self._write.get_latest_position_snapshots()
 
+    def save_execution_facts(self, facts: list, venue: str = "binance_futures") -> int:
+        return self._write.save_execution_facts(facts, venue=venue)
+
+    def get_execution_facts(
+        self,
+        symbol: str = None,
+        since_ms: int = None,
+        until_ms: int = None,
+        venue: str = "binance_futures",
+    ) -> list:
+        return self._write.get_execution_facts(
+            symbol=symbol,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            venue=venue,
+        )
+
+    def save_income_facts(self, facts: list, venue: str = "binance_futures") -> int:
+        return self._write.save_income_facts(facts, venue=venue)
+
+    def get_income_facts(
+        self,
+        symbol: str = None,
+        income_type: str = None,
+        since_ms: int = None,
+        until_ms: int = None,
+        venue: str = "binance_futures",
+    ) -> list:
+        return self._write.get_income_facts(
+            symbol=symbol,
+            income_type=income_type,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            venue=venue,
+        )
 
     def get_latest_transfer_event_time(self):
         return self._read.get_latest_transfer_event_time()
@@ -117,3 +152,4 @@ class SyncRepository:
 
     def get_data_quality_summary(self):
         return self._read.get_data_quality_summary()
+
