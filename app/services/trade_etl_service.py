@@ -149,13 +149,72 @@ def extract_symbol_closed_positions(
         return (*result, cursor_update) if return_cursor_update else result
     filled_orders.sort(key=lambda item: item["updateTime"])
 
-    if fee_totals_by_symbol is not None:
+    order_fees = {}
+    if trades:
+        for t in trades:
+            oid = t.get("orderId")
+            comm = t.get("commission")
+            if oid is not None and comm is not None:
+                try:
+                    order_fees[int(oid)] = order_fees.get(int(oid), 0.0) + abs(float(comm))
+                except Exception:
+                    pass
+    elif sync_repo is not None and hasattr(sync_repo, "get_execution_facts"):
+        try:
+            facts = sync_repo.get_execution_facts(symbol=symbol, since_ms=effective_since, until_ms=until)
+            for f in facts:
+                oid = f.get("order_id")
+                comm = f.get("commission")
+                if oid is not None and comm is not None:
+                    try:
+                        order_fees[int(oid)] = order_fees.get(int(oid), 0.0) + abs(float(comm))
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.debug(f"Failed to load execution facts for {symbol}: {exc}")
+
+    if order_fees:
+        fees_map = order_fees
+    elif fee_totals_by_symbol is not None:
         symbol_total_fees = fee_totals_by_symbol.get(symbol, 0.0)
         fees_map = {0: symbol_total_fees} if symbol_total_fees != 0 else {}
     else:
         fees_map = processor.get_fees_for_symbol(symbol, since, until, client=worker_client)
 
-    positions = processor.match_orders_to_positions(filled_orders, symbol, fees_map, presorted=True)
+    initial_lots = []
+    if sync_repo is not None and hasattr(sync_repo, "get_open_lots"):
+        try:
+            initial_lots = sync_repo.get_open_lots(symbol=symbol)
+        except Exception as exc:
+            logger.debug(f"Failed to load open lots for {symbol}: {exc}")
+
+    try:
+        matching_res = processor.match_orders_to_positions(
+            filled_orders,
+            symbol,
+            fees_map,
+            presorted=True,
+            initial_open_lots=initial_lots,
+            return_open_lots=True,
+        )
+    except TypeError:
+        matching_res = processor.match_orders_to_positions(
+            filled_orders,
+            symbol,
+            fees_map,
+            presorted=True,
+        )
+
+    if isinstance(matching_res, tuple) and len(matching_res) == 2:
+        positions, updated_lots = matching_res
+        if sync_repo is not None and hasattr(sync_repo, "save_open_lots"):
+            try:
+                sync_repo.save_open_lots(symbol=symbol, lots=updated_lots)
+            except Exception as exc:
+                logger.warning(f"Failed to save open lots for {symbol}: {exc}")
+    else:
+        positions = matching_res
+
     if cursor_times:
         min_cursor = min(cursor_times)
         overlap_ms = max(10, int(cursor_overlap_minutes)) * 60 * 1000
