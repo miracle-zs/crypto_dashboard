@@ -38,7 +38,7 @@ from app.jobs.sync_pipeline_jobs import (
 )
 from app.jobs.balance_sync_job import run_balance_sync_job
 from app.jobs.scheduler_startup_jobs import register_scheduler_jobs
-from app.core.job_runtime import JobRuntimeController
+from app.core.job_runtime import JobCategory, JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
 from app.core.scheduler_binding import SCHEDULER_CONFIG_FIELDS, apply_scheduler_config_fields
@@ -108,11 +108,11 @@ class TradeDataScheduler:
     def _is_api_cooldown_active(self, source: str) -> bool:
         return self.runtime_controller.is_cooldown_active(source=source)
 
-    def _try_enter_api_job_slot(self, source: str) -> bool:
-        return self.runtime_controller.try_acquire(source=source)
+    def _try_enter_api_job_slot(self, source: str, category: Optional[JobCategory] = None) -> bool:
+        return self.runtime_controller.try_acquire(source=source, category=category)
 
-    def _release_api_job_slot(self, source: Optional[str] = None):
-        self.runtime_controller.release(source=source)
+    def _release_api_job_slot(self, source: Optional[str] = None, category: Optional[JobCategory] = None):
+        self.runtime_controller.release(source=source, category=category)
 
     def _format_ms_to_utc8(self, ts_ms: int) -> str:
         """将毫秒时间戳格式化为 UTC+8 可读时间。"""

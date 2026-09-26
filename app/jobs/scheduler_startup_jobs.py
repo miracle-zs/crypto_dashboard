@@ -73,6 +73,24 @@ def _register_sync_jobs(scheduler, *, utc8):
         misfire_grace_time=600,
         replace_existing=True,
     )
+
+    def _prune_balance_maintenance():
+        try:
+            deleted = scheduler.trade_repo.prune_balance_history()
+            logger.info(f"每日数据库维护完成: 清理过时历史余额 {deleted} 条")
+        except Exception as exc:
+            logger.warning(f"每日数据库维护执行失败: {exc}")
+
+    scheduler.scheduler.add_job(
+        func=_prune_balance_maintenance,
+        trigger=CronTrigger(hour=4, minute=15, timezone=utc8),
+        id="prune_balance_history_daily",
+        name="清理过时历史余额数据",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+        replace_existing=True,
+    )
     if scheduler.enable_daily_open_positions_full_sync:
         scheduler.scheduler.add_job(
             func=scheduler.sync_open_positions_full_window,

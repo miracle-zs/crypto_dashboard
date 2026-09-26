@@ -167,6 +167,18 @@ class TradeRepository:
     def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
         return self._write.save_balance_history(balance=balance, wallet_balance=wallet_balance)
 
+    def prune_balance_history(
+        self,
+        days_to_keep_raw: int = 7,
+        days_to_keep_hourly: int = 90,
+        days_to_keep_daily: int = 365,
+    ) -> int:
+        return self._write.prune_balance_history(
+            days_to_keep_raw=days_to_keep_raw,
+            days_to_keep_hourly=days_to_keep_hourly,
+            days_to_keep_daily=days_to_keep_daily,
+        )
+
     def save_ws_event(self, event_type: str, event_time: int, payload):
         return self._write.save_ws_event(event_type=event_type, event_time=event_time, payload=payload)
 

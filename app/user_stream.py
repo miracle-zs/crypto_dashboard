@@ -41,6 +41,8 @@ class BinanceUserDataStream:
         self.listen_key: Optional[str] = None
         self._running = False
         self._is_connected = False
+        self._connected_at_ms: int = 0
+        self._last_heartbeat_time_ms: int = 0
         self._last_event_time_ms: int = 0
         self._ws_app: Optional[websocket.WebSocketApp] = None
         self._supervisor_thread: Optional[threading.Thread] = None
@@ -49,6 +51,14 @@ class BinanceUserDataStream:
     @property
     def is_connected(self) -> bool:
         return self._is_connected and self._running
+
+    @property
+    def connected_at_ms(self) -> int:
+        return self._connected_at_ms
+
+    @property
+    def last_heartbeat_time_ms(self) -> int:
+        return self._last_heartbeat_time_ms
 
     @property
     def last_event_time_ms(self) -> int:
@@ -157,13 +167,24 @@ class BinanceUserDataStream:
                 ws_url = f"{self.ws_base_url}/ws/{self.listen_key}"
                 logger.info(f"Connecting user data stream to {self.ws_base_url}/ws/...")
 
-                self._ws_app = websocket.WebSocketApp(
-                    ws_url,
-                    on_open=self._on_open,
-                    on_message=self._on_message,
-                    on_error=self._on_error,
-                    on_close=self._on_close,
-                )
+                ws_kwargs = {
+                    "url": ws_url,
+                    "on_open": self._on_open,
+                    "on_message": self._on_message,
+                    "on_error": self._on_error,
+                    "on_close": self._on_close,
+                }
+                import inspect
+                try:
+                    sig = inspect.signature(websocket.WebSocketApp.__init__)
+                    if "on_ping" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        ws_kwargs["on_ping"] = self._on_ping
+                    if "on_pong" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        ws_kwargs["on_pong"] = self._on_pong
+                except Exception:
+                    pass
+
+                self._ws_app = websocket.WebSocketApp(**ws_kwargs)
 
                 # Reset backoff when connection loop runs
                 backoff = self.reconnect_delay_seconds
@@ -185,8 +206,17 @@ class BinanceUserDataStream:
             backoff = min(self.max_reconnect_delay_seconds, backoff * 2)
 
     def _on_open(self, _ws):
+        now_ms = int(time.time() * 1000)
         self._is_connected = True
+        self._connected_at_ms = now_ms
+        self._last_heartbeat_time_ms = now_ms
         logger.info("User data stream WebSocket connection established")
+
+    def _on_ping(self, _ws, message):
+        self._last_heartbeat_time_ms = int(time.time() * 1000)
+
+    def _on_pong(self, _ws, message):
+        self._last_heartbeat_time_ms = int(time.time() * 1000)
 
     def _on_message(self, _ws, message: str):
         try:

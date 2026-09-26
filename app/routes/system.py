@@ -47,6 +47,8 @@ async def get_status(request: Request, db: Database = Depends(get_db)):
     user_stream_info = {
         "enabled": user_stream is not None,
         "connected": user_stream.is_connected if user_stream else False,
+        "connected_at_ms": getattr(user_stream, "connected_at_ms", 0),
+        "last_heartbeat_time_ms": getattr(user_stream, "last_heartbeat_time_ms", 0),
         "last_event_time_ms": user_stream.last_event_time_ms if user_stream else 0,
     }
 

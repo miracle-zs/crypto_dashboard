@@ -97,3 +97,77 @@ class TradeWriteRepository:
         )
         conn.commit()
         conn.close()
+
+    def prune_balance_history(
+        self,
+        days_to_keep_raw: int = 7,
+        days_to_keep_hourly: int = 90,
+        days_to_keep_daily: int = 365,
+    ) -> int:
+        """
+        Prune balance_history downsampling old points to prevent unlimited DB bloat:
+        - Points older than days_to_keep_daily: completely deleted.
+        - Points between days_to_keep_hourly and days_to_keep_daily: kept at 1 point per day.
+        - Points between days_to_keep_raw and days_to_keep_hourly: kept at 1 point per hour.
+        - Points within days_to_keep_raw: preserved completely at raw 30s cadence.
+        """
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            before_changes = conn.total_changes
+
+            # 1. Beyond daily retention limit (e.g. 365 days): delete
+            cursor.execute(
+                "DELETE FROM balance_history WHERE timestamp < datetime('now', ?)",
+                (f"-{int(days_to_keep_daily)} days",),
+            )
+
+            # 2. Between hourly and daily (e.g. 90d to 365d): keep 1 per day
+            cursor.execute(
+                f"""
+                DELETE FROM balance_history
+                WHERE timestamp < datetime('now', ?)
+                  AND timestamp >= datetime('now', ?)
+                  AND id NOT IN (
+                      SELECT min(id)
+                      FROM balance_history
+                      WHERE timestamp < datetime('now', ?)
+                        AND timestamp >= datetime('now', ?)
+                      GROUP BY strftime('%Y-%m-%d', timestamp)
+                  )
+                """,
+                (
+                    f"-{int(days_to_keep_hourly)} days",
+                    f"-{int(days_to_keep_daily)} days",
+                    f"-{int(days_to_keep_hourly)} days",
+                    f"-{int(days_to_keep_daily)} days",
+                ),
+            )
+
+            # 3. Between raw and hourly (e.g. 7d to 90d): keep 1 per hour
+            cursor.execute(
+                f"""
+                DELETE FROM balance_history
+                WHERE timestamp < datetime('now', ?)
+                  AND timestamp >= datetime('now', ?)
+                  AND id NOT IN (
+                      SELECT min(id)
+                      FROM balance_history
+                      WHERE timestamp < datetime('now', ?)
+                        AND timestamp >= datetime('now', ?)
+                      GROUP BY strftime('%Y-%m-%d %H', timestamp)
+                  )
+                """,
+                (
+                    f"-{int(days_to_keep_raw)} days",
+                    f"-{int(days_to_keep_hourly)} days",
+                    f"-{int(days_to_keep_raw)} days",
+                    f"-{int(days_to_keep_hourly)} days",
+                ),
+            )
+
+            total_deleted = conn.total_changes - before_changes
+            conn.commit()
+            return total_deleted
+        finally:
+            conn.close()
