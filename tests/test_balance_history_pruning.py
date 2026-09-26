@@ -10,7 +10,7 @@ def test_prune_balance_history(tmp_path):
 
     conn = db._get_connection()
     cursor = conn.cursor()
-    now = datetime.utcnow()
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
 
     # 1. Recent data: 2 days ago (5 records within the same hour) -> all should be kept
     t_recent = now - timedelta(days=2)

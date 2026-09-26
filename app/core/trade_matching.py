@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 
 def is_liquidation_order(order: Dict) -> bool:
@@ -11,10 +11,33 @@ def is_liquidation_order(order: Dict) -> bool:
     )
 
 
-def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict]:
+def match_position_side(
+    orders: List[Dict],
+    symbol: str,
+    side: str,
+    initial_open_lots: Optional[List[Dict]] = None,
+    return_open_lots: bool = False,
+) -> Union[List[Dict], Tuple[List[Dict], List[Dict]]]:
     """Match entry and exit orders for one position side."""
     positions = []
     open_positions = []
+
+    if initial_open_lots:
+        for lot in initial_open_lots:
+            rem_qty = float(lot.get("remaining_qty", lot.get("qty", 0.0)))
+            if rem_qty > 0.0001:
+                open_positions.append(
+                    {
+                        "price": float(lot["price"]),
+                        "qty": rem_qty,
+                        "time": int(lot.get("time_ms", lot.get("time", 0))),
+                        "order_id": lot.get("order_id"),
+                        "fee_rate": float(lot.get("fee_rate", 0.0)),
+                        "symbol": symbol,
+                        "position_side": side,
+                        "side": side,
+                    }
+                )
 
     for order in orders:
         if order["type"] == "entry":
@@ -25,6 +48,9 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
                     "time": order["time"],
                     "order_id": order["order_id"],
                     "fee_rate": order.get("fee_rate", 0.0),
+                    "symbol": symbol,
+                    "position_side": side,
+                    "side": side,
                 }
             )
         elif order["type"] == "exit" and open_positions:
@@ -68,13 +94,53 @@ def match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict
                 if entry["qty"] <= 0.0001:
                     open_positions.pop(0)
 
+    remaining_lots = [
+        {
+            "symbol": symbol,
+            "position_side": side,
+            "side": side,
+            "order_id": p["order_id"],
+            "price": p["price"],
+            "qty": p["qty"],
+            "remaining_qty": p["qty"],
+            "time_ms": p["time"],
+            "fee_rate": p.get("fee_rate", 0.0),
+        }
+        for p in open_positions
+        if p["qty"] > 0.0001
+    ]
+
+    if return_open_lots:
+        return positions, remaining_lots
     return positions
 
 
-def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
+def match_one_way_orders(
+    orders: List[Dict],
+    symbol: str,
+    initial_open_lots: Optional[List[Dict]] = None,
+    return_open_lots: bool = False,
+) -> Union[List[Dict], Tuple[List[Dict], List[Dict]]]:
     """Match positionSide=BOTH orders by tracking the signed net position."""
     positions = []
     open_entries = []
+
+    if initial_open_lots:
+        for lot in initial_open_lots:
+            rem_qty = float(lot.get("remaining_qty", lot.get("qty", 0.0)))
+            if rem_qty > 0.0001:
+                open_entries.append(
+                    {
+                        "side": str(lot.get("side", "")).upper(),
+                        "price": float(lot["price"]),
+                        "qty": rem_qty,
+                        "time": int(lot.get("time_ms", lot.get("time", 0))),
+                        "order_id": lot.get("order_id"),
+                        "fee_rate": float(lot.get("fee_rate", 0.0)),
+                        "symbol": symbol,
+                        "position_side": "BOTH",
+                    }
+                )
 
     for order in orders:
         order_side = order["side"]
@@ -126,9 +192,29 @@ def match_one_way_orders(orders: List[Dict], symbol: str) -> List[Dict]:
                     "time": order["time"],
                     "order_id": order["order_id"],
                     "fee_rate": order_fee_rate,
+                    "symbol": symbol,
+                    "position_side": "BOTH",
                 }
             )
 
+    remaining_lots = [
+        {
+            "symbol": symbol,
+            "position_side": "BOTH",
+            "side": e["side"],
+            "order_id": e["order_id"],
+            "price": e["price"],
+            "qty": e["qty"],
+            "remaining_qty": e["qty"],
+            "time_ms": e["time"],
+            "fee_rate": e.get("fee_rate", 0.0),
+        }
+        for e in open_entries
+        if e["qty"] > 0.0001
+    ]
+
+    if return_open_lots:
+        return positions, remaining_lots
     return positions
 
 
@@ -137,7 +223,9 @@ def match_orders_to_positions(
     symbol: str,
     fees_map: Optional[Dict[int, float]] = None,
     presorted: bool = False,
-) -> List[Dict]:
+    initial_open_lots: Optional[List[Dict]] = None,
+    return_open_lots: bool = False,
+) -> Union[List[Dict], Tuple[List[Dict], List[Dict]]]:
     """Match orders to closed positions (handles partial fills)."""
     if fees_map is None:
         fees_map = {}
@@ -156,6 +244,12 @@ def match_orders_to_positions(
         if oid is not None and oid in fees_map and oid != 0:
             has_explicit_fees = True
             break
+
+    if not has_explicit_fees and initial_open_lots:
+        for lot in initial_open_lots:
+            if float(lot.get("fee_rate", 0.0)) != 0.0:
+                has_explicit_fees = True
+                break
 
     def _get_order_fee_rate(o: Dict, executed_qty: float) -> float:
         if executed_qty <= 0:
@@ -246,10 +340,29 @@ def match_orders_to_positions(
                 }
             )
 
+    long_lots_init = [l for l in (initial_open_lots or []) if str(l.get("position_side", "")).upper() == "LONG"]
+    short_lots_init = [l for l in (initial_open_lots or []) if str(l.get("position_side", "")).upper() == "SHORT"]
+    one_way_lots_init = [l for l in (initial_open_lots or []) if str(l.get("position_side", "BOTH")).upper() in ("BOTH", "")]
+
+    long_positions_matched, long_remaining_lots = match_position_side(
+        long_positions, symbol, "LONG", initial_open_lots=long_lots_init, return_open_lots=True
+    )
+    short_positions_matched, short_remaining_lots = match_position_side(
+        short_positions, symbol, "SHORT", initial_open_lots=short_lots_init, return_open_lots=True
+    )
+    one_way_positions_matched, one_way_remaining_lots = match_one_way_orders(
+        one_way_orders, symbol, initial_open_lots=one_way_lots_init, return_open_lots=True
+    )
+
     all_positions = (
-        match_position_side(long_positions, symbol, "LONG")
-        + match_position_side(short_positions, symbol, "SHORT")
-        + match_one_way_orders(one_way_orders, symbol)
+        long_positions_matched
+        + short_positions_matched
+        + one_way_positions_matched
+    )
+    all_open_lots = (
+        long_remaining_lots
+        + short_remaining_lots
+        + one_way_remaining_lots
     )
 
     if has_explicit_fees:
@@ -271,4 +384,6 @@ def match_orders_to_positions(
                 pos["pnl"] = pos["pnl_before_fees"]
                 pos.pop("explicit_fee", None)
 
+    if return_open_lots:
+        return all_positions, all_open_lots
     return all_positions

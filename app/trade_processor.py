@@ -418,12 +418,16 @@ class TradeDataProcessor:
         symbol: str,
         fees_map: Dict[int, float] = None,
         presorted: bool = False,
-    ) -> List[Dict]:
+        initial_open_lots: Optional[List[Dict]] = None,
+        return_open_lots: bool = False,
+    ):
         return match_orders_to_positions_core(
             orders=orders,
             symbol=symbol,
             fees_map=fees_map,
             presorted=presorted,
+            initial_open_lots=initial_open_lots,
+            return_open_lots=return_open_lots,
         )
 
     def _match_position_side(self, orders: List[Dict], symbol: str, side: str) -> List[Dict]:

@@ -591,3 +591,71 @@ class SyncWriteRepository:
         finally:
             conn.close()
 
+    def save_open_lots(self, symbol: str, lots: list[dict], position_side: str | None = None) -> int:
+        """保存指定交易对的未平仓批次（全量替换该交易对/持仓方向的 open_lots）"""
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            if position_side:
+                cursor.execute(
+                    "DELETE FROM open_lots WHERE symbol = ? AND position_side = ?",
+                    (symbol.upper(), position_side.upper()),
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM open_lots WHERE symbol = ?",
+                    (symbol.upper(),),
+                )
+
+            insert_rows = []
+            for lot in lots:
+                rem_qty = float(lot.get("remaining_qty", lot.get("qty", 0.0)))
+                if rem_qty <= 0.0001:
+                    continue
+                insert_rows.append((
+                    symbol.upper(),
+                    str(lot.get("position_side", "BOTH")).upper(),
+                    str(lot.get("side", "")).upper(),
+                    int(lot.get("order_id", 0)),
+                    float(lot.get("price", 0.0)),
+                    float(lot.get("qty", rem_qty)),
+                    rem_qty,
+                    int(lot.get("time_ms", lot.get("time", 0))),
+                    float(lot.get("fee_rate", 0.0)),
+                ))
+            if insert_rows:
+                cursor.executemany(
+                    """
+                    INSERT INTO open_lots (
+                        symbol, position_side, side, order_id, price, qty,
+                        remaining_qty, time_ms, fee_rate, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    insert_rows,
+                )
+            conn.commit()
+            return len(insert_rows)
+        finally:
+            conn.close()
+
+    def get_open_lots(self, symbol: str | None = None, position_side: str | None = None) -> list[dict]:
+        """查询当前活跃的未平仓批次"""
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            conditions = ["remaining_qty > 0.0001"]
+            params = []
+            if symbol:
+                conditions.append("symbol = ?")
+                params.append(symbol.upper())
+            if position_side:
+                conditions.append("position_side = ?")
+                params.append(position_side.upper())
+            where_clause = " WHERE " + " AND ".join(conditions)
+            sql = f"SELECT * FROM open_lots{where_clause} ORDER BY time_ms ASC, id ASC"
+            cursor.execute(sql, tuple(params))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+
