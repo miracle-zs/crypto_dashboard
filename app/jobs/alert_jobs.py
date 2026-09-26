@@ -89,16 +89,17 @@ def run_reentry_alert_check(scheduler):
         if len(triggered) > preview_count:
             content += f"... 其余 {len(triggered) - preview_count} 笔未展示。\n"
 
-        send_server_chan_notification(title, content)
-
-        scheduler.risk_repo.set_positions_reentry_alerted_batch(
-            [(item["symbol"], item["order_id"]) for item in triggered]
-        )
-
-        logger.info(
-            "同币重复开仓提醒已发送: "
-            f"count={len(triggered)}, symbols={sorted(set(item['symbol'] for item in triggered))}"
-        )
+        notify_res = send_server_chan_notification(title, content)
+        if notify_res is not False:
+            scheduler.risk_repo.set_positions_reentry_alerted_batch(
+                [(item["symbol"], item["order_id"]) for item in triggered]
+            )
+            logger.info(
+                "同币重复开仓提醒已发送: "
+                f"count={len(triggered)}, symbols={sorted(set(item['symbol'] for item in triggered))}"
+            )
+        else:
+            logger.warning("同币重复开仓提醒发送失败或未配置 Key，保留未提醒状态以便后续重试")
     except Exception as exc:
         logger.error(f"同币重复开仓提醒检查失败: {exc}")
 
@@ -175,17 +176,18 @@ def run_profit_alert_check(scheduler, threshold_pct: float):
                 f"- 现价: {item['mark_price']:.6g}\n"
                 f"- 时间: {item['entry_time']}\n\n"
             )
-        send_server_chan_notification(title, content)
-
-        scheduler.risk_repo.set_positions_profit_alerted_batch(
-            [(item["symbol"], item["order_id"]) for item in triggered]
-        )
-
-        logger.info(
-            "浮盈提醒已发送: "
-            f"threshold={threshold_pct:.2f}%, "
-            f"count={len(triggered)}, "
-            f"symbols={[item['symbol'] for item in triggered]}"
-        )
+        notify_res = send_server_chan_notification(title, content)
+        if notify_res is not False:
+            scheduler.risk_repo.set_positions_profit_alerted_batch(
+                [(item["symbol"], item["order_id"]) for item in triggered]
+            )
+            logger.info(
+                "浮盈提醒已发送: "
+                f"threshold={threshold_pct:.2f}%, "
+                f"count={len(triggered)}, "
+                f"symbols={[item['symbol'] for item in triggered]}"
+            )
+        else:
+            logger.warning("浮盈提醒发送失败或未配置 Key，保留未提醒状态以便后续重试")
     except Exception as exc:
         logger.error(f"浮盈提醒检查失败: {exc}")

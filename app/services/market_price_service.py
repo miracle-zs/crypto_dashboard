@@ -6,6 +6,7 @@ from app.logger import logger
 
 class MarketPriceService:
     _cached_prices: Dict[str, float] = {}
+    _cached_timestamps: Dict[str, float] = {}
     _cached_at: float = 0.0
 
     @classmethod
@@ -13,9 +14,16 @@ class MarketPriceService:
         return dict(cls._cached_prices), cls._cached_at
 
     @classmethod
+    def get_symbol_cached_price(cls, symbol: str) -> Tuple[float | None, float | None]:
+        return cls._cached_prices.get(symbol), cls._cached_timestamps.get(symbol)
+
+    @classmethod
     def set_cached_prices(cls, prices: Dict[str, float], timestamp: float | None = None):
+        now = timestamp or time.time()
         cls._cached_prices.update(prices)
-        cls._cached_at = timestamp or time.time()
+        for sym in prices:
+            cls._cached_timestamps[sym] = now
+        cls._cached_at = max(cls._cached_timestamps.values()) if cls._cached_timestamps else now
 
     @classmethod
     def get_mark_price_map(cls, symbols, client):

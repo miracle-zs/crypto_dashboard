@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 
 
@@ -9,7 +10,7 @@ def run_balance_sync_job(scheduler) -> str:
         return "success"
     if scheduler._is_api_cooldown_active(source="余额同步"):
         return "success"
-    if not scheduler._try_enter_api_job_slot(source="余额同步"):
+    if not try_enter_slot(scheduler, source="余额同步", category=JobCategory.LIGHT):
         return "success"
 
     status = "success"

@@ -44,6 +44,7 @@ class BinanceUserDataStream:
         self._connected_at_ms: int = 0
         self._last_heartbeat_time_ms: int = 0
         self._last_event_time_ms: int = 0
+        self._position_pnl_map: dict[tuple[str, str], float] = {}
         self._ws_app: Optional[websocket.WebSocketApp] = None
         self._supervisor_thread: Optional[threading.Thread] = None
         self._keepalive_thread: Optional[threading.Thread] = None
@@ -257,23 +258,28 @@ class BinanceUserDataStream:
             return
 
         positions = account_info.get("P", [])
-        has_positions_pnl = False
         if positions:
-            usdt_pnl = 0.0
             for p in positions:
-                if p.get("ma") == "USDT" or str(p.get("s", "")).endswith("USDT"):
+                sym = str(p.get("s", "")).upper()
+                ps = str(p.get("ps") or p.get("positionSide") or "BOTH").upper()
+                if p.get("ma") == "USDT" or sym.endswith("USDT"):
                     try:
-                        usdt_pnl += float(p.get("up", 0.0))
-                        has_positions_pnl = True
+                        qty = float(p.get("pa", 0.0))
+                        up = float(p.get("up", 0.0))
+                        if abs(qty) < 1e-6:
+                            self._position_pnl_map.pop((sym, ps), None)
+                        else:
+                            self._position_pnl_map[(sym, ps)] = up
                     except (ValueError, TypeError):
                         pass
-            if has_positions_pnl:
-                self._last_unrealized_pnl = usdt_pnl
 
-        if has_positions_pnl or hasattr(self, "_last_unrealized_pnl"):
-            margin_balance = wallet_balance + getattr(self, "_last_unrealized_pnl", 0.0)
+        if self._position_pnl_map:
+            total_up = sum(self._position_pnl_map.values())
+            self._last_unrealized_pnl = total_up
+            margin_balance = wallet_balance + total_up
+        elif hasattr(self, "_last_unrealized_pnl") and self._last_unrealized_pnl != 0.0:
+            margin_balance = wallet_balance + self._last_unrealized_pnl
         else:
-            # Fallback when no position context is known yet: use cross_wallet
             margin_balance = cross_wallet
 
         # Persist as balance history snapshot

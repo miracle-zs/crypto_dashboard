@@ -2,6 +2,7 @@ from datetime import datetime
 import time
 from zoneinfo import ZoneInfo
 
+from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 
 UTC8 = ZoneInfo("Asia/Shanghai")
@@ -86,7 +87,7 @@ def sync_trades_compensation_job(
         return True
     if scheduler._is_api_cooldown_active(source="交易补偿同步"):
         return True
-    if not scheduler._try_enter_api_job_slot(source="交易补偿同步"):
+    if not try_enter_slot(scheduler, source="交易补偿同步", category=JobCategory.HEAVY):
         return True
 
     started_at = time.perf_counter()

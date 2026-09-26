@@ -135,3 +135,11 @@ class JobRuntimeController:
     def remaining_budget_seconds(started_at: float, total_budget_seconds: float) -> float:
         elapsed = time.perf_counter() - started_at
         return max(0.0, float(total_budget_seconds) - elapsed)
+
+
+def try_enter_slot(scheduler, source: str, category: JobCategory) -> bool:
+    try:
+        return scheduler._try_enter_api_job_slot(source=source, category=category)
+    except TypeError:
+        return scheduler._try_enter_api_job_slot(source=source)
+

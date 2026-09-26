@@ -11,17 +11,19 @@ load_dotenv()
 SERVERCHAN_SENDKEY = os.getenv('SERVERCHAN_SENDKEY')
 SERVERCHAN_API = "https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
 
-def send_server_chan_notification(title: str, content: str):
+def send_server_chan_notification(title: str, content: str) -> bool:
     """
     发送 Server酱 通知
 
     Args:
         title: 标题
         content: 内容 (支持 Markdown)
+    Returns:
+        bool: 发送成功返回 True，未配置或发送失败返回 False
     """
     if not SERVERCHAN_SENDKEY:
         logger.warning("未配置 SERVERCHAN_SENDKEY，跳过发送通知")
-        return
+        return False
 
     url = SERVERCHAN_API.format(SERVERCHAN_SENDKEY=SERVERCHAN_SENDKEY)
     data = {
@@ -44,5 +46,7 @@ def send_server_chan_notification(title: str, content: str):
         response = requests.post(url, data=data, proxies=proxies, timeout=10)
         response.raise_for_status()
         logger.info(f"通知已发送: {title}")
+        return True
     except Exception as e:
         logger.error(f"发送通知失败: {e}")
+        return False

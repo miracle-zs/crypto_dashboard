@@ -2,6 +2,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 
 UTC8 = ZoneInfo("Asia/Shanghai")
@@ -30,7 +31,7 @@ def run_sync_open_positions(
         return
     if scheduler._is_api_cooldown_active(source="未平仓同步"):
         return
-    if not scheduler._try_enter_api_job_slot(source="未平仓同步"):
+    if not try_enter_slot(scheduler, source="未平仓同步", category=JobCategory.LIGHT):
         return
 
     started_at = time.perf_counter()

@@ -204,21 +204,6 @@ class PositionsService:
             else:
                 missing_symbols.append(symbol_full)
 
-        if missing_symbols:
-            daily_market_view = await run_in_thread(
-                partial(daily_kline_repo.load, missing_symbols)
-            )
-            for symbol_full in missing_symbols:
-                rows = daily_market_view.get(symbol_full) or []
-                if not rows:
-                    continue
-                try:
-                    price = float(rows[-1]["close"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if price > 0:
-                    mark_prices[symbol_full] = price
-
         positions = []
         per_symbol_notional = defaultdict(float)
         total_notional = 0.0

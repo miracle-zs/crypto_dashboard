@@ -3,6 +3,7 @@ import traceback
 import os
 
 from app.binance_client import BinanceFuturesRestClient
+from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 
 
@@ -59,7 +60,7 @@ def run_sync_trades_data_impl(
         return True
     if scheduler._is_api_cooldown_active(source="交易同步"):
         return True
-    if not scheduler._try_enter_api_job_slot(source="交易同步"):
+    if not try_enter_slot(scheduler, source="交易同步", category=JobCategory.HEAVY):
         return True
 
     sync_started_at = time.perf_counter()

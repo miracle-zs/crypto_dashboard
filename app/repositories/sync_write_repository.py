@@ -329,11 +329,24 @@ class SyncWriteRepository:
         return len(rows)
 
     def save_position_snapshots(self, snapshot_time: str, positions: list) -> int:
-        if not positions:
-            return 0
         conn = self.db._get_connection()
         try:
             cursor = conn.cursor()
+            if not positions:
+                cursor.execute(
+                    """
+                    INSERT INTO position_snapshots (
+                        snapshot_time, symbol, position_side, qty, entry_price,
+                        mark_price, unrealized_pnl, liquidation_price, leverage,
+                        margin_type, is_complete, created_at
+                    ) VALUES (?, '__EMPTY__', 'BOTH', 0.0, 0.0, 0.0, 0.0, 0.0, 0, 'cross', 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(snapshot_time, symbol, position_side) DO NOTHING
+                    """,
+                    (str(snapshot_time),),
+                )
+                conn.commit()
+                return 1
+
             insert_rows = []
             for p in positions:
                 insert_rows.append(
@@ -388,7 +401,7 @@ class SyncWriteRepository:
                 return []
             latest_time = row["snapshot_time"]
             cursor.execute(
-                "SELECT * FROM position_snapshots WHERE snapshot_time = ?",
+                "SELECT * FROM position_snapshots WHERE snapshot_time = ? AND symbol != '__EMPTY__'",
                 (latest_time,),
             )
             return [dict(r) for r in cursor.fetchall()]

@@ -1,5 +1,6 @@
 import time
 
+from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 from app.notifier import send_server_chan_notification
 from app.services.market_snapshot_service import (
@@ -16,7 +17,7 @@ def refresh_daily_kline_cache_job(scheduler):
         return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
     if scheduler._is_api_cooldown_active(source=source):
         return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-    if not scheduler._try_enter_api_job_slot(source=source):
+    if not try_enter_slot(scheduler, source=source, category=JobCategory.HEAVY):
         return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
     try:
         result = update_daily_kline_cache(
@@ -38,7 +39,7 @@ def build_and_save_all_market_snapshots_job(scheduler, utc8):
         return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
     if scheduler._is_api_cooldown_active(source=source):
         return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-    if not scheduler._try_enter_api_job_slot(source=source):
+    if not try_enter_slot(scheduler, source=source, category=JobCategory.HEAVY):
         return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
     try:
         result = build_all_market_snapshots(scheduler, utc8)
@@ -177,7 +178,7 @@ def get_rebound_snapshot_job(scheduler, *, source: str, build_snapshot=None, loa
         return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
     if scheduler._is_api_cooldown_active(source=source):
         return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-    if not scheduler._try_enter_api_job_slot(source=source):
+    if not try_enter_slot(scheduler, source=source, category=JobCategory.HEAVY):
         return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
 
     try:
