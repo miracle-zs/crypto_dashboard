@@ -4,6 +4,7 @@ from app.core.scheduler_config import load_scheduler_config
 def test_scheduler_config_defaults(monkeypatch):
     monkeypatch.delenv("UPDATE_INTERVAL_MINUTES", raising=False)
     monkeypatch.delenv("OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES", raising=False)
+    monkeypatch.delenv("BALANCE_SYNC_INTERVAL_MINUTES", raising=False)
     monkeypatch.delenv("LEADERBOARD_ALERT_HOUR", raising=False)
     monkeypatch.delenv("LEADERBOARD_ALERT_MINUTE", raising=False)
     monkeypatch.delenv("NOON_LOSS_CHECK_HOUR", raising=False)

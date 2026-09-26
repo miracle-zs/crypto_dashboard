@@ -42,6 +42,7 @@ def test_scheduler_registers_one_market_data_pipeline_and_no_per_window_scans(mo
     monkeypatch.setenv("BINANCE_API_SECRET", "s")
     monkeypatch.setenv("ENABLE_USER_STREAM", "0")
     monkeypatch.setenv("ENABLE_DAILY_FULL_SYNC", "0")
+    monkeypatch.delenv("BALANCE_SYNC_INTERVAL_MINUTES", raising=False)
     scheduler = TradeDataScheduler()
     jobs = {}
 
