@@ -204,7 +204,23 @@ class CrashRiskService:
             "rows": rows,
         }
 
-    refresh_from_leaderboard_snapshot = build_from_leaderboard_snapshot
+    def get_latest_crash_risk_snapshot(self, db) -> dict:
+        repo = self.repository_cls(db)
+        getter = getattr(repo, "get_latest_crash_risk_snapshot", None)
+        if callable(getter):
+            snapshot = getter()
+            if snapshot:
+                return snapshot
+        return self.build_empty_response()
+
+    def refresh_from_leaderboard_snapshot(self, db) -> dict:
+        result = self.build_from_leaderboard_snapshot(db)
+        if result and result.get("rows"):
+            repo = self.repository_cls(db)
+            saver = getattr(repo, "save_crash_risk_snapshot", None)
+            if callable(saver):
+                saver(result)
+        return result
 
     @classmethod
     def _stage_from_score(cls, risk_score):

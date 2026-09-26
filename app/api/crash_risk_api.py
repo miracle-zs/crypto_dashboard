@@ -15,7 +15,8 @@ async def _run_snapshot_job(func, db):
 
 @router.get("/api/crash-risk", response_model=CrashRiskResponse)
 async def get_crash_risk(db=Depends(get_db)):
-    return await _run_snapshot_job(service.build_from_leaderboard_snapshot, db)
+    return await _run_snapshot_job(service.get_latest_crash_risk_snapshot, db)
+
 
 
 @router.post("/api/crash-risk/refresh", response_model=CrashRiskResponse, status_code=200)

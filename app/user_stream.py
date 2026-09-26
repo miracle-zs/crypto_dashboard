@@ -222,16 +222,37 @@ class BinanceUserDataStream:
 
         try:
             wallet_balance = float(usdt.get("wb", 0))
-            margin_balance = float(usdt.get("cw", wallet_balance))
+            cross_wallet = float(usdt.get("cw", wallet_balance))
         except (TypeError, ValueError):
             return
+
+        positions = account_info.get("P", [])
+        has_positions_pnl = False
+        if positions:
+            usdt_pnl = 0.0
+            for p in positions:
+                if p.get("ma") == "USDT" or str(p.get("s", "")).endswith("USDT"):
+                    try:
+                        usdt_pnl += float(p.get("up", 0.0))
+                        has_positions_pnl = True
+                    except (ValueError, TypeError):
+                        pass
+            if has_positions_pnl:
+                self._last_unrealized_pnl = usdt_pnl
+
+        if has_positions_pnl or hasattr(self, "_last_unrealized_pnl"):
+            margin_balance = wallet_balance + getattr(self, "_last_unrealized_pnl", 0.0)
+        else:
+            # Fallback when no position context is known yet: use cross_wallet
+            margin_balance = cross_wallet
 
         # Persist as balance history snapshot
         try:
             self.trade_repo.save_balance_history(balance=margin_balance, wallet_balance=wallet_balance)
-            logger.info(f"User stream balance updated: {margin_balance:.2f} USDT (Wallet: {wallet_balance:.2f})")
+            logger.info(f"User stream balance updated: {margin_balance:.2f} USDT (Wallet: {wallet_balance:.2f}, Cross: {cross_wallet:.2f})")
         except Exception as exc:
             logger.warning(f"Failed to persist balance history from user stream: {exc}")
+
 
     def _on_error(self, _ws, error):
         logger.warning(f"User stream websocket error: {error}")
