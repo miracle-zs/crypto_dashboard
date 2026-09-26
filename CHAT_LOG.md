@@ -214,6 +214,43 @@
 1. **服务器资源极其紧绷（2核 2G 内存）**：当前同时运行 `bubble_buster`（CPU 40%, 190MB）、`momentum_alpha`（3 进程，160MB）、`crypto_dashboard`（190MB）。物理内存仅剩 ~96MB，已耗费 938MB Swap。**暂不可直接物理拆分成多进程部署**，应先在单进程内做架构模块解耦。
 2. **`balance_history` 膨胀至 30 万行**：每 30 秒采集一次且未清理，文件达 194MB，需加入降采样与保留期策略。
 3. **线上 WebSocket user_stream 疑似哑火**：线上 `last_event_time_ms = 0` 且 `ws_events` 为 0 行，全靠 30 秒一次的 REST 兜底在跑。
-4. **推进建议**：认同“事实先于结果”核心原则，建议优先落地 0-3 阶段（修接口穿透、拆分仓位表、统一 UTC 毫秒时间、建立 execution_facts/income_facts 事实账本）。
+4. **推进建议**：认同“事实先于结果”核心原则，优先落地 4 个阶段（修接口穿透、拆分仓位表、统一 UTC 毫秒时间、建立 execution_facts/income_facts 事实账本与确定性撮合、数据库瘦身与锁规范化）。
+
+## 2026-09-26 第一性原理系统重构推进实录与全量上线
+
+按照 `GEMINI.md` 的规范，将 Astra 方案结合 2G 内存生产环境约束，分为 4 个 Stage 逐一推进，并全量上线验证：
+
+### Stage 1: 口径防雷与 GET 接口纯读化 [Commit: a7bbd90]
+1. **接口防雷**：改造 `app/api/crash_risk_api.py`，将 `GET /api/crash-risk` 改为纯读本地 `crash_risk_snapshots` 快照，彻底切断外部 REST 请求；新增 `POST /api/crash-risk/refresh` 承担计算和入库。
+2. **数据库迁移 v4**：创建 `crash_risk_snapshots`、`position_snapshots`、`execution_facts`、`income_facts` 四张事实与快照表，并在 `open_positions` 增加 `is_incomplete`。
+3. **资金口径修正**：修正 `app/user_stream.py`，避免将 WebSocket `cw`（全仓钱包余额）直接误赋给 `margin_balance`（全仓保证金净值），在有仓位时结合浮盈亏计算真实净值。
+4. **测试覆盖**：新增 `tests/test_crash_risk_api_purity.py` 与 `tests/test_user_stream_semantics.py` 并通过。
+
+### Stage 2: 仓位权威快照与开仓批次解耦 [Commit: b17a86a]
+1. **持仓互斥 Bug 修复**：在 `app/repositories/sync_write_repository.py` 的 `save_open_positions` 中，针对 `order_id=0` 的仓位按 LONG (`-101`) / SHORT (`-201`) 分配互不冲突的负数虚拟 ID，彻底消灭双向持仓在无历史订单时被 `UNIQUE(symbol, order_id)` 互相覆盖吞噬的 Bug。
+2. **权威成本捕获**：在 `app/services/trade_api_gateway.py` 与 `app/trade_processor.py` 中，从交易所 `/fapi/v3/positionRisk` 中提取并持久化真实的 `entryPrice` 与权威快照，在 `trade_etl_service.py` 生成兜底持仓时优先继承真实均价，彻底消灭 0 元成本和 -100% 虚假浮亏。
+3. **测试覆盖**：修复并完全通过 `docs/audits/2026-09-26-architecture-probes.py` 探针，新增 `tests/test_position_snapshot_and_lots.py`。
+
+### Stage 3: 不可变事实账本与可重放确定性撮合 [Commit: bdc1a40]
+1. **事实入库与幂等保障**：在 `SyncWriteRepository` 与 `SyncRepository` 中实现 `save_execution_facts` 与 `save_income_facts`，利用 `ON CONFLICT DO NOTHING` 实现绝对幂等；修复 Python `sqlite3` 中 `total_changes` 批量插入统计。
+2. **撮合费率确定性重构**：修改 `app/core/trade_matching.py`，支持单笔成交/订单的明确手续费分摊归因，彻底消灭因切批边界移动导致的手续费和盈亏漂移，实现批次不变性。
+3. **ETL 事实归档接入**：在 `app/services/trade_etl_service.py` 中将拉取的 `processor.get_user_trades` 真正落库至 `execution_facts`，将 `_fetch_income_history` 真正落库至 `income_facts`。
+4. **测试覆盖**：新增 `tests/test_execution_facts_ledger.py` 与 `tests/test_deterministic_matching.py` 并全部通过。
+
+### Stage 4: 数据库瘦身、调度器锁规范化与生产环境上线 [Commit: 1af8c85]
+1. **历史余额多梯级瘦身**：在 `TradeWriteRepository` 中实现 `prune_balance_history`（7天内保留30秒原始数据，7-90天按小时抽样，90-365天按天保留）。并在后台每日 04:15 注册自动化维护任务。
+2. **调度器互斥锁解耦**：改造 `app/core/job_runtime.py`，将中文子串匹配（“交易同步”等）重构为标准化的 `JobCategory` 枚举（`HEAVY`, `LIGHT`, `DEFAULT`），保持 100% 向后兼容。
+3. **WebSocket 心跳与状态透明化**：在 `app/user_stream.py` 中接入 WebSocket ping/pong 协议帧心跳监控，并在 `/api/status` 输出 `connected_at_ms` 与 `last_heartbeat_time_ms`。
+4. **生产环境物理减负与验证**：
+   - 生产环境 `git pull` 代码并自动应用数据库迁移 v4。
+   - 对生产数据库执行 `prune_balance_history()`，**成功清理 290,066 条冗余记录**，`balance_history` 从 30 万行下降到 9,646 行，执行 `VACUUM` 整理磁盘空间。
+   - 重启 `crypto_dashboard.service`，服务内存占用从 167MB 骤降至 112MB，服务器物理可用内存从不足 300MB 提升至 **1111MB**！
+   - 线上接口实测：
+     - `GET /api/status`：在线且数据健康，WS 保持连接并带有精准心跳。
+     - `GET /api/crash-risk`：0ms 纯读本地快照返回。
+     - `POST /api/crash-risk/refresh`：后台计算成功更新 24 条预警标的快照。
+     - `GET /api/open-positions`：8 个持仓全部具备真实入场成本与标记价格，无 0 元成本，无 -100% 虚假浮亏。
+   - 本地全量回归测试：**221 passed**，0 failure！
+
 
 
