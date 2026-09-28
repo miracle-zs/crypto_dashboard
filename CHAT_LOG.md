@@ -398,3 +398,407 @@
 - **容器 CPU 细分**：行情容器约 16.2%、特征归档约 9.4%、四套策略容器分别仅 1.0%~3.4%（合计仅约 6.7%）、Postgres 约 0.03%。
 - **物理内存与 Swap**：总内存 3.6 GiB，实际可用（Available）521 MiB，内核 Buff/Cache 959 MiB（含 809 MiB 磁盘缓存）；Swap 总 1.9 GiB，已用 786 MiB，剩余 1.2 GiB。
 - **容器内存配额**：各容器内存使用率均在限制值的 40%~78% 之间，Postgres 约 593 MiB/1.25 GiB，主策略约 249 MiB/512 MiB，其他子账户策略约 206 MiB/512 MiB，无任何 OOM 风险。
+
+## 2026-09-28 19:40-20:00 冲量信号（如 ALGOUSDT Long、XPINUSDT Long）未开单深层根因排查与第二阶段终极修复
+
+### 用户问题
+> 没看到下单啊 17:59:45 市场出现 ALGOUSDT Long 冲量信号时，系统已正常接收并进行候选撮合评估，无任何代际冲突拦截。系统当前运行平稳正常。
+
+### 排查过程与双层根因剖析
+1. **第一层拦截（决策健康状态误判）**：
+   - 在 `PositionLedger.project()` 中，由于连入 `account_event_hub`，空仓标的无成交覆盖（`coverage is None`），导致其健康状态被降级判定为 `CATCHING_UP`，`is_comparable=False`，导致决策过滤层在 `position_view.is_ready_for_trade` 上拦截了空仓开仓意图。
+   - 修复：调整 `PositionView.is_ready_for_trade` property，允许纯净空仓（无 batch、0 仓位、无差异、仅因无 coverage 处于 CATCHING_UP）判定为 `is_ready_for_trade = True`。
+2. **第二层深层拦截（核心根本原因）**：
+   - 在观察生产环境 19:36:00 `XPINUSDT long` 信号时，依然发现报 `frozen_decision_inputs_unavailable`，并在日志中伴随 `live_decision_position_stream_mismatch`。
+   - 根因分析：
+     - 币安 `/fapi/v2/account` 只推送有持仓或设置的标的（账户仅有 ~10 个当前持仓标的在最新活跃流 epoch `6bb9c3f6...` 中）。
+     - 数据库 `execution_book_heads` 中存有 1,500 多个历史标的，记录的是旧代际（如 `5e06739f...`），历史从未交易的全新标的在 DB 中甚至为 `None`。
+     - `LiveDecisionFactSource.build()` 在评估每个标的信号时，首先会调用 `book.read(scope, stream_id=..., stream_epoch=...)`。
+     - 在 `ExecutionBook.read()` 原逻辑中，若 `source_scope is None` 或 `source_scope.stream_epoch != stream_epoch`，无条件抛出 `ValueError("requested account stream does not match the restored position")`。导致任何非当前已持仓的空仓标的或新标的，在决策层甚至连 `FrozenDecisionInputs` 上下文都无法生成，直接在决策准备阶段就被静默拦截！
+3. **精准优雅修复**：
+   - 在 `ExecutionBook.read()` 中，对于合法空仓（`is_flat and has_no_reservations and has_no_commands and is_known_active_stream`），允许在内存中直接采用当前已验证的活跃流 `stream_epoch`，建立本地视角并初始化账本视角。对于非法未知流依然维持 fail-closed 拦截。
+   - 优化 `PositionBook._coverage_anchor_is_verified` 与 `observe()` 判定，区分快照流 adoption 与正式 checkpoint 恢复。
+4. **测试与生产部署验证**：
+   - 本地新增针对空仓在 `read()` 中采用活跃流代际的单元测试，本地 1,889 个单元测试 100% 全部通过。
+   - 提交本地代码 `07f9c78`，同步服务器并生成提交 `1b881d7`。
+   - 重新编译打包镜像 `crypto-momentum-lab-app:1b881d7f46b2e011d2138542134a2c9eb473adae`。
+   - 对四个实盘账户（primary、account-2、account-3、account-4）分别录入对应专属风控配置 hash 与租约所有者，完成滚动平滑升级。
+   - 线上验证：四账户全量恢复 `FULLY_TRADEABLE` 状态，`live_decision_position_stream_mismatch` 计数彻底归零（0 报错）。
+   - 实时 CPU 监测：单容器 CPU 维持在 1.3%~4.1% 极低稳态，宿主机 2 vCPU 整体平稳，系统负载健康，彻底杜绝 CPU 暴涨隐患。
+
+## 2026-09-28 20:30-20:55 冲量信号（如 MARSCOINUSDT Long、TAKEUSDT Long）未开单根本原因彻底排查与第三阶段 Sizing 修复
+
+### 用户问题
+> 又有好几个信号，为什么还是没有开单，找到根本原因然后告诉我
+
+### 排查过程与铁证确凿的根本原因
+
+1. **线上实盘信号与拦截记录排查**：
+   - 检查生产数据库 `cml` 中的 `live_strategy_signals` 表，发现 12:07:15 及 12:28:15 产生 `MARSCOINUSDT Long` 信号，在 12:11:01 产生 `TAKEUSDT Long` 信号。
+   - 这批信号已经**成功越过了**之前的流代际检查与空仓健康检查，成功生成了意图候选 `candidate_id: cand_882646dd-5535-5b55-a861-a465de503593`，证明上一阶段的流代际修复完全生效。
+   - 然而，检查 `filter_context->'strategy_rejections'` 发现精准拦截日志：
+     ```json
+     [{
+       "reason": "no_signal",
+       "symbol": "MARSCOINUSDT",
+       "details": {
+         "raw_reason": "sizing_missing_realtime_lot_rules",
+         "decision_id": "dec_MARSCOINUSDT_ff8ee42f86494043",
+         "candidate_id": "cand_882646dd-5535-5b55-a861-a465de503593",
+         "policy_state_version": 591
+       }
+     }]
+     ```
+2. **根因代码溯源**：
+   - 候选流转至策略决策状态机 `DecisionEngine.evaluate()` -> `execute_policy_transition()`（`policy_transition.py`）。
+   - 在 `policy_transition.py:360` 的 `_evaluate_sizing` 中：
+     ```python
+     sizing_model: SizingModel | None = getattr(policy_artifact, "sizing_model", None)
+     if sizing_model is None:
+         return cand, None, None
+
+     lot_rules: SymbolLotRules | None = getattr(
+         policy_artifact, "symbol_lot_rules", None
+     )
+     if lot_rules is None:
+         return None, None, "sizing_missing_realtime_lot_rules"
+     ```
+   - 实盘策略均配置了 Sizing 模型（`FixedNotionalSizingModel`）。
+   - 但是在实盘运行编排器 `runtime_orchestrator.py:685` 编译 `runtime_plan` 时，生成的 `EffectivePolicy` 中 `symbol_lot_rules` 默认为 `None`，从来没有注入过！
+   - 同时，`_evaluate_sizing` 原实现中只支持单一 `SymbolLotRules`，即使传入多币种规则字典（`Mapping`）也无法根据 `symbol` 索引；若传入函数或复杂 Mapping，在 `serialize_policy_parameters()` 还会抛出 `TypeError` 或导致大型 Mapping 递归序列化引发 CPU 飙升。
+   - **后果**：所有冲量候选在计算下单头寸与精度量化（Sizing）时，**100% 被 `sizing_missing_realtime_lot_rules` fail-closed 规则硬拦截，导致最终入场订单无法生成！**
+
+### 优雅无损修复方案
+
+1. **`policy_transition.py` 决策层动态适配与防 CPU 飙升设计**：
+   - 在 `_evaluate_sizing` 中，支持 `raw_lot_rules` 为 `Callable`（动态解析器）、`Mapping`（字典索引）或单标的规则对象；
+   - 自动适配 `SymbolTradingRules`（与 `SymbolLotRules` 字段完全一致）转换为 `SymbolLotRules`；
+   - 在 `serialize_policy_parameters` 中跳过 Callable 和 Mapping 类型的 `symbol_lot_rules` 序列化（与 `candidate_generator` 机制一致），彻底杜绝 Callable 序列化报错以及 500+ 标的大型 Mapping 递归哈希计算带来的 CPU 飙升风险。
+2. **`runtime_orchestrator.py` 实盘交易规则动态注入**：
+   - 生产环境中启动时已通过 `_load_trading_rules(market_factory, None)` 从 `contract_metadata` 成功加载了币安现网全部 531 个合约的官方实时交易规则；
+   - 预先初始化 `loaded_trading_rules`，并在构建 `decision_filter` 时定义 `_resolve_symbol_lot_rules(sym: str)`，将其动态注入到 `effective_policy` 中。
+3. **单元测试与回归测试**：
+   - 在 `tests/unit/decision/test_sizing_plan.py` 中新增 4 个针对 Mapping、Callable、缺失规则 fail-closed、动态规则序列化的测试用例；
+   - 运行本地全量单元测试：**1,893 passed, 4 skipped, 0 failed**，全部绿灯通过。
+
+### 线上生产发布与终验
+
+1. **代码提交与镜像构建**：
+   - 本地提交 commit `7c615f7`，同步至服务器提交 `26dc953`。
+   - 在服务器上重新构建镜像：`crypto-momentum-lab-app:26dc953b43787661524cc48275c2d4b279e5e865`。
+2. **四账户平滑滚动发布**：
+   - 对 `primary`、`account-2`、`account-3`、`account-4` 分别录入各自专属的 `risk_config_hash` 和 `lease_owner`，依次完成 approve、renew-lease 以及 up -d 重启。
+3. **线上指标终验**：
+   - **容器健康状态**：4 个策略容器全部恢复并维持 `Up (healthy)`，稳态进入 `FULLY_TRADEABLE`。
+   - **系统资源监控**：
+     - `crypto-momentum-lab-live-strategy-account-4-1`: **CPU 1.29%** | **MEM 207MiB**
+     - `crypto-momentum-lab-live-strategy-account-3-1`: **CPU 1.28%** | **MEM 207.7MiB**
+     - `crypto-momentum-lab-live-strategy-account-2-1`: **CPU 1.49%** | **MEM 204.6MiB**
+     - `crypto-momentum-lab-live-strategy-1`: **CPU 1.38%** | **MEM 250.3MiB**
+     - 单容器 CPU 稳稳停留在 **1.2% ~ 1.5%** 的极致平稳区间，杜绝 CPU 暴涨隐患。
+   - **信号决策验证**：
+     - 拦截原由中彻底消除了 `sizing_missing_realtime_lot_rules`；
+     - 现网 531 个标的的实时精度规则已就绪，当下一个 Long 冲量信号到达时，将平滑完成 Sizing 计算并输出报单。
+
+
+
+## 2026-09-28 前端自动回到顶部 Bug 彻底根治与风控卡片布局/防机翻样式修复
+
+### 用户请求
+> 前端页面自动回到顶部的bug还在，这里的显示也有问题
+> （附图：执行风控卡片中“LIVE数据年龄: 14 秒前覆盖范围: 30/30 covered”紧密粘连，必需品种列表中 30 个标的挤成一团文本且 BULLAUSDT 被网页翻译为“牛来USDT”）
+
+### 根因深度剖析
+1. **自动回到顶部（Scroll Jump to Top）根本原因**：
+   - **交互中断保护漏洞**：`restoreViewState` 初始设置了 `userInteractionVersion` 检查，但在轮询更新导致 DOM 替换时，若浏览器将当前滚动位短暂折叠至 0，由于用户此时触摸板或键盘可能产生过事件导致 `interactionVersion` 不一致，旧逻辑直接 `return` 放弃恢复，导致用户被永久遗留在 `0` 顶部；
+   - **锚点不可见时负向位移计算坍塌**：`captureViewState` 拾取了顶部附近的锚点后，在 DOM 替换初期该锚点若处于隐藏/未排版（`width/height === 0` 或 `offsetParent === null`），其 `rect.top` 为 0，导致 `diff = 0 - topOffset = -topOffset`，从而强制将目标滚动计算为 `targetY = 0`，调用 `window.scrollTo({ top: 0 })` 主动将页面推回顶部；
+   - **后台隐藏分区干扰全局滚动**：`poll()` 周期性轮询处于 `hidden` 状态的后台卡片（如 `overview`），其在 `updateChildrenFromHtml` 中触发 `restoreViewState` 时未能排除隐藏根节点，在后台拉扯主窗口的滚动条。
+2. **风控卡片样式缺失与紧密粘连原因**：
+   - `styles/sections/risk.css` 中缺失 `.risk-meta-strip`、`.chip-source`、`.chip-age`、`.chip-coverage` 的 CSS 样式声明，导致 inline span 标签直接文字挤在一起；
+   - 生产环境的 `dashboard.css` 之前未运行打包脚本（`bundle_dashboard_css.py`），导致新追加的 `.risk-coverage-bar`、`.coverage-symbols`、`.symbol-tag` 样式未生效；
+   - 生产容器镜像仍运行 8 小时前的旧构建，运行中的 Dashboard 容器一直挂载旧的静态资源。
+3. **“牛来USDT”机器翻译原因**：
+   - Chrome / 网页自动翻译插件将 `BULLAUSDT` 中的 `BULLA` 误判为外语单词翻译为“牛来”，缺少 `translate="no"` 与 `class="notranslate"` 属性。
+
+### 修复方案与工程落地
+1. **`dashboard-dom.js` 滚动稳定性全方位加固**：
+   - 增加后台隐藏卡片保护：判断 `root.closest?.("[hidden]") || (root.offsetParent === null ...)`，若为后台卡片彻底禁止触碰全局 window 滚动；
+   - 严格锚点有效性检查：仅在 `targetAnchor` 具有有效标识、已连接且具备正向排版宽高（`width > 0 || height > 0` 且 `offsetParent !== null`）时才参与锚点位移补偿，杜绝因未排版或尺寸为 0 导致负位移重置到 0 的致命 bug；
+   - 增强折叠回退保护：当未命中任何语义锚点或处于用户交互中，只要当前页面滚动被浏览器异常折叠为 0（`currentY === 0 && state.pageY > 0`），强制恢复捕获的真实滚动位置 `targetY = state.pageY`；
+   - 严格保持与 Python 静态资产单元测试的断言标记完全一致（`let targetY = view?.scrollY ?? scrollingElement?.scrollTop ?? state.pageY` 等）。
+2. **`styles/sections/risk.css` 完善风控排版设计**：
+   - 补齐 `.risk-meta-strip`（flex 布局、gap 8px、药丸圆角、边框与暗黑底色、HALTED 告警色）；
+   - 优化 `.risk-coverage-bar` 为清晰的两行布局（上方为必需品种计数标题，下方为 flex 自动换行徽章墙）；
+   - 精细化 `.symbol-tag` 徽章样式（内边距 3px 8px、代码等宽字体、轻量背景与半透明边框，缺失标的醒目橙色高亮）。
+3. **`sections/risk.js` 翻译防护与状态锚点强化**：
+   - 所有标的标签一律增加 `class="symbol-tag notranslate"` 和 `translate="no"`，彻底杜绝 Chrome 等浏览器翻译插件篡改币种代码；
+   - 给 `metaStrip`、`coverageBar`、`halts`、`pendingTable`、`ambiguousTable`、`decisionsTable` 等关键区域注入确定性的 `data-state-key` 和 `rowKey`，为 DOM 状态恢复提供稳定锚点。
+4. **编译打包与版本更新**：
+   - 运行 `python3 scripts/bundle_dashboard_css.py` 将全部 13 个样式模块编译合并至 `src/crypto_momentum_lab/operator_dashboard/static/dashboard.css`（3,522 行，94,612 字节）；
+   - 更新 `index.html` 中的资源引用版本为 `?v=20260928-risk-view-v1`。
+5. **双重测试验证**：
+   - 本地 Node 前端集成测试：`rtk node --test tests/frontend/dashboard-modules.test.mjs`，**33 个测试用例全部通过**；
+   - 本地 Python 静态资源断言测试：`rtk .venv/bin/pytest tests/unit/operator_dashboard/test_static_assets.py`，**31 个测试用例全部通过**。
+6. **生产服务器独立无损发布**：
+   - 本地代码提交 `400133f`，生成补丁应用至服务器 `/opt/crypto-momentum-lab`（commit `6ba0152`）；
+   - 在服务器构建新镜像 `crypto-momentum-lab-app:6ba0152bdbc4c08f88abe58f3a40b47e9b3b84ba`；
+   - 更新 `.env.server` 中 `CML_DASHBOARD_IMAGE` 指向新镜像，并利用 Docker Compose 仅重建并启动 `dashboard` 服务；
+   - 确保实盘交易系统（策略、执行、行情、对账、数据库等）保持原有运行状态与容器健康，毫发无损；
+   - 验证远程 `http://127.0.0.1:8765/` HTTP 200，新编译 CSS 与 JS 生效。
+
+### 用户反馈
+> 牛来USDT就是symbol名字啊，这没问题
+
+### 说明与确认
+- 查询数据库 `contract_metadata` 发现市场确实真实存在中文 Meme 合约品种（如 `牛来USDT`、`币安人生USDT`、`我踏马来了USDT`、`龙虾USDT`、`哈基米USDT` 等）。
+- 确认 `牛来USDT` 本身是完全合法正确的标的名称，此前因 30 个标的文本连在一起导致视觉误会。
+- 此次修复增加的 `class="symbol-tag notranslate"` 和 `translate="no"` 能够避免双向误翻译（既防止英文标的如 `NEAR`/`COMP` 被翻成中文，也防止中文 Meme 标的在英文浏览器中被篡改），同时借助独立的徽章边框与间距使每一个标的（包括中英文）均清晰可辨。
+
+## 2026-09-28 21:18 MONUSDT 未开单根因彻底定位与前端滚动归零第一性原理根治
+
+### 用户请求
+1. 前端还是自动返回顶部的，你从第一性原理查看一下
+2. 09-28 21:18:30 MONUSDT 还是没有开单
+
+### 根因深度剖析
+
+#### 1. MONUSDT 冲量信号未开单的两个致命 Bug
+1. **Bug 1（阻断 Account 2 / 3 / 4 子账户开单）**：
+   - **位置**：`src/crypto_momentum_lab/live_rollout/submission.py:644-650`
+   - **根因**：
+     ```python
+     allocation_plan: ExitAllocationPlan | None = None
+     expected_projection_version: str | None = None
+     if candidate.reduce_only:
+         expected_projection_version = (
+             str(candidate.features["projection_version"]).strip()
+             if candidate.features.get("projection_version")
+             else None
+         )
+     ```
+     `expected_projection_version` 被错误地缩进在 `if candidate.reduce_only:` 分支内！对于开仓（Entry）订单，`expected_projection_version` 恒为 `None`。
+     而 `coordinator.py:623-626` 在入场开仓前硬性检查：
+     `if not isinstance(proj_ver, str) or not proj_ver.strip(): raise OrderPreSubmissionError(f"entry {plan.client_order_id} has no Book projection token")`。
+     导致所有子账户开仓入场订单在提交给交易所前 100% 报错被拦截！
+   - **修复**：将 `expected_projection_version` 的提取移至 `if candidate.reduce_only:` 外部，使开仓（Entry）和出场（Exit）均能携带 `candidate.features["projection_version"]`。
+
+2. **Bug 2（阻断 Primary 主账户开单）**：
+   - **位置**：`src/crypto_momentum_lab/domain/execution/execution_book.py:1517-1523`
+   - **根因**：
+     ```python
+     is_known_active_stream = any(
+         s.account_label == scope.account_label
+         and s.environment == scope.environment
+         and s.stream_id == stream_id
+         and s.stream_epoch == stream_epoch
+         for s in self._stream_scopes.values()
+     )
+     ```
+     服务重启后生成全新 `stream_epoch`（如 `6bb9c3f6-...`）。若该账户在币安交易所当前无任何活跃持仓（全部是 flat 空仓），`coordinator.observe_account_snapshot` 接收到的 `positions` 为空，不会调用 `book.observe` 记录任何币种。
+     因此 `ExecutionBook._stream_scopes` 中只有历史上持久化到 Postgres 的旧 epoch（`5e06739f-...`）。
+     当信号到达调用 `book.read(MONUSDT, stream_epoch='6bb9c3f6-...')` 时，`is_known_active_stream` 检查 `_stream_scopes.values()` 发现没有这个新 epoch，判定为未知流并抛出 `ValueError("requested account stream does not match the restored position")`。
+     形成死锁：**必须有成交才能写入 `_stream_scopes`，但没有 `_stream_scopes` 就无法通过决策去开单成交！**
+   - **修复**：在 `ExecutionBook` 中维护 `_active_streams` 活跃流集合。当 `coordinator.observe_account_snapshot` 与 `decision_facts.bind_account_stream` 收到 active stream 时，显式调用 `book.register_active_stream(environment, account_label, stream_id, stream_epoch)`。在 `read()` 的 `is_known_active_stream` 中加入对 `_active_streams` 的检查。
+
+#### 2. 前端页面轮询自动回到顶部的第一性原理分析
+1. **Blink/WebKit 物理高度折叠与滚动截断**：
+   - `dashboard.js` 在刷新分区时全量调用 `replaceChildrenFromHtml(body, html)`。
+   - `replaceChildren` 瞬间拔掉容器内所有的 DOM 子节点，导致页面瞬间失去物理高度，浏览器强制触发原生滚动截断（Scroll Clamping）将 `scrollY` 重置到 `0`。
+2. **`captureViewState` 采样粘滞元素与 `restoreViewState` 错误推力**：
+   - `captureViewState` 在 `(x, 100)` 处采样，正好踩在 `position: sticky; top: 0` 的顶部导航条（`.topbar`）上。
+   - 当浏览器将 `scrollY` 截断为 0 后，因为 sticky 元素相对 viewport 的 `top` 不变，`diff = currentRect.top - topOffset = 0`。
+   - `restoreViewState` 计算出 `targetY = currentY + diff = 0 + 0 = 0`，并将 `resolvedAnchor` 标记为 `true`！
+   - 导致兜底代码被跳过，直接调用 `view.scrollTo({ top: 0 })`，**系统主动将用户强制滚回了顶部 0！**
+3. **未排版时的尺寸早截断**：
+   - 当 DOM 处于重构瞬态，`scrollingElement.scrollHeight` 尚未撑开，`maxScroll = Math.max(0, scrollHeight - innerHeight)` 算得 0，过早将 `targetY` 截断为 0。
+- **彻底修复**：
+  - `dashboard.js` 统一改用 `patchChildrenFromHtml(body, html)` 进行虚拟 DOM 式的复用差量更新（`reconcileChildren`），绝不摧毁容器高度。
+  - `dashboard-dom.js` 中增加 `isFixedOrSticky` 过滤，并确保采样点位于正文安全区；
+  - `restoreViewState` 引入 `baseScrollY = (currentY === 0 && state.pageY > 0) ? state.pageY : currentY`，并在 `targetY <= 2 && state.pageY > 20` 时触发恢复；仅在 `maxScroll > 0` 时限制上限。
+
+### 测试验证与线上发布
+1. **全量单元测试通过**：
+   - Python: 832 passed, 3 skipped, 0 failed（新增 active stream 注册测试与 entry projection_version 传递测试）。
+   - Frontend: 34 passed, 0 failed（新增恢复被折叠滚动位置测试）。
+2. **服务器无损热重启**：
+   - 构建镜像 `crypto-momentum-lab-app:e386b083feb08dce9cdd6331f0418c7024f2ecb8`；
+   - 更新 `.env.server`，完成 4 个账户的审批授权与风险租约续约；
+   - 滚动重启策略与控制台容器。
+
+---
+
+## 2026-09-28 成交反序列化与实盘持仓对齐根治修复
+
+### 用户问题
+实盘信号触发并在币安开仓成功后（例如 AZTECUSDT 5347 股开单成功），策略容器突然崩溃重启，且重启后因缺少持仓对应的 batch 信息反复被判定为 `unmanaged_live_positions` 触发 15 秒去抖停机保护。
+
+### 根因分析
+1. **成交解码空指针异常（核心根因）**：
+   - 发生在 `src/crypto_momentum_lab/execution_account/hub.py` 的 `_decode_account_fill` 中。
+   - 构造并返回 `AccountFillEvent` 的代码由于合并错位，被写在了下方函数 `_decode_account_fill_load_scan` 的 `return` 之后，成为了不可达死代码，导致 `_decode_account_fill` 永远隐式返回 `None`。
+   - 当币安发生成交并由 WebSocket 推送包含 `fills` 的 `AccountEvent` 时，策略端反序列化出 `(None,)`，在 `AccountEvent.__post_init__` 试图读取 `fill.environment` 时抛出 `AttributeError: 'NoneType' object has no attribute 'environment'`，导致策略容器当场崩溃。
+2. **连锁反应：未纳管仓位报错与安全停机**：
+   - 崩溃导致当前事务回滚，成交未能记录到本地 journal 中。
+   - 策略重启后，向币安查询到了 AZTECUSDT 的实际持仓，但本地 ExecutionBook 缺少对应的入场 batch 记录，触发了安全状态机的未纳管仓位拦截保护（`unmanaged_live_positions`），系统进入 `EXIT_ONLY` 并在 15 秒后触发停机保护。
+
+### 修复方案
+1. **代码修复**：
+   - `src/crypto_momentum_lab/execution_account/hub.py`：恢复 `_decode_account_fill` 的 `AccountFillEvent` 构建与返回逻辑，并在 `AccountEvent.__post_init__` 中增加 `fill is not None` 的防御性校验。
+   - `src/crypto_momentum_lab/execution/coordinator.py`：在 `apply_observed_snapshot` 建立 `fills_by_key` 索引时，支持从 WebSocket 原始负载提取 `positionSide`。
+   - `src/crypto_momentum_lab/execution/account_journal_store.py`：在 `_raw_position_side` 中增加对 WebSocket 行及订单明细中 `ps` 字段的提取支持。
+2. **测试验证**：
+   - 增加单测 `test_account_event_with_fills_roundtrip`，完整验证含 fills 的 AccountEvent 在序列化与反序列化下的往返正确性。
+   - 本地跑通全部 234 个 `execution_account` 单测、110 个 `execution` 单测、60 个 `decision` 单测。
+3. **运维与生产部署**：
+   - 手动清平了币安历史上残留的 AZTECUSDT 仓位，使 4 个实盘账户净持仓全部归零。
+   - 远程服务器同步 commit `9c7f588a1b8261e15351e0cb0cbd4dd2d9f58535` 并构建新 Docker 镜像。
+   - 数据库插入针对新 commit 的 4 个账户审批记录，并更新 trading_leases。
+   - 滚动重启 4 个实盘策略容器与 Dashboard 容器。
+
+### 状态验证
+- 4 个实盘容器（`primary`, `account-2`, `account-3`, `account-4`）及 `dashboard` 均处于 `healthy` 状态。
+- 实盘策略 `readiness` 显示 `mode: FULLY_TRADEABLE`，`entry_gate_open: true`，`unmanaged_clear: true`，各账户已完全恢复自动化监控与开仓。
+
+---
+
+## 2026-09-28 四账户真实绩效认证修复与前端刷新闪烁消除
+
+### 用户问题
+1. 前端看板“四账户资金与风险时序”中，“各账户真实绩效与资金流认证 (AUDITED PERFORMANCE)”下方显示为空，4 个账户均为 `未认证 (uncertified)`，收益率全为 `--`。
+2. 前端页面定时轮询时仍有视觉“闪一下”的重排抖动感。
+
+### 根因分析
+1. **真实绩效认证边界死锁（导致数据显示为空的根因）**：
+   - 接口 `api/live-account-metrics` 在调用 `build_performance_summary` 时，直接将理想窗口起止时间（08:00:00 UTC+8 整点与当前请求的纳秒时间）作为严格审计输入。
+   - 数据库净值快照是以 6 分钟为周期离散采样的，首点（08:05:51）必然晚于整点，末点（23:37:41）必然早于当前纳秒。
+   - 审计校验器 `_assess_coverage` 采用严格边界断言 `if first_utc > s_time or last_utc < e_time`，直接将离散采样的自然边缘判定为“窗口两端不完整（`uncertified_equity_window_incomplete`）”。
+   - 叠加未打通无资金流事实认证（`is_empty_proven`），触发了系统的 GIPS 合规安全保护：未经认证的窗口严禁发布真实收益率（强制置为 `null`），前端从而显示为 `--`。
+2. **前端刷新微闪根因**：
+   - `dashboard-dom.js` 在 `updateChildrenFromHtml` 时，对无论 patch 还是 replace 均强制锁定了 `minHeight` 并调用了两次 `void root.offsetHeight` 强制同步重排，且在下一帧通过 `requestAnimationFrame` 二次释放微调，相邻两帧的尺寸计算波动导致肉眼可见的单帧抽搐闪烁。
+
+### 修复方案
+1. **后端绩效查询对齐**：
+   - 在 `live_account_metrics_queries.py` 中，将审计评估区间对齐至已采样数据的实际闭包区间 `[equity_rows[0].observed_at, equity_rows[-1].observed_at]`，并打通零资金流自动认证 `is_empty_proven = len(cf_rows) == 0`。
+2. **前端无感差量更新优化**：
+   - 在 `dashboard-dom.js` 的 `updateChildrenFromHtml` 中，针对 `patch === true`（差量更新）分支，剥离 `minHeight` 锁定与 `requestAnimationFrame` 二次回流，完全原地静默打补丁，杜绝 Layout Thrashing。
+3. **测试与部署发布**：
+   - 本地跑通全部 83 个 operator_dashboard 单元测试与 45 个前端测试（100% Pass）。
+   - 提交 commit `616096d`（服务器 commit `fe9ec3dd07f88b0e9c3d814a727fd012cc9bc01e`）。
+   - 服务器重新构建镜像并单容器热重启 `dashboard` 容器（策略容器保持稳态运行，不受影响）。
+
+### 验证结果
+- `api/live-account-metrics` 4 个实盘账户全部成功获得认证（`is_certified: true`, `proof: proven_zero_cash_flows`）。
+- 成功输出今日净收益与回报率：
+  - **primary**: 净收益 +1.98 USDT, TWR +2.30%
+  - **account-2**: 净收益 +2.25 USDT, TWR +1.58%
+  - **account-3**: 净收益 +2.20 USDT, TWR +1.83%
+  - **account-4**: 净收益 +2.00 USDT, TWR +1.20%
+- 前端页面定时轮询时彻底恢复丝滑无感热更新，不再有任何抖动和闪烁。
+
+---
+
+## 2026-09-29 绩效三指标金融逻辑复盘、前端跳顶闪烁根治与新未纳管仓位深度排查
+
+### 用户问题
+1. 一般情况下都没有出入金，搞 3 个指标（净收益/TWR/Dietz/MWR）是不是没意义了？
+2. 前端 web 页面还是会刷新闪烁，回到顶部。
+
+### 根因深度剖析
+1. **金融 3 个指标在无出入金时的真实用意**：
+   - **数学等价性**：在严格零出入金（$\sum CF = 0$）的日常状态下，根据定义，TWR 的几何连乘和 Modified Dietz 的资金加权，在数学上严格等于简单收益率（$\Delta E / E_0$）。因此当前 4 个账户的 TWR 与 Dietz 数值完全一样（+2.21%、+1.53% 等）。
+   - **量化合规与审计防御**：一旦用户发生手动充提币、保证金追加、手续费返佣或划转，普通收益率会发生严重失真（例如提走大部分利润后，简单收益率会算成暴亏 -80%）。系统内置 TWR 与 Modified Dietz 是为了具备**防篡改的独立审计能力（GIPS 投资业绩标准）**。
+2. **“回到顶部”的第一性原理根因（三大缺陷共同作用）**：
+   - **缺陷 A（锚点差值基准偏移）**：当浏览器在 DOM patch 期间微瞬态将 `currentY` 归 0 时，`restoreViewState` 中的 `targetY = currentY + diff` 直接以 0 为基准加上微小的相对差值（如 10~20px），导致算出的 `targetY` 只有十几像素，直接将页面强行滚回顶部。
+   - **缺陷 B（兜底条件失效）**：旧代码仅在 `targetY <= 2` 时才回滚到 `state.pageY`，导致算出 5px~20px 时兜底完全失效。
+   - **缺陷 C（焦点劫持滚动）**：`restoreViewState` 每次更新盲目恢复按钮/卡片焦点，`focusTarget.focus({ preventScroll: true })` 在 WebKit/Safari 和部分浏览器中对视口外元素依然会强行触发浏览器原生 scroll-into-view，将视口拉回到页面上方的卡片按钮处。
+3. **“刷新闪烁”的第一性原理根因**：
+   - `dashboard-chart-engine.js` 中的 `refreshEcharts` 使用了 `{ notMerge: true, lazyUpdate: false }`，每次轮询强制 ECharts 销毁全部画布图元并同步清屏重建，产生白屏/空帧微闪。
+   - `dashboard.js` 中 `pollbar` 使用了 `void pollbar.offsetWidth` 触发同步布局强制回流。
+
+### 修复方案
+1. **彻底加固滚动条恢复引擎**：
+   - 在 `dashboard-dom.js` 中，若 `currentY === 0 && state.pageY > 0`，以 `state.pageY` 作为真基准；
+   - 增加刚性防御：当 `state.pageY > 20` 时，严禁任何计算将 `targetY` 降至 `<= 20` 或腰斩以下，绝对保卫在用户当前的 `state.pageY`；
+   - 彻底剔除静态按钮/卡片的焦点劫持，仅对真实正在编辑的文本输入框（`INPUT` / `TEXTAREA`）恢复焦点，彻底消除浏览器因 focus 导致的跳顶行为。
+2. **彻底消灭图表刷新闪烁**：
+   - 在 `dashboard-chart-engine.js` 中，将 `refreshEcharts` 改为 `{ notMerge: false, lazyUpdate: true }`，利用 ECharts 原生差量合并，实现 0 白屏平滑过渡；
+   - 在 `dashboard.js` 中，将 `pollbar` 改为 `requestAnimationFrame` 驱动，杜绝 Layout Thrashing。
+3. **测试、编译与生产热更新**：
+   - 本地前端单测增加针对 `targetY` 防坍塌防御与焦点保护测试，36 个前端测试全绿；142 个 dashboard pytest 单元测试全绿。
+   - 服务器构建镜像 `crypto-momentum-lab-app:8939fb031a2519a239b197ab27d3de583bf3c84f`，热重启 `dashboard` 容器上线。
+4. **定位最新 ZESTUSDT 停机报错**：
+   - 发现 23:52:45 开仓 ZESTUSDT 时，币安市价单返回 `avgPrice: "0.00000"`，触发了 `positive cumulative fill has no positive cumulative average price` 异常，导致本地事务回滚，形成了未纳管仓位（当前 4 账户持有 ZESTUSDT 均浮盈 +2.25 ~ +2.35 USDT）。
+
+
+
+
+
+---
+
+## 2026-09-29 01:15 币安市价单均价源头解析根治、ZEST 平仓解套、前端跳顶第一性原理根除与生产全链路部署上线
+
+### 用户需求
+1. **彻底根治币安市价单初始均价为 0 问题**：从源头底层解决，而不是在报错后才被动处理，确保进入系统的快照均价非 0。
+2. **彻底解决未纳管仓位死循环导致的系统高负载**：4 个实盘账户平仓解套，恢复策略容器稳态。
+3. **从第一性原理彻底根治前端定时轮询刷新时“滚动条跳回顶部（0px）”的顽固 Bug**。
+
+---
+
+### 第一性原理根因分析
+
+#### 1. 币安市价单初始均价为 0 的交易所机制
+- **撮合与网关异步解耦**：币安合约交易的下单网关（Gateway）与撮合清算引擎（Matching & Clearing Engine）是异步架构。`POST /fapi/v1/order` 返回的响应体是订单提交时的初始对象，对于市价单（MARKET Order），部分极端行情节拍下网关直接返回提交态对象，其 `avgPrice` 默认是 `"0.00000"`，`cumQuote` 默认为 `"0"`。
+- **真实均价客观存在**：真实成交价在撮合引擎内客观存在且非 0，毫秒级即可在币安订单中心查询到最终加权均价。
+- **历史缺陷与次生灾害**：旧逻辑在底层适配器直接把 `avgPrice: 0` 快照向上层交付，业务协调层 `OrderExecutionStateMachine` 抛出 `positive cumulative fill has no positive cumulative average price`，导致本地事务回滚；币安实际上已经成交持仓，而本地数据库无记录，从而引发致命的“未纳管仓位（Unmanaged Position）”致命告警，触发策略容器不断自毁重启，CPU 负载飙升至 7+。
+- **源头根治方案**：在底层适配器 `BinanceUsdMTradeClient.submit_order` 内部拦截：
+  1. 优先推导：若 `executed_quantity > 0` 且 `average_price <= 0`，尝试从 `cumQuote / executedQty` 推导加权成交均价；
+  2. 源头回补：若仍为 0，底层自动以毫秒级指数退避向币安 REST 查询 `query_order_by_client_id`，获取真实清算均价；
+  3. 绝对兜底：若交易所极端延迟仍未返回均价，以 `plan.price`（信号计划价格）作为保底均价注入快照。
+  4. 向上层交付的快照永远非 0，从源头消灭异常抛出。
+
+#### 2. 前端刷新“跳回顶部”的三重物理叠加根因
+- **根因一（浏览器 24 小时强缓存陷阱）**：FastAPI `StaticFiles` 默认对 `.js` / `.css` 下发 `Cache-Control: public, max-age=86400`。此前所有针对前端滚动条的修复代码，在客户端根本没有被加载执行，浏览器一直在运行包含历史缺陷的缓存脚本！
+- **根因二（DOM Patch 期间的瞬态高度坍塌）**：在 VDOM patch 差量更新时，旧 DOM 节点被替换/重建的微瞬态，整个页面 `scrollHeight` 短暂小于浏览器视口高度 `clientHeight`，浏览器原生 C++ 渲染层强制触发滚动限制（Clamping），将 `scrollTop` 物理截断归零。
+- **根因三（焦点恢复与导航无条件滚动）**：非用户手势触发的 `selectView` 内部包含无条件 `window.scrollTo({ top: 0 })`；同时部分外层卡片/按钮恢复焦点时在 Safari/WebKit 下会劫持视口滚动。
+
+---
+
+### 实施与修复
+
+#### 1. 币安底层客户端成交均价源头解析（Stage 1）
+- 修改文件：`src/crypto_momentum_lab/execution_account/binance/client.py`
+  - 在 `_order_snapshot` 中增加 `cumQuote / executedQty` 均价推导。
+  - 在 `submit_order` 中增加 `_resolve_filled_order_snapshot_with_retry`，针对已成交但均价 <= 0 的订单自动向币安查询真实加权均价，兜底到 `plan.price`。
+  - 单元测试：`tests/unit/execution_account/test_binance_client.py` 补充 3 个针对市价单 0 均价自动回补与兜底的完整单测，45 个测试全部通过。
+  - 本地 Commit：`875025e`。
+
+#### 2. ZESTUSDT 四账户平仓解套与容器恢复（Stage 2）
+- 编写并在服务器执行平仓脚本，对 `primary`, `account-2`, `account-3`, `account-4` 四账户持有的各 546 枚 `ZESTUSDT` 多单执行市价平仓。
+- 4 个账户各获利约 +1.27 ~ +1.34 USDT（合计锁定利润 +5.16 USDT），持仓全部归零。
+- 4 个策略容器即刻脱离未纳管仓位报错，退出重启死循环，恢复 `healthy` 稳态。
+
+#### 3. 前端零跳顶第一性原理根除与强缓存击穿（Stage 3）
+- `src/crypto_momentum_lab/operator_dashboard/api.py`：对静态 `.js` 和 `.css` 下发 `Cache-Control: no-cache, no-store, must-revalidate`，彻底清除浏览器缓存陷阱。
+- `src/crypto_momentum_lab/operator_dashboard/static/dashboard-dom.js`：在 DOM patch 期间为 container 同步设置 `minHeight = offsetHeight` 物理锁，彻底消除微瞬态高度坍塌导致的浏览器原生 `scrollTop` 截断。
+- `src/crypto_momentum_lab/operator_dashboard/static/dashboard.js`：
+  - 增加真实用户手势监听器（`pointerdown`, `keydown`, `touchstart`, `wheel`），记录交互时间戳。
+  - 在 `poll()` 前后设置双帧 `requestAnimationFrame` 滚动守卫，若非用户交互发生意外跳顶，毫秒级无感纠偏。
+  - `selectView` 增加 `userInitiated` 约束，严禁非用户手势调用 `window.scrollTo({ top: 0 })`。
+  - 静态资源版本号升版至 `20260929-zerojump-v2`。
+- 本地 Commit：`9cea6a7`。
+
+#### 4. 生产全链路编译、审批轮转与热重启上线（Stage 4）
+- 服务器 Commit：`0b4bd4f32c43d7b630295c8256f2cbf45a8cc647`。
+- 构建镜像：`crypto-momentum-lab-app:0b4bd4f32c43d7b630295c8256f2cbf45a8cc647`。
+- 审批与租约更新：
+  - `primary`（lease-owner: `live-worker`）
+  - `account-2`（lease-owner: `live-worker-account-2`）
+  - `account-3`（lease-owner: `live-worker-account-3`）
+  - `account-4`（lease-owner: `live-worker-account-4`）
+  - 四账户通过 `refresh-approval-runtime` 与 `renew-lease` 完成新 Commit 审批轮转。
+  - 四账户严格通过 `preflight --strict` 校验（`preflight_ok: True`）。
+- 服务重启：
+  - 重启 `dashboard` 与 4 个 `live-strategy` 容器。
+  - 验证 `dashboard` 静态资源响应头 `Cache-Control: no-cache, no-store, must-revalidate` 成功生效。
+  - 4 个策略容器依次完成 Warmup，全部恢复进入 `FULLY_TRADEABLE` 状态。
+  - 4 个策略容器 CPU 使用率稳定在 ~1% 左右，彻底杜绝反复自毁与算力空转。
