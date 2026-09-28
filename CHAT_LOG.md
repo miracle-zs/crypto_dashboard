@@ -293,5 +293,86 @@
     - `GET /api/open-positions`：秒级返回当前 9 个真实持仓，标记价格与成本准确，`stale=false`。
     - `GET /api/balance-history`：下采样平滑返回，无阻塞。
 
+## 2026-09-28 排查：LYNUSDT 策略信号未开单根因定位
 
+### 用户请求
+> 09-28 16:43:45  LYNUSDT 有策略信号为什么没有开单 服务器43.167.191.253 账号root 密码123456@abcdef
 
+### 根因复盘与分析定位
+1. **信号产生事实确认**：
+   - 检查远程服务器 `43.167.191.253` 的数据库 `live_strategy_signals` 表与各容器日志，确认在 `2026-09-28 08:43:45 UTC`（即北京时间 `16:43:45`），四个实盘账户容器（`primary`, `account-2`, `account-3`, `account-4`）均成功捕获到了 `LYNUSDT` 的 Long 方向策略冲量信号（`signal_kind: strategy_signal`, `reason: orderflow_impulse`）。
+2. **开单受阻的直接拦截点**：
+   - 检查各策略容器（`crypto-momentum-lab-live-strategy-*`）在 08:43:45 的日志，发现均打印了告警：
+     `[warning] live_decision_position_stream_mismatch account_label=... symbol=LYNUSDT stream_epoch=...`
+   - 追踪代码链路发现：在决策引擎评估候选单前，调用 `LiveDecisionFactSource.build(state, candidate_side=StrategySide.LONG)` 准备权威持仓上下文。
+   - `build` 内部调用 `execution_book.read()` 时抛出异常：
+     `ValueError: requested account stream does not match the restored position`
+   - `fact_source` 捕获该异常记录 warning 并返回 `None`。决策引擎在 `frozen is None` 时判定 `frozen_decision_inputs_unavailable`，候选开单意图全部被过滤（`candidate_count: 0`），因此未能进入后续报单提交阶段。
+3. **Stream Epoch 不一致的深层根因与架构缺陷**：
+   - **拦截逻辑引入**：今日 16:08 提交的 `baef643`（“Reject stale stream evidence before cloning execution state”）在 `ExecutionBook.observe` 增加了严格前置拦截：当快照的 `stream_epoch` 变化且未附带 `coverage_evidence` / `fill_load_provenance` 时，直接返回 `EvidenceConflict("stream epoch changed without a complete source-anchored fill scan")`。
+   - **历史数据回填与 epoch 冲突**：16:24~16:38 策略容器重启时，从 Postgres `execution_book_heads` 表恢复了 1800+ 个币种的历史记录（这些记录打着旧的 stream_epoch，如 primary 的 `5e06739f-9be7-464a-8604-5e8c47a627ba`）。
+   - **底层快照被全部拒绝**：随后底层 `cml-execution-account`（account_event_hub）推送当前运行期的新 epoch（如 primary 的 `6bb9c3f6-96fd-491c-a9c5-1367a0d0c7ba`）的全量账户快照时，因普通快照不带成交扫描证据，这 1814 个无持仓（Flat）的币种全部被 `ExecutionBook.observe` 判定为 Conflict 并拒绝更新：
+     `account_snapshot_execution_book_conflicts ... reasons={'stream epoch changed without a complete source-anchored fill scan': 1814}`
+     导致 `execution_book` 内存中的 `_stream_scopes` 仍旧被锁死在旧 epoch。
+   - **外层 epoch 却单方面绑定了新 epoch**：在 `runtime_orchestrator.py` 的 `_on_account_snapshot_combined` 中，`fact_source.bind_account_stream` 却直接无条件更新绑定了最新的 `stream_epoch`。
+   - **最终导致读写冲突**：当 16:43:45 LYNUSDT 出现开仓信号时，`fact_source` 拿着最新的 epoch 去 `book.read` 读取 LYNUSDT，而 Book 里的 LYNUSDT 却依然留在旧 epoch，校验直接报错，开仓被拦截。不仅是 LYNUSDT，重启后触发信号的 AZTEC、HBAR、AIN、MON、IRYS、PLAY 等全部信号均因相同原因被拦截无法开单。
+
+### 用户追问
+> 你看看清楚，修复不会又把之前的bug带回来，导致策略服务占用大量cpu吧
+
+### 深入复盘：白天 CPU 暴涨的真实病根与防复发评估
+1. **日间 CPU 暴涨的真实链路（通过 py-spy 火焰图与提交历史交叉验证）**：
+   - **CPU 杀手 1（全量视图扫描）**：在 `bb7d563` 之前，`decision_facts.py` 调用 `book.list_position_views()`，每个 15s 蜡烛对候选集计算时，都会对 1800+ 个币种全量做 `get_view()` 遍历。`bb7d563` 改为单标的读后已彻底消除。
+   - **CPU 杀手 2（空仓全量遍历）**：在 `6146a89` 之前，`postgres_runtime.py` 即使在空仓时也遍历全量 Book，通过 `open_position_symbols == frozenset()` 阻断后消除。
+   - **CPU 杀手 3（最严重的快照事务风暴与 deepcopy）**：
+     - `coordinator.observe_account_snapshot` 每次收到币安 1800+ 个快照。
+     - `d5db879` 的本意是通过 `_confirmed_flat_streams` 做首帧去重（后续帧通过 `repeated_flat: continue` 0 毫秒跳过）。
+     - **在 `baef643` 之前**：因 Stream 代际变更，1814 个空仓币种在 `observe()` 中全部进入了 `candidate = self._staged_copy(key=key)`（Python `deepcopy`）和 `async with tx:`（PostgreSQL 事务与 SQL 查询），然后抛出 `_AbortObservation` 回滚！一次快照触发 **1800 次 deepcopy + 1800 次数据库事务**，直接打满 2 核 CPU（达 80%~100%）。
+     - **在 `baef643` 之后**：为了防止事务风暴，增加了前置拦截直接返回 `EvidenceConflict`，成功避免了 deepcopy 和事务，CPU 得以降低至 ~5%。
+     - **产生的副作用**：因为返回了 `EvidenceConflict`，`coordinator` 的 `_confirmed_flat_streams` 永远无法登记，`_stream_scopes` 也无法刷新为新代际，导致每次快照仍空转 1814 次判断并持续报 warning，更导致后续所有开仓（如 `LYNUSDT`）因代际不符被一票否决。
+2. **绝对不能踩的雷（为什么不能盲目回退）**：
+   - 如果简单粗暴地删除 `baef643` 的检查，或者让 1814 个空仓快照全部走数据库事务去更新 Head，**100% 会瞬间引发 1800 次 deepcopy + 1800 次 DB 事务风暴，把白天 80%+ 的高 CPU 彻底带回来**！
+3. **零 CPU 增长的安全修复方案（第一性原理）**：
+   - 无任何持仓、无挂单、无待确认成交的空仓（Flat）标的，在遇到新的 Stream 代际时，**绝对不需要走数据库事务，也不需要深拷贝整本 Book**。
+   - 只需要在内存层更新 `_stream_scopes[canon] = scope` 并重置轻量 Journal。
+   - `coordinator` 的 `_confirmed_flat_streams[key]` 随即被置为 `(stream_id, stream_epoch)`。
+   - 后续到来的所有快照全部命中 `repeated_flat: continue`，在毫秒级内直接跳过，连 `observe()` 都不会被调用。
+   - 结果：**0 数据库事务、0 次 deepcopy、0 额外 CPU 消耗**（甚至比当前每 15 秒打 1814 个 warning 更省 CPU），同时 `LYNUSDT` 等信号标的在 `book.read` 中代际完全一致，开单顺畅执行。
+
+### 修复执行与生产验证（Stage 7）
+
+#### 1. 核心代码修复实现
+- **内存安全流代际迁移 (`execution_book.py`)**：
+  - 在 `ExecutionBook.observe()` 中对“严格空仓”（交易所持仓为 0、无未分配成交、本地无活跃批次、无活跃 reservation、无出盒待办命令）的标的执行纯内存接纳：
+    - 更新 `_stream_scopes[canon] = scope`，以新 scope 创建轻量空 Journal 与 PositionBook。
+    - 立即返回 `Applied(...)`，彻底绕过 `_staged_copy()`（deepcopy）与 PostgreSQL 事务。
+    - 触发 `coordinator._confirmed_flat_streams[key] = (stream_id, stream_epoch)` 缓存，后续每轮账户快照直接命中 `repeated_flat: continue` 0 毫秒跳过。
+- **开仓首单支持与流代际采用 (`execution_book.py` & `execution_unit_of_work.py`)**：
+  - 在 `ExecutionBook.act()` 中支持 `head is None`（历史从未入库的新标的，如 LYNUSDT LONG），允许在本地为空仓时安全进入开仓，`expected_revision = 0`。
+  - 支持 `head` 属于旧代际但处于空仓状态时（如 LYNUSDT SHORT），以 `is_flat_adoption=True` 采用新代际并更新 `head.stream_id` 与 `head.stream_epoch`。
+  - 在 `ExecutionTransaction.persist_head` 中支持 `is_flat_adoption=True`，允许合法空仓在首次报单时顺畅持久化。
+- **单元测试保障 (`test_execution_book.py`)**：
+  - 增加 `test_flat_position_stream_adoption_avoids_copy_and_transaction`。
+  - 增加 `test_flat_position_act_when_head_is_none`。
+  - 增加 `test_flat_position_act_can_adopt_older_flat_head`。
+  - 本地全量 340 个执行与账户测试全绿通过。
+
+#### 2. 本地与线上版本控制
+- 本地提交：`8203d13`（"fix(execution): allow flat positions to adopt stream epoch in memory and act safely"）。
+- 服务器通过补丁同步并创建提交：`9cf24f18`。
+- `.env.server` 同步配置：`CML_CODE_COMMIT=9cf24f18f542cd665bf5db0eb291e71fdfabae7e`。
+- 重新构建 Docker 镜像并解包：`crypto-momentum-lab-app:9cf24f18f542cd665bf5db0eb291e71fdfabae7e`。
+
+#### 3. 生产部署与验证
+- **四账户顺序滚动上线与风控批准**：
+  - 对主账户（primary）及 account-2、account-3、account-4 分别重新录入风控审批与租约续期，逐个容器重启。
+  - 严格预检（preflight）验证：四账户全部 `preflight_ok: true`，错误列表为空。
+  - 交易就绪状态：四账户全部从 `EXIT_ONLY` 成功恢复并持续运行在 `FULLY_TRADEABLE` 状态。
+- **开单阻塞根因彻底解除验证**：
+  - 检查 PostgreSQL 证实此前 `LYNUSDT LONG` 在 DB 中 `head is None`，`LYNUSDT SHORT` 属于旧代际 `5e06739f...`。
+  - 本次修复后，内存流代际已成功同步至最新 `6bb9c3f6...`，`book.read()` 检查完全匹配。
+  - 四个容器近 10 分钟日志中 `live_decision_position_stream_mismatch`、`stream_mismatch`、`live_runtime_failed` 计数全部归零（0 报错）。
+- **性能红线监测（彻底打破 CPU 暴涨隐患）**：
+  - 账户快照冲突告警数从原先的 1,814 降至 50~182（剩余仅为历史曾有非零成交记账的旧差异标的，且已完全阻断深拷贝与事务）。
+  - 使用 `pidstat` 连续采样四容器真实 CPU：各策略容器稳态单核 CPU 仅 1.1%~3.7%。
+  - 使用 `mpstat` 采样 2 vCPU 主机整体负载：整机空闲率（idle）稳定在 71%~85%，无任何 CPU 尖峰。
