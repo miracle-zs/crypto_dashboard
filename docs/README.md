@@ -25,8 +25,10 @@
   *核心突破*：多周期极端涨幅、持仓量异动与插针崩盘风险评分模型。
 - [2026-03-24 365D 大周期反弹榜实现](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/plans/2026-03-24-rebound-365d-implementation.md)
   *核心突破*：共享本地日线缓存，零 REST 请求高效扩充年化周期反弹榜。
-- [2026-02-20 性能优先重构与加固报告](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/plans/2026-02-20-performance-refactor-verification-report.md)
-  *核心突破*：读模型缓存加速，热点查询延迟优化达 64%。
+- [2026-02-20 性能优先重构方案与验证报告](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/plans/2026-02-20-performance-refactor-verification-report.md)
+  *核心突破*：[性能重构设计](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/plans/2026-02-20-performance-refactor-design.md) + 读模型缓存加速，热点查询延迟优化达 64%。
+- [2026-02-20 模块化单体分层设计](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/plans/2026-02-20-refactor-design.md)
+  *核心突破*：由早期单体扁平脚本向清晰的 `api / services / repositories / jobs / core` 分层治理演进。
 
 ---
 

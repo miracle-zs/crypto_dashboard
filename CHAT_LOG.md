@@ -942,4 +942,19 @@
    - 更新全量 `.env` 环境变量配置清单与实盘循环 SOP。
    - 纠正项目工程结构树，准确反映现有各子目录与核心模块。
 
+### 历史冗余与临时文档清理
+用户确认采用方案 1（彻底清理已过期的历史过程性文档）：
+- 删除了 `docs/plans/` 下 8 个历史阶段性临时文档（临时发布公告、阶段性 release notes、早已完成的历史实施计划实施清单）：
+  1. `2026-02-20-refactor-announcement.md`
+  2. `2026-02-20-refactor-release-notes.md`
+  3. `2026-02-20-refactor-implementation-plan.md`
+  4. `2026-02-20-refactor-verification-report.md`
+  5. `2026-02-20-performance-refactor-implementation-plan.md`
+  6. `2026-02-23-refactor-final-review.md`
+  7. `2026-04-10-crash-risk-implementation-plan.md`
+  8. `2026-04-09-leaderboard-rebound-drawdown-fields.md`
+- 保留具有长久技术参考价值的核心架构方案（第一性原理重构、暴跌风险雷达设计、365D反弹榜设计、性能重构设计与报告）。
+- 更新 `docs/README.md` 索引链接，确保文档中心索引精准无死链。
+
+
 
