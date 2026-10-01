@@ -58,6 +58,7 @@ def extract_symbol_closed_positions(
 ):
     started_at = time.perf_counter()
     worker_client = processor._create_worker_client()
+    sync_repo = getattr(processor, "sync_repo", None)
 
     effective_since = int(since)
     cursor_times = []
