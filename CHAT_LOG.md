@@ -990,9 +990,35 @@
    - 从 751 行缩减为 482 行，重构为纯粹、高内聚的 Facade（外观类）。
    - 将所有工具函数转为 `@staticmethod` 直接委托给核心领域纯函数，无状态依赖、消除内存泄漏与死锁风险，100% 保持既有单测与调用签名向后兼容。
 
-#### Stage 4: 全量回归测试与端到端健康核验
+#### Stage 4: 全量回归测试与端到端健康核验 [Commit: ab93ec3]
 1. **全量回归验证**：运行全量 230 个测试用例，**230 passed**，0 失败，覆盖率与功能契约 100% 保持稳定。
 2. **清理规划文件**：删除过程性跟踪文件 `IMPLEMENTATION_PLAN.md`。
+
+---
+
+## 2026-10-02 生产环境（43.153.134.252）同步部署与线上真实缺陷根治
+
+### 用户请求
+> 下一步 -> (Recommended) 推送本地提交到远程仓库（git push origin main）并考虑更新生产服务器 -> 好了吗 -> 继续
+
+### 部署与排查过程
+1. **远程推送**：成功将本地重构与清理相关的 10 个 commits 推送至 `origin/main`（`f160815..ab93ec3`）。
+2. **线上拉取与真实环境探针发现**：
+   - SSH 登录生产服务器（`43.153.134.252`），线上 `git pull origin main` 成功拉取代码。
+   - 在线上应用日志中捕获到了一个此前本地未暴露的真实缺陷：
+     `Processing KOMAUSDT failed: cannot access local variable 'sync_repo' where it is not associated with a value`。
+   - **根本原因定位**：在 `app/services/trade_etl_service.py` 的 `extract_symbol_closed_positions` 中，`sync_repo` 仅在 `if trades:` 内部被局部赋值；当 `return_cursor_update=False`（即触发式补偿与全量补偿）且 `trades` 为空时，后续的分支访问了未绑定的局部变量 `sync_repo`。
+3. **缺陷根治与测试环境加固 [Commit: 8be869f]**：
+   - **ETL 缺陷修复**：在 `extract_symbol_closed_positions` 函数入口处统一无条件声明初始化 `sync_repo = getattr(processor, "sync_repo", None)`。
+   - **测试环境运行时隔离**：在 `tests/conftest.py` 中为 `client` fixture 注入 mock 保护，在单测执行期间显式禁用调度器启动与用户流真实 WebSocket 连接，避免单测在生产机器上有真实 `.env` 密钥时误连币安生产 API 导致限流挂起。
+4. **线上热更新与回归核验**：
+   - 代码 push 并同步线上，生产环境运行全量测试：**230 passed, 0 失败，4.12s 极速全绿**。
+   - 执行平滑重启：`systemctl restart crypto_dashboard`。
+   - 生产环境内存开销仅 **110.8MB**，WebSocket `user_stream` 秒级重连（`connected: true`）。
+   - **补偿同步自愈验证**：应用重启后，自动触发对 `KOMAUSDT` 与 `MITOUSDT` 的补偿同步，日志显示：
+     `Closed ETL stats: success=2, failed=0 ... 保存 1 条记录到数据库 ... 同步水位推进: success_symbols=2 ... 耗时 0.53s`，此前因变量未绑定而失败的补偿单彻底自愈并成功落库！
+   - **接口健康验证**：`GET /api/status`、`GET /api/crash-risk` 等核心接口均秒级响应返回。
+
 
 
 
