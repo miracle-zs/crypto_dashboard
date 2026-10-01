@@ -251,3 +251,32 @@ def test_save_open_positions_raises_when_state_load_fails(tmp_path):
 
     with pytest.raises(RuntimeError, match="加载 open_positions 历史状态失败"):
         repo.save_open_positions(rows)
+
+
+def test_get_completed_exit_order_ids(tmp_path):
+    db = Database(db_path=str(tmp_path / "test_exit_orders.db"))
+    repo = SyncRepository(db)
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO trades (symbol, entry_order_id, exit_order_id, pnl_net)
+        VALUES ('BTC', 101, '201', 50.0),
+               ('BTC', 102, '202', -10.0),
+               ('ETH', 103, '301', 20.0),
+               ('BTC', 104, 'invalid_id', 0.0)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    btc_exits = repo.get_completed_exit_order_ids("BTC")
+    assert btc_exits == {201, 202}
+
+    eth_exits = repo.get_completed_exit_order_ids("ETH")
+    assert eth_exits == {301}
+
+    sol_exits = repo.get_completed_exit_order_ids("SOL")
+    assert sol_exits == set()
+

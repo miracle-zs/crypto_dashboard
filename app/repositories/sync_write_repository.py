@@ -658,4 +658,20 @@ class SyncWriteRepository:
         finally:
             conn.close()
 
+    def get_completed_exit_order_ids(self, symbol: str) -> set[int]:
+        """查询指定交易对已完成平仓记录的所有 exit_order_id"""
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT exit_order_id FROM trades WHERE symbol = ?", (symbol.upper(),))
+            res = set()
+            for row in cursor.fetchall():
+                val = row[0]
+                if val is not None and str(val).isdigit():
+                    res.add(int(val))
+            return res
+        finally:
+            conn.close()
+
+
 

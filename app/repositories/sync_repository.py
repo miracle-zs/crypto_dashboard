@@ -153,3 +153,6 @@ class SyncRepository:
     def get_data_quality_summary(self):
         return self._read.get_data_quality_summary()
 
+    def get_completed_exit_order_ids(self, symbol: str) -> set[int]:
+        return self._write.get_completed_exit_order_ids(symbol)
+
