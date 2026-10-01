@@ -956,5 +956,44 @@
 - 保留具有长久技术参考价值的核心架构方案（第一性原理重构、暴跌风险雷达设计、365D反弹榜设计、性能重构设计与报告）。
 - 更新 `docs/README.md` 索引链接，确保文档中心索引精准无死链。
 
+---
+
+## 2026-10-02 渐进式架构解耦与冗余代码重构全流程
+
+### 用户请求
+> 需要重构吗 -> 是
+
+### 重构背景与指导方针
+拒绝推倒重来的 Big-Bang 重构，遵循 `GEMINI.md` 开发准则（小步快跑、测试先行、清晰意图、面向接口与领域组合）。按照 `IMPLEMENTATION_PLAN.md` 划分 4 个阶段，分步消除历史遗留债务：
+
+### 阶段执行与成果
+
+#### Stage 1: 收敛工作区半成品与补齐单测 [Commit: 4e189e3]
+1. **闭环平仓订单查询**：在 `SyncWriteRepository` 与 `SyncRepository` 中对齐实现 `get_completed_exit_order_ids(symbol, exit_order_ids)`，清理 `trade_etl_service.py` 中悬空的无用引用。
+2. **时区边界测试加固**：修复 `tests/test_balance_history_pruning.py` 在特定时区或跨天时间执行时的断言偏差（统一对齐当天 00:00:00 基准毫秒戳）。
+3. **单测覆盖与验证**：在 `tests/test_sync_repository_batch_ops.py` 中补充 `test_get_completed_exit_order_ids` 单元测试，全套 230 个单测全部通过。
+
+#### Stage 2: 瘦身 `app/scheduler.py` 并清理废弃反弹榜死代码 [Commit: 7ef1da2]
+1. **消除冗余死代码**：清理 `app/scheduler.py` 中 14 个已废弃的旧版逐周期反弹榜兼容方法（`_build_rebound_snapshot`, `snapshot_morning_rebound_*`, `get_rebound_*` 等），统一路由至现代榜单体系。
+2. **清理下游悬空方法**：同步清理 `app/jobs/market_snapshot_jobs.py` 与 `app/services/market_snapshot_service.py` 中未被使用的历史遗留兼容函数。
+3. **调度层大幅瘦身**：`app/scheduler.py` 从 610 行缩减至 467 行，职责高度聚焦于作业编排与生命周期管理，调度测试全绿通过。
+
+#### Stage 3: 消除 `TradeDataProcessor` 兼容外壳，统一收敛至领域服务 [Commit: 58ec32b]
+1. **API 网关标准化 (`app/services/trade_api_gateway.py`)**：
+   - 将 `fetch_klines`、`fetch_exchange_info`、`fetch_all_symbols`、`fetch_transfer_income_records` 正式收敛为领域网关函数。
+2. **行情与价格服务解耦 (`app/services/trade_price_service.py`)**：
+   - 解除 `get_price_change_from_utc_start` 与 `fetch_open_price_for_key` 对 `TradeDataProcessor` 具体实现的反向强依赖，直接对接 API 网关。
+3. **ETL 服务彻底解除反向私有调用 (`app/services/trade_etl_service.py`)**：
+   - 消除对 `processor._consume_fifo_entries`、`processor._trim_entries_to_target_qty`、`processor._build_open_position_output`、`processor.merge_same_entry_positions`、`processor.get_utc_day_start` 等私有工具的反向循环调用，直接导入 `app.core` 与 `app.services` 纯函数。
+   - 解除 `analyze_orders` 与 `get_open_positions` 在并发执行时反向通过 `processor` private 方法绕圈调用的历史反模式。
+4. **重构瘦身 `TradeDataProcessor` (`app/trade_processor.py`)**：
+   - 从 751 行缩减为 482 行，重构为纯粹、高内聚的 Facade（外观类）。
+   - 将所有工具函数转为 `@staticmethod` 直接委托给核心领域纯函数，无状态依赖、消除内存泄漏与死锁风险，100% 保持既有单测与调用签名向后兼容。
+
+#### Stage 4: 全量回归测试与端到端健康核验
+1. **全量回归验证**：运行全量 230 个测试用例，**230 passed**，0 失败，覆盖率与功能契约 100% 保持稳定。
+2. **清理规划文件**：删除过程性跟踪文件 `IMPLEMENTATION_PLAN.md`。
+
+
 
 
