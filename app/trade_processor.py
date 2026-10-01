@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Binance Futures Order Analyzer
-Analyze trading history based on orders (not individual trades)
+Binance Futures Order Analyzer & Trade Processing Facade
+Coordinates trade analysis, order fetching, matching, and export.
 """
 
-import pandas as pd
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional, Tuple
-import time
 import os
 import threading
+import time
+from typing import Dict, List, Optional, Tuple
+
 from dotenv import load_dotenv
+import pandas as pd
+
 from app.logger import logger
 from app.binance_client import BinanceFuturesRestClient
 from app.core.trade_position_utils import (
@@ -30,8 +32,12 @@ from app.core.trade_dataframe_utils import merge_same_entry_positions
 from app.services.trade_api_gateway import (
     fetch_account_balance,
     fetch_all_orders,
+    fetch_all_symbols,
+    fetch_exchange_info,
     fetch_income_history,
+    fetch_klines,
     fetch_real_positions,
+    fetch_transfer_income_records,
     fetch_user_trades,
 )
 from app.services.trade_etl_service import (
@@ -52,12 +58,11 @@ from app.services.trade_price_service import (
 )
 from app.services.trade_export_service import export_to_excel_file
 
-# 定义北京时区 UTC+8
 UTC8 = timezone(timedelta(hours=8))
 
 
 class TradeDataProcessor:
-    """Binance Order Analyzer"""
+    """Binance Futures Order Analyzer Facade"""
 
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
@@ -73,7 +78,7 @@ class TradeDataProcessor:
         self.extra_loss_income_types = self._load_extra_loss_income_types()
 
     def _load_max_workers(self) -> int:
-        raw = os.getenv('ETL_MAX_WORKERS', '2')
+        raw = os.getenv("ETL_MAX_WORKERS", "2")
         try:
             workers = int(raw)
             if workers < 1:
@@ -84,7 +89,7 @@ class TradeDataProcessor:
             return 2
 
     def _load_price_workers(self) -> int:
-        raw = os.getenv('ETL_PRICE_WORKERS', str(self.max_etl_workers))
+        raw = os.getenv("ETL_PRICE_WORKERS", str(self.max_etl_workers))
         try:
             workers = int(raw)
             if workers < 1:
@@ -96,7 +101,7 @@ class TradeDataProcessor:
 
     def _load_open_positions_workers(self) -> int:
         default_workers = max(1, self.max_etl_workers * 2)
-        raw = os.getenv('ETL_OPEN_POSITIONS_WORKERS', str(default_workers))
+        raw = os.getenv("ETL_OPEN_POSITIONS_WORKERS", str(default_workers))
         try:
             workers = int(raw)
             if workers < 1:
@@ -107,7 +112,7 @@ class TradeDataProcessor:
             return default_workers
 
     def _load_exchange_info_cache_ttl(self) -> float:
-        raw = os.getenv('ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS', '300')
+        raw = os.getenv("ETL_EXCHANGE_INFO_CACHE_TTL_SECONDS", "300")
         try:
             ttl = float(raw)
             return max(0.0, ttl)
@@ -118,9 +123,7 @@ class TradeDataProcessor:
     def _load_extra_loss_income_types(self) -> set[str]:
         raw = os.getenv("EXTRA_LOSS_INCOME_TYPES", "INSURANCE_CLEAR")
         parsed = {item.strip().upper() for item in raw.split(",") if item.strip()}
-        if not parsed:
-            return {"INSURANCE_CLEAR"}
-        return parsed
+        return parsed or {"INSURANCE_CLEAR"}
 
     def _resolve_workers(self, task_count: int, max_workers: Optional[int] = None) -> int:
         cap = self.max_etl_workers if max_workers is None else max_workers
@@ -132,35 +135,22 @@ class TradeDataProcessor:
         return BinanceFuturesRestClient(api_key=self.api_key, api_secret=self.api_secret)
 
     def _fetch_open_price_for_key(
-        self,
-        symbol: str,
-        utc_day_start_ms: int
+        self, symbol: str, utc_day_start_ms: int
     ) -> tuple[str, int, Optional[float], float]:
         return fetch_open_price_for_key_service(self, symbol=symbol, utc_day_start_ms=utc_day_start_ms)
 
     def get_recent_financial_flow(self, start_time: int) -> float:
-        """
-        Calculate the sum of Realized PnL, Commission, and Funding Fees since start_time.
-        Used to distinguish between trading PnL and Deposit/Withdrawal.
-        """
-        endpoint = '/fapi/v1/income'
-        params = {
-            'startTime': start_time,
-            'limit': 1000
-        }
-
+        """Calculate the sum of Realized PnL, Commission, and Funding Fees since start_time."""
+        endpoint = "/fapi/v1/income"
+        params = {"startTime": start_time, "limit": 1000}
         income_data = self.client.signed_get(endpoint, params)
         if not income_data:
             return 0.0
 
         flow = 0.0
         for item in income_data:
-            # TRANSFER is explicitly excluded here because we want to detect it via balance diff
-            # (or we could rely on this if it's reliable, but user asked for balance diff)
-            # We want to know how much balance change is EXPLAINED by trading.
-            if item['incomeType'] in ['REALIZED_PNL', 'COMMISSION', 'FUNDING_FEE']:
-                flow += float(item['income'])
-
+            if item.get("incomeType") in ("REALIZED_PNL", "COMMISSION", "FUNDING_FEE"):
+                flow += float(item.get("income", 0.0))
         return flow
 
     def _fetch_income_history(
@@ -171,7 +161,7 @@ class TradeDataProcessor:
         income_type: Optional[str] = None,
         fail_on_error: bool = False,
     ) -> List[Dict]:
-        """Fetch income history once in a paginated way for a time window."""
+        """Fetch income history in a paginated way for a time window."""
         client = client or self.client
         records = fetch_income_history(
             client=client,
@@ -188,66 +178,13 @@ class TradeDataProcessor:
         return records
 
     def get_transfer_income_records(self, start_time: int, end_time: Optional[int] = None) -> List[Dict]:
-        """
-        直接从 Binance income 接口拉取 TRANSFER 出入金记录。
-
-        Returns:
-            List[Dict]: 每条包含 amount/event_time_ms/asset/income_type/source_uid/description
-        """
-        if start_time is None:
-            return []
-
-        now_ms = int(time.time() * 1000)
-        until = int(end_time if end_time is not None else now_ms)
-        if start_time > until:
-            return []
-
-        records = self._fetch_income_history(
-            since=int(start_time),
-            until=until,
-            income_type='TRANSFER'
+        """Fetch TRANSFER income records via trade_api_gateway."""
+        return fetch_transfer_income_records(
+            client=self.client,
+            start_time=start_time,
+            end_time=end_time,
+            sync_repo=getattr(self, "sync_repo", None),
         )
-        if not records:
-            return []
-
-        normalized = []
-        seen = set()
-
-        for record in records:
-            income_type = str(record.get('incomeType') or '').upper()
-            if income_type != 'TRANSFER':
-                continue
-
-            try:
-                event_time_ms = int(record.get('time'))
-                amount = float(record.get('income', 0.0))
-            except (TypeError, ValueError):
-                continue
-
-            asset = str(record.get('asset') or 'USDT').upper()
-            tran_id = str(record.get('tranId') or '').strip()
-            info = str(record.get('info') or '').strip()
-            symbol = str(record.get('symbol') or '').strip().upper()
-            source_uid = (
-                f"TRANSFER:{tran_id}"
-                if tran_id
-                else f"TRANSFER:{event_time_ms}:{asset}:{amount:.8f}:{symbol}:{info}"
-            )
-            if source_uid in seen:
-                continue
-            seen.add(source_uid)
-
-            normalized.append({
-                "amount": amount,
-                "event_time_ms": event_time_ms,
-                "asset": asset,
-                "income_type": income_type,
-                "source_uid": source_uid,
-                "description": f"Binance income {income_type}{f' ({info})' if info else ''}".strip()
-            })
-
-        normalized.sort(key=lambda x: x["event_time_ms"])
-        return normalized
 
     def get_account_balance(self) -> Dict[str, float]:
         """Get USD-M Futures account balance (Margin & Wallet)."""
@@ -262,10 +199,9 @@ class TradeDataProcessor:
         client: Optional[BinanceFuturesRestClient] = None,
         fail_on_error: bool = False,
     ) -> List[Dict]:
-        """Get all orders for a symbol"""
-        client = client or self.client
+        """Get all orders for a symbol."""
         return fetch_all_orders(
-            client=client,
+            client=client or self.client,
             symbol=symbol,
             limit=limit,
             start_time=start_time,
@@ -283,9 +219,9 @@ class TradeDataProcessor:
         client: Optional[BinanceFuturesRestClient] = None,
         fail_on_error: bool = False,
     ) -> List[Dict]:
-        client = client or self.client
+        """Get account trades for a symbol."""
         return fetch_user_trades(
-            client=client,
+            client=client or self.client,
             symbol=symbol,
             limit=limit,
             start_time=start_time,
@@ -295,34 +231,25 @@ class TradeDataProcessor:
         )
 
     def get_exchange_info(self, client: Optional[BinanceFuturesRestClient] = None) -> dict:
-        """Get exchange information"""
-        client = client or self.client
-        if client is self.client:
+        """Get exchange information with optional in-memory TTL cache."""
+        active_client = client or self.client
+        if active_client is self.client:
             now = time.time()
             with self._exchange_info_lock:
                 if self._exchange_info_cache is not None and now < self._exchange_info_expires_at:
                     return self._exchange_info_cache
-        endpoint = '/fapi/v1/exchangeInfo'
-        result = client.public_get(endpoint)
-        payload = result or {}
-        if client is self.client:
+
+        payload = fetch_exchange_info(client=active_client)
+        if active_client is self.client:
             with self._exchange_info_lock:
                 self._exchange_info_cache = payload
                 self._exchange_info_expires_at = time.time() + self._exchange_info_cache_ttl_seconds
         return payload
 
     def get_all_symbols(self, client: Optional[BinanceFuturesRestClient] = None) -> List[str]:
-        """Get all USDT perpetual contract symbols"""
+        """Get all USDT perpetual contract symbols."""
         info = self.get_exchange_info(client=client)
-        if not info or 'symbols' not in info:
-            return []
-
-        symbols = []
-        for s in info['symbols']:
-            if s['contractType'] == 'PERPETUAL' and s['quoteAsset'] == 'USDT':
-                symbols.append(s['symbol'])
-
-        return symbols
+        return fetch_all_symbols(client=client or self.client, exchange_info=info)
 
     def get_kline_data(
         self,
@@ -330,36 +257,29 @@ class TradeDataProcessor:
         interval: str,
         start_time: int,
         limit: int = 1,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> List:
-        """Get kline/candlestick data"""
-        client = client or self.client
-        endpoint = '/fapi/v1/klines'
-        params = {
-            'symbol': symbol,
-            'interval': interval,
-            'startTime': start_time,
-            'limit': limit
-        }
+        """Get kline/candlestick data."""
+        return fetch_klines(
+            client=client or self.client,
+            symbol=symbol,
+            interval=interval,
+            start_time=start_time,
+            limit=limit,
+        )
 
-        result = client.public_get(endpoint, params)
-        return result or []
-
-    def get_utc_day_start(self, timestamp: int) -> int:
-        """Get UTC+0 00:00 timestamp for given timestamp"""
+    @staticmethod
+    def get_utc_day_start(timestamp: int) -> int:
+        """Get UTC+0 00:00 timestamp for given timestamp."""
         return calc_utc_day_start(timestamp)
 
     def get_price_change_from_utc_start(
         self,
         symbol: str,
         timestamp: int,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> Optional[float]:
-        """Get the opening price for the UTC day of the given timestamp
-        
-        Returns:
-            float: opening price or None if failed
-        """
+        """Get the opening price for the UTC day of the given timestamp."""
         return get_price_change_from_utc_start_service(
             self,
             symbol=symbol,
@@ -372,32 +292,28 @@ class TradeDataProcessor:
         symbol: str,
         since: int,
         until: int,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> Dict[int, float]:
-        """Get commission and funding fees for a symbol (fallback helper)."""
+        """Get commission and funding fees for a symbol."""
         records = self._fetch_income_history(since=since, until=until, client=client)
         fees_map = {}
-
         if records:
             for record in records:
-                if record.get('symbol') != symbol:
+                if record.get("symbol") != symbol:
                     continue
-                if record.get('incomeType') in ['COMMISSION', 'FUNDING_FEE']:
-                    time_ts = int(record['time'])
-                    income = float(record['income'])
-                    fees_map[time_ts] = fees_map.get(time_ts, 0) + income
-
+                if record.get("incomeType") in ("COMMISSION", "FUNDING_FEE"):
+                    time_ts = int(record["time"])
+                    income = float(record["income"])
+                    fees_map[time_ts] = fees_map.get(time_ts, 0.0) + income
         return fees_map
 
     def get_fee_totals_by_symbol(
         self,
         since: int,
         until: int,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> Dict[str, float]:
-        """
-        Batch fetch income once and aggregate commission/funding by symbol.
-        """
+        """Batch fetch income once and aggregate fees by symbol."""
         records = self._fetch_income_history(since=since, until=until, client=client)
         extra_types = getattr(self, "extra_loss_income_types", {"INSURANCE_CLEAR"})
         return aggregate_fee_totals_by_symbol(records, extra_loss_income_types=extra_types)
@@ -412,8 +328,8 @@ class TradeDataProcessor:
     def _is_liquidation_order(order: Dict) -> bool:
         return is_liquidation_order_core(order)
 
+    @staticmethod
     def match_orders_to_positions(
-        self,
         orders: List[Dict],
         symbol: str,
         fees_map: Dict[int, float] = None,
@@ -430,14 +346,15 @@ class TradeDataProcessor:
             return_open_lots=return_open_lots,
         )
 
-    def _match_position_side(self, orders: List[Dict], symbol: str, side: str) -> List[Dict]:
+    @staticmethod
+    def _match_position_side(orders: List[Dict], symbol: str, side: str) -> List[Dict]:
         return match_position_side_core(orders=orders, symbol=symbol, side=side)
 
     def get_traded_symbols(
         self,
         since: int,
         until: int,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> List[str]:
         """Get symbols that have actual trades using income history."""
         symbols_list, _fee_totals = self.get_traded_symbols_and_fee_totals(
@@ -451,15 +368,14 @@ class TradeDataProcessor:
         self,
         since: int,
         until: int,
-        client: Optional[BinanceFuturesRestClient] = None
+        client: Optional[BinanceFuturesRestClient] = None,
     ) -> tuple[List[str], Dict[str, float]]:
         """Fetch traded symbols and fee totals in one income-history pass."""
-        symbols_list, fee_totals, _activity_ranges = self.get_traded_symbols_fee_totals_and_ranges(
+        symbols_list, fee_totals, _ranges = self.get_traded_symbols_fee_totals_and_ranges(
             since=since,
             until=until,
             client=client,
         )
-
         return symbols_list, fee_totals
 
     def get_traded_symbols_fee_totals_and_ranges(
@@ -473,12 +389,10 @@ class TradeDataProcessor:
             until=until,
             client=client,
         )
-
         if symbols_list:
             logger.info(f"Found {len(symbols_list)} symbols with activity: {symbols_list}")
         else:
             logger.warning("No symbols found in income history")
-
         return symbols_list, fee_totals, activity_ranges
 
     def get_incremental_income_activity(
@@ -507,8 +421,6 @@ class TradeDataProcessor:
                 ids.append(int(record.get("tranId")))
             except (TypeError, ValueError):
                 pass
-        # A successful empty response still advances the covered time window.
-        # The configured overlap protects late-arriving records on the next run.
         cursor = {
             "last_id": max(ids) if ids else None,
             "last_time_ms": int(until),
@@ -577,17 +489,20 @@ class TradeDataProcessor:
     def _format_holding_time_cn(duration_seconds: float) -> str:
         return format_holding_time_cn(duration_seconds)
 
-    def _position_to_trade_row(self, pos: Dict, idx: int, open_price_cache: Dict[tuple[str, int], Optional[float]]) -> Dict:
+    @staticmethod
+    def _position_to_trade_row(
+        pos: Dict, idx: int, open_price_cache: Dict[tuple[str, int], Optional[float]]
+    ) -> Dict:
         return position_to_trade_row(
             pos=pos,
             idx=idx,
             open_price_cache=open_price_cache,
             utc8=UTC8,
-            get_utc_day_start=self.get_utc_day_start,
+            get_utc_day_start=calc_utc_day_start,
         )
 
+    @staticmethod
     def _build_trades_dataframe(
-        self,
         *,
         all_positions: List[Dict],
         open_price_cache: Dict[tuple[str, int], Optional[float]],
@@ -595,51 +510,55 @@ class TradeDataProcessor:
         trades_data = []
         for idx, pos in enumerate(all_positions, 1):
             try:
-                trades_data.append(self._position_to_trade_row(pos=pos, idx=idx, open_price_cache=open_price_cache))
+                trades_data.append(
+                    position_to_trade_row(
+                        pos=pos,
+                        idx=idx,
+                        open_price_cache=open_price_cache,
+                        utc8=UTC8,
+                        get_utc_day_start=calc_utc_day_start,
+                    )
+                )
                 if idx % 20 == 0:
                     logger.info(f"Processed {idx}/{len(all_positions)} positions...")
             except Exception as e:
                 logger.error(f"Parse position failed: {e}")
         return pd.DataFrame(trades_data)
 
-    def merge_same_entry_positions(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
         return merge_same_entry_positions(df)
 
     def export_to_excel(self, df: pd.DataFrame, filename: str = None):
-        """Export to Excel file"""
+        """Export analyzed trades to Excel file."""
         try:
             output_path = export_to_excel_file(df, filename=filename)
             logger.info(f"Exported to: {output_path}")
             logger.info(f"Total records: {len(df)}")
-
-            if 'PNL_Net' in df.columns:
-                pnl_before_fees = df['PNL_Before_Fees'].sum() if 'PNL_Before_Fees' in df.columns else 0
-                total_fees = df['Fees'].sum() if 'Fees' in df.columns else 0
-                pnl_net = df['PNL_Net'].sum()
-                win_count = len(df[df['PNL_Net'] > 0])
-                loss_count = len(df[df['PNL_Net'] < 0])
+            if "PNL_Net" in df.columns:
+                pnl_before_fees = df["PNL_Before_Fees"].sum() if "PNL_Before_Fees" in df.columns else 0
+                total_fees = df["Fees"].sum() if "Fees" in df.columns else 0
+                pnl_net = df["PNL_Net"].sum()
+                win_count = len(df[df["PNL_Net"] > 0])
+                loss_count = len(df[df["PNL_Net"] < 0])
                 win_rate = win_count / len(df) * 100 if len(df) > 0 else 0
-
                 logger.info(f"PNL Before Fees: {pnl_before_fees:.2f} USDT")
-                logger.info(f"Total Fees (Commission + Funding): {total_fees:.2f} USDT")
+                logger.info(f"Total Fees: {total_fees:.2f} USDT")
                 logger.info(f"Net PNL: {pnl_net:.2f} USDT")
                 logger.info(f"Win Rate: {win_rate:.2f}% ({win_count} wins / {loss_count} losses)")
-
         except Exception as e:
             logger.error(f"Export to Excel failed: {e}")
-            import traceback
-            traceback.print_exc()
 
-
-    def get_real_positions(self, client: Optional[BinanceFuturesRestClient] = None) -> Optional[Dict[str, float]]:
-        """Get actual open positions from Binance (Symbol -> NetQty)"""
+    def get_real_positions(
+        self, client: Optional[BinanceFuturesRestClient] = None
+    ) -> Optional[Dict[str, float]]:
+        """Get actual open positions from Binance (Symbol -> NetQty)."""
         active_client = client or self.client
         res = fetch_real_positions(client=active_client)
         if hasattr(active_client, "_latest_position_risk"):
             self._latest_position_risk = getattr(active_client, "_latest_position_risk")
             self._latest_position_risk_map = getattr(active_client, "_latest_position_risk_map")
         return res
-
 
     @staticmethod
     def _consume_fifo_entries(entries: List[Dict], qty_to_close: float):
@@ -654,11 +573,7 @@ class TradeDataProcessor:
         return build_open_position_output(symbol, side_str, entries, utc8=UTC8)
 
     def _extract_open_positions_for_symbol(
-        self,
-        symbol: str,
-        real_net_qty: float,
-        since: int,
-        until: int
+        self, symbol: str, real_net_qty: float, since: int, until: int
     ) -> tuple[List[Dict], float]:
         return extract_open_positions_for_symbol_service(
             self,
@@ -668,7 +583,9 @@ class TradeDataProcessor:
             until=until,
         )
 
-    def get_open_positions(self, since: int, until: int, traded_symbols: Optional[List[str]] = None) -> Optional[List[Dict]]:
+    def get_open_positions(
+        self, since: int, until: int, traded_symbols: Optional[List[str]] = None
+    ) -> Optional[List[Dict]]:
         """Get open entry orders (opened but not closed)."""
         return get_open_positions_service(
             self,
@@ -679,62 +596,52 @@ class TradeDataProcessor:
 
 
 def main():
-    """Main function"""
+    """Main CLI entry point for standalone trade analysis"""
     load_dotenv()
 
-    api_key = os.getenv('BINANCE_API_KEY')
-    api_secret = os.getenv('BINANCE_API_SECRET')
+    api_key = os.getenv("BINANCE_API_KEY")
+    api_secret = os.getenv("BINANCE_API_SECRET")
 
-    # Read time range configuration
-    start_date_str = os.getenv('START_DATE')
-    end_date_str = os.getenv('END_DATE')
-    days_to_fetch = int(os.getenv('DAYS_TO_FETCH', 30))
+    start_date_str = os.getenv("START_DATE")
+    end_date_str = os.getenv("END_DATE")
+    days_to_fetch = int(os.getenv("DAYS_TO_FETCH", 30))
 
-    # Calculate time range
     if start_date_str:
-        # Parse start date
         try:
-            start_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
-            start_dt = start_dt.replace(hour=23, minute=0, second=0, microsecond=0)
+            start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(
+                hour=23, minute=0, second=0, microsecond=0
+            )
             since = int(start_dt.timestamp() * 1000)
 
             if end_date_str:
-                # Parse end date
-                end_dt = datetime.strptime(end_date_str, '%Y-%m-%d')
-                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999000)
+                end_dt = datetime.strptime(end_date_str, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, microsecond=999000
+                )
                 until = int(end_dt.timestamp() * 1000)
                 time_range_desc = f"{start_date_str} to {end_date_str}"
             else:
                 until = int(datetime.now().timestamp() * 1000)
                 time_range_desc = f"from {start_date_str} to now"
         except ValueError as e:
-            logger.error(f"Error parsing date: {e}")
-            logger.error("Date format should be YYYY-MM-DD")
+            logger.error(f"Error parsing date: {e}. Format should be YYYY-MM-DD")
             return
     else:
-        # Use days_to_fetch
         since = int((datetime.now() - timedelta(days=days_to_fetch)).timestamp() * 1000)
         until = int(datetime.now().timestamp() * 1000)
         time_range_desc = f"Last {days_to_fetch} days"
 
     if not api_key or not api_secret:
         logger.error("Please configure API keys first!")
-        logger.error("1. Copy .env.template to .env")
-        logger.error("2. Fill in your Binance API keys in .env file")
         return
 
     logger.info("=" * 60)
     logger.info("Binance Futures Order Analyzer")
-    logger.info("Analyzing based on ORDER level (not individual trades)")
-    logger.info("=" * 60)
     logger.info(f"Query range: {time_range_desc}")
-    logger.info(f"Start timestamp: {since} ({datetime.fromtimestamp(since/1000).strftime('%Y-%m-%d %H:%M:%S')})")
-    logger.info(f"End timestamp: {until} ({datetime.fromtimestamp(until/1000).strftime('%Y-%m-%d %H:%M:%S')})")
+    logger.info(f"Start: {datetime.fromtimestamp(since/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"End: {datetime.fromtimestamp(until/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
 
     analyzer = TradeDataProcessor(api_key, api_secret)
-
-    logger.info("Note: This may take several minutes depending on trading history...")
-
     df = analyzer.analyze_orders(since=since, until=until)
 
     if df.empty:
@@ -742,7 +649,6 @@ def main():
         return
 
     analyzer.export_to_excel(df)
-
     logger.info("Done!")
 
 

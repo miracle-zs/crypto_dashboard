@@ -7,8 +7,40 @@ import pandas as pd
 
 from app.logger import logger
 from app.services.trade_income_aggregation import summarize_income_records
+from app.core.trade_position_utils import (
+    build_open_position_output,
+    consume_fifo_entries,
+    position_to_trade_row,
+    trim_entries_to_target_qty,
+)
+from app.core.trade_matching import match_orders_to_positions as match_orders_to_positions_core
+from app.core.trade_dataframe_utils import merge_same_entry_positions
+from app.services.trade_price_service import calc_utc_day_start
 
 UTC8 = timezone(timedelta(hours=8))
+
+
+def build_trades_dataframe(
+    all_positions: List[Dict],
+    open_price_cache: Dict[tuple[str, int], Optional[float]],
+) -> pd.DataFrame:
+    trades_data = []
+    for idx, pos in enumerate(all_positions, 1):
+        try:
+            trades_data.append(
+                position_to_trade_row(
+                    pos=pos,
+                    idx=idx,
+                    open_price_cache=open_price_cache,
+                    utc8=UTC8,
+                    get_utc_day_start=calc_utc_day_start,
+                )
+            )
+            if idx % 20 == 0:
+                logger.info(f"Processed {idx}/{len(all_positions)} positions...")
+        except Exception as e:
+            logger.error(f"Parse position failed: {e}")
+    return pd.DataFrame(trades_data)
 
 
 def extract_symbol_closed_positions(
@@ -188,8 +220,9 @@ def extract_symbol_closed_positions(
         except Exception as exc:
             logger.debug(f"Failed to load open lots for {symbol}: {exc}")
 
+    match_fn = getattr(processor, "match_orders_to_positions", match_orders_to_positions_core)
     try:
-        matching_res = processor.match_orders_to_positions(
+        matching_res = match_fn(
             filled_orders,
             symbol,
             fees_map,
@@ -198,7 +231,7 @@ def extract_symbol_closed_positions(
             return_open_lots=True,
         )
     except TypeError:
-        matching_res = processor.match_orders_to_positions(
+        matching_res = match_fn(
             filled_orders,
             symbol,
             fees_map,
@@ -302,7 +335,10 @@ def _collect_positions_for_symbols(
                     "return_cursor_update": True,
                 }
             )
-        return processor._extract_symbol_closed_positions(**kwargs)
+        extract_symbol_fn = getattr(processor, "_extract_symbol_closed_positions", None)
+        if extract_symbol_fn is not None:
+            return extract_symbol_fn(**kwargs)
+        return extract_symbol_closed_positions(processor, **kwargs)
 
     def _unpack(result):
         if return_cursor_updates:
@@ -379,7 +415,8 @@ def _prefetch_open_prices(
     all_positions: List[Dict],
 ) -> tuple[Dict[tuple[str, int], Optional[float]], float]:
     price_prefetch_started = time.perf_counter()
-    price_keys = sorted({(pos["symbol"], processor.get_utc_day_start(pos["entry_time"])) for pos in all_positions})
+    day_start_fn = getattr(processor, "get_utc_day_start", calc_utc_day_start)
+    price_keys = sorted({(pos["symbol"], day_start_fn(pos["entry_time"])) for pos in all_positions})
     open_price_cache: Dict[tuple[str, int], Optional[float]] = {}
     price_timings: List[tuple[str, float, bool]] = []
     daily_kline_repo = getattr(processor, "daily_kline_repo", None)
@@ -537,12 +574,16 @@ def analyze_orders(
     open_price_cache, price_prefetch_elapsed = _prefetch_open_prices(processor, all_positions=all_positions)
 
     transform_started = time.perf_counter()
-    df = processor._build_trades_dataframe(all_positions=all_positions, open_price_cache=open_price_cache)
+    if hasattr(processor, "_build_trades_dataframe"):
+        df = processor._build_trades_dataframe(all_positions=all_positions, open_price_cache=open_price_cache)
+    else:
+        df = build_trades_dataframe(all_positions=all_positions, open_price_cache=open_price_cache)
     df = df.sort_values("Entry_Time", ascending=True)
 
     logger.info(f"Successfully parsed {len(df)} positions")
     logger.info("Post-processing: Merging positions with same entry time...")
-    df = processor.merge_same_entry_positions(df)
+    merge_fn = getattr(processor, "merge_same_entry_positions", merge_same_entry_positions)
+    df = merge_fn(df)
     logger.info(f"After merging: {len(df)} positions")
     transform_elapsed = time.perf_counter() - transform_started
     logger.info(
@@ -645,12 +686,12 @@ def extract_open_positions_for_symbol(
         if position_side == "LONG" and side == "BUY":
             long_entries.append({"price": price, "qty": qty, "time": order_time, "order_id": order_id})
         elif position_side == "LONG" and side == "SELL":
-            processor._consume_fifo_entries(long_entries, qty)
+            consume_fifo_entries(long_entries, qty)
 
         if position_side == "SHORT" and side == "SELL":
             short_entries.append({"price": price, "qty": qty, "time": order_time, "order_id": order_id})
         elif position_side == "SHORT" and side == "BUY":
-            processor._consume_fifo_entries(short_entries, qty)
+            consume_fifo_entries(short_entries, qty)
 
     final_entries = []
     if real_net_qty > 0:
@@ -660,7 +701,7 @@ def extract_open_positions_for_symbol(
         if abs(calculated_qty - real_net_qty) > 0.0001:
             logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc={calculated_qty}. Adjusting to Real.")
             if calculated_qty > real_net_qty:
-                processor._trim_entries_to_target_qty(long_entries, real_net_qty)
+                trim_entries_to_target_qty(long_entries, real_net_qty)
         final_entries = long_entries
     elif real_net_qty < 0:
         if one_way_entries:
@@ -670,14 +711,14 @@ def extract_open_positions_for_symbol(
         if abs(calculated_qty - abs_real_qty) > 0.0001:
             logger.warning(f"{symbol} Qty Mismatch: Real={real_net_qty}, Calc=-{calculated_qty}. Adjusting to Real.")
             if calculated_qty > abs_real_qty:
-                processor._trim_entries_to_target_qty(short_entries, abs_real_qty)
+                trim_entries_to_target_qty(short_entries, abs_real_qty)
         final_entries = short_entries
 
     side_str = "LONG" if real_net_qty > 0 else "SHORT"
-    output = processor._build_open_position_output(symbol, side_str, final_entries)
+    tz = getattr(processor, "UTC8", UTC8)
+    output = build_open_position_output(symbol, side_str, final_entries, utc8=tz)
     if not output and abs(real_net_qty) > 0.0001:
         base = symbol[:-4] if symbol.endswith("USDT") else symbol
-        tz = getattr(processor, "UTC8", UTC8)
         dt = datetime.fromtimestamp(since / 1000, tz=tz)
         entry_price = 0.0
         raw_risk = getattr(processor, "_latest_position_risk_map", {})
@@ -748,10 +789,20 @@ def get_open_positions(
     failure_count = 0
     symbol_timings: List[tuple[str, float, int]] = []
 
+    extract_open_fn = getattr(processor, "_extract_open_positions_for_symbol", None)
+    if extract_open_fn is None:
+        extract_open_fn = lambda symbol, real_net_qty, since, until: extract_open_positions_for_symbol(
+            processor,
+            symbol=symbol,
+            real_net_qty=real_net_qty,
+            since=since,
+            until=until,
+        )
+
     if worker_count == 1:
         for symbol, amt in active_items:
             try:
-                positions, elapsed = processor._extract_open_positions_for_symbol(
+                positions, elapsed = extract_open_fn(
                     symbol=symbol,
                     real_net_qty=amt,
                     since=since,
@@ -775,7 +826,7 @@ def get_open_positions(
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_map = {
             executor.submit(
-                processor._extract_open_positions_for_symbol,
+                extract_open_fn,
                 symbol=symbol,
                 real_net_qty=amt,
                 since=since,

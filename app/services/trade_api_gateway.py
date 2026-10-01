@@ -309,3 +309,116 @@ def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:
     except Exception as exc:
         logger.error(f"Failed to fetch position risk: {exc}")
         return None
+
+
+def fetch_klines(
+    *,
+    client,
+    symbol: str,
+    interval: str,
+    start_time: int,
+    limit: int = 1,
+) -> List:
+    """Fetch kline/candlestick data from Binance Futures."""
+    endpoint = "/fapi/v1/klines"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "startTime": start_time,
+        "limit": limit,
+    }
+    result = client.public_get(endpoint, params)
+    return result or []
+
+
+def fetch_exchange_info(*, client) -> dict:
+    """Fetch exchange info from Binance Futures."""
+    endpoint = "/fapi/v1/exchangeInfo"
+    result = client.public_get(endpoint)
+    return result or {}
+
+
+def fetch_all_symbols(*, client, exchange_info: Optional[dict] = None) -> List[str]:
+    """Fetch all USDT perpetual contract symbols."""
+    info = exchange_info if exchange_info is not None else fetch_exchange_info(client=client)
+    if not info or "symbols" not in info:
+        return []
+
+    symbols = []
+    for s in info.get("symbols", []):
+        if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == "USDT":
+            symbol = s.get("symbol")
+            if symbol:
+                symbols.append(symbol)
+    return symbols
+
+
+def fetch_transfer_income_records(
+    *,
+    client,
+    start_time: int,
+    end_time: Optional[int] = None,
+    sync_repo=None,
+) -> List[Dict]:
+    """Fetch TRANSFER income records from Binance Futures."""
+    if start_time is None:
+        return []
+
+    now_ms = int(time.time() * 1000)
+    until = int(end_time if end_time is not None else now_ms)
+    if start_time > until:
+        return []
+
+    records = fetch_income_history(
+        client=client,
+        since=int(start_time),
+        until=until,
+        income_type="TRANSFER",
+    )
+    if not records:
+        return []
+
+    if sync_repo is not None and hasattr(sync_repo, "save_income_facts"):
+        try:
+            sync_repo.save_income_facts(records)
+        except Exception as exc:
+            logger.warning(f"Failed to persist transfer income facts: {exc}")
+
+    normalized = []
+    seen = set()
+
+    for record in records:
+        income_type = str(record.get("incomeType") or "").upper()
+        if income_type != "TRANSFER":
+            continue
+
+        try:
+            event_time_ms = int(record.get("time"))
+            amount = float(record.get("income", 0.0))
+        except (TypeError, ValueError):
+            continue
+
+        asset = str(record.get("asset") or "USDT").upper()
+        tran_id = str(record.get("tranId") or "").strip()
+        info = str(record.get("info") or "").strip()
+        symbol = str(record.get("symbol") or "").strip().upper()
+        source_uid = (
+            f"TRANSFER:{tran_id}"
+            if tran_id
+            else f"TRANSFER:{event_time_ms}:{asset}:{amount:.8f}:{symbol}:{info}"
+        )
+        if source_uid in seen:
+            continue
+        seen.add(source_uid)
+
+        normalized.append({
+            "amount": amount,
+            "event_time_ms": event_time_ms,
+            "asset": asset,
+            "income_type": income_type,
+            "source_uid": source_uid,
+            "description": f"Binance income {income_type}{f' ({info})' if info else ''}".strip(),
+        })
+
+    normalized.sort(key=lambda x: x["event_time_ms"])
+    return normalized

@@ -3,6 +3,7 @@ import time
 from typing import Optional
 
 from app.binance_client import BinanceFuturesRestClient
+from app.services.trade_api_gateway import fetch_klines
 
 
 def calc_utc_day_start(timestamp: int) -> int:
@@ -20,7 +21,16 @@ def get_price_change_from_utc_start(
 ) -> Optional[float]:
     try:
         day_start = calc_utc_day_start(timestamp)
-        kline_start = processor.get_kline_data(symbol, "1h", day_start, 1, client=client)
+        if hasattr(processor, "get_kline_data"):
+            kline_start = processor.get_kline_data(symbol, "1h", day_start, 1, client=client)
+        else:
+            kline_start = fetch_klines(
+                client=client or getattr(processor, "client", None),
+                symbol=symbol,
+                interval="1h",
+                start_time=day_start,
+                limit=1,
+            )
         if not kline_start:
             return None
         return float(kline_start[0][1])
@@ -35,15 +45,28 @@ def fetch_open_price_for_key(
     utc_day_start_ms: int,
 ) -> tuple[str, int, Optional[float], float]:
     started_at = time.perf_counter()
-    worker_client = processor._create_worker_client()
+    worker_client = (
+        processor._create_worker_client()
+        if hasattr(processor, "_create_worker_client")
+        else getattr(processor, "client", None)
+    )
     try:
-        kline_start = processor.get_kline_data(
-            symbol=symbol,
-            interval="1h",
-            start_time=utc_day_start_ms,
-            limit=1,
-            client=worker_client,
-        )
+        if hasattr(processor, "get_kline_data"):
+            kline_start = processor.get_kline_data(
+                symbol=symbol,
+                interval="1h",
+                start_time=utc_day_start_ms,
+                limit=1,
+                client=worker_client,
+            )
+        else:
+            kline_start = fetch_klines(
+                client=worker_client,
+                symbol=symbol,
+                interval="1h",
+                start_time=utc_day_start_ms,
+                limit=1,
+            )
         if not kline_start:
             return symbol, utc_day_start_ms, None, time.perf_counter() - started_at
         open_price = float(kline_start[0][1])
