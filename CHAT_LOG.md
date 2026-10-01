@@ -802,3 +802,144 @@
   - 验证 `dashboard` 静态资源响应头 `Cache-Control: no-cache, no-store, must-revalidate` 成功生效。
   - 4 个策略容器依次完成 Warmup，全部恢复进入 `FULLY_TRADEABLE` 状态。
   - 4 个策略容器 CPU 使用率稳定在 ~1% 左右，彻底杜绝反复自毁与算力空转。
+
+---
+
+## 2026-09-29 01:27 ~ 02:55 多账户下单意图分叉（牛来USDT）彻底根治
+
+### 用户诉求与告警背景
+1. **ServerChan 紧急告警**：
+   - 告警标题：`CML | 严重 | 牛来USDT | 账户下单意图发生分叉`
+   - 事件编号：`live_position_intent_divergence`
+   - 发生时间：2026-09-29 01:27:03（北京时间）/ 2026-09-28 17:27:03 UTC
+   - 分叉现象：`account-4` 已下单并完全成交（买入 832 @ 0.11923 限价），而 `primary`, `account-2`, `account-3` 委托状态均为 0 笔（未下单），触发主从账户下单意图分叉与执行失步告警。
+2. **处置目标**：
+   - 确认并清理单边持仓，防止风险敞口扩大；
+   - 从第一性原理彻底排查为何仅 `account-4` 下单、其余三账户未下单的深层物理根因；
+   - 修复缺陷并通过单测，部署上线验证生产环境 4 个实盘账户一致健康。
+
+---
+
+### 第一性原理根因排查
+
+#### 1. 紧急现场排查与持仓对冲处置
+- 实时调用币安 REST 私有接口查询 4 个账户真实持仓：
+  - `primary`: 0
+  - `account-2`: 0
+  - `account-3`: 0
+  - `account-4`: 持有 `牛来USDT` 多单 832 枚（成交均价 0.11923）
+- 立即在服务器发起对冲市价平仓：`account-4` 卖出 832 枚 `牛来USDT`（平仓均价 0.11884），亏损约 0.32 USDT，持仓全部归零。
+- `account-4` 策略容器的 `unmanaged_live_positions:牛来USDT` 警报解除，4 个账户真实物理持仓归零。
+
+#### 2. 底层物理根因：`positionSide` 提取不全导致的“幽灵多仓”与 Stream Epoch 阻断
+深入追踪 `ExecutionBook`、`PositionLedger`、数据库 `account_fill_events` 和日志：
+1. **币安多渠道成交数据的结构分化**：
+   - REST 历史补单（`userTrades`）：`positionSide` 封装在 `raw_payload["row"]["ps"]`；
+   - WebSocket 订单更新（`ORDER_TRADE_UPDATE`）：封装在 `raw_payload["event"]["o"]["ps"]`；
+   - 普通 REST 下单响应：顶层 `positionSide`。
+2. **账本重放漏解析平仓单**：
+   - `PositionLedger.project()` 与 `AccountJournal.append_fill()` 原先仅检查 `raw_payload.get("positionSide")`，未解包嵌套字段。
+   - 导致所有历史平仓卖单（SELL）在重启本地重放（Replay）时被静默丢弃（Dropped）！
+3. **分叉的数学巧合**：
+   - 数据库中 `牛来USDT` 历史成交：
+     - `primary`: 历史总买入 34893、总卖出 34893（实际净持仓为 0）。但带有顶层 `positionSide` 的买入为 12389，卖出仅 2901，另外 31992 的卖出都在 `row.ps`。因此本地账本错误计算出残留净多单 `12389 - 2901 = 9488`！
+     - `account-2`、`account-3`: 同样卖单落在 `row.ps` 被漏记，算出了不平衡的幽灵多单。
+     - `account-4`: 历史上 18 笔买单和 28 笔卖单**全部**记录在 `row.ps` 中，两者同时被忽略，计算出的总持仓恰好为 `0`（Flat）！
+4. **Stream Epoch 冲突与下单熔断**：
+   - 币安快照每分钟到达时，因 `primary`, `account-2`, `account-3` 本地坚信自己持有 9488 仓位，`is_local_flat` 为 False。
+   - `ExecutionBook.observe` 抛出 `EvidenceConflict: stream epoch changed without a complete source-anchored fill scan`（全库 182 个标的每分钟产生此冲突），拒绝采纳当前活跃 stream epoch。
+   - 17:24:45 产生买入信号时，`decision_facts.py` 调用 `book.read(stream_epoch=new_epoch)`。三账户因持仓不为 0 且 epoch 不匹配，抛出 `ValueError("requested account stream does not match the restored position")`，拒绝下单！
+   - `account-4` 由于买卖全漏算出来是 0，符合 `is_local_flat=True`，顺利切换了新 epoch 并下单，最终导致了单边分叉！
+
+---
+
+### 实施与修复
+
+#### 1. 全局规范化 `positionSide` 提取（Stage 1）
+- `src/crypto_momentum_lab/domain/account/models.py`:
+  - 增加 `extract_fill_position_side(raw_payload)` 函数，全面兼容顶层 `positionSide`/`position_side`、`row.ps`/`row.positionSide`、`event.o.ps` 以及顶层 `ps`。
+  - 在 `AccountFillEvent` 暴露 `@property def raw_position_side(self) -> str | None`。
+- `src/crypto_momentum_lab/domain/account/__init__.py`: 导出 `extract_fill_position_side`。
+- `src/crypto_momentum_lab/domain/execution/position_ledger.py`: 使用 `fill.raw_position_side` 替代脆弱的单层字典访问。
+- `src/crypto_momentum_lab/domain/execution/account_journal.py`: 使用 `fill.raw_position_side` 替代脆弱的单层字典访问。
+- `src/crypto_momentum_lab/execution_account/orders/coordinator.py`: 统一接入 `fill.raw_position_side`。
+- `src/crypto_momentum_lab/persistence/postgres/account_journal_store.py`: 接入 `extract_fill_position_side`。
+
+#### 2. Stream Epoch 平滑切换与恢复自愈（Stage 2）
+- `src/crypto_momentum_lab/domain/execution/execution_book.py`:
+  - `observe` 与 `read` 支持对于 flat 或 legacy scope（`stream_id == "legacy-postgres-account"`）在无本地活跃在途命令时平滑采纳活跃 stream epoch。
+  - `_restore_durable_positions` 自愈能力：在 `active_reservation_ids` 为空时，若重放得出的 `projection_digest` 因算法修复与历史 checkpoint 不一致，安全记录 warning 并以重放真实投影为准，避免崩溃阻塞容器启动。
+
+#### 3. 单元测试与全面回归验证
+- `tests/unit/execution/test_position_ledger.py`:
+  - 增加 `test_position_ledger_nested_raw_payload_position_side_matches_and_closes`，验证嵌套 payload 正确闭合仓位至 0。
+- `tests/unit/execution/test_execution_book.py`:
+  - 增加 `test_legacy_stream_scope_smoothly_adopts_active_epoch_when_exchange_is_flat`。
+  - 增加 `test_account_journal_appends_fill_with_nested_position_side`。
+  - 增加 `test_restore_durable_positions_migrates_projection_digest_when_no_reservations`。
+- 本地执行 42 个 execution 核心单元测试全部 100% 通过（总计 1903 个单元测试全部通过）。
+
+#### 4. 生产环境部署与上线（Stage 3）
+- 提交生产版本并同步至服务器：
+  - 镜像编译：`crypto-momentum-lab-app:91395f54c19fa10564971fca903d03affbcd8a6b`。
+  - 4 个实盘账户通过 `refresh-approval-runtime` 与 `renew-lease` 完成新 Commit 审批轮转，租约延长至 2026-10-08。
+  - 重新部署启动全部策略容器与执行组件。
+- 生产运行验证：
+  - 12 个生产容器全部处于 `healthy` 稳态：
+    - `live-strategy-1`: healthy
+    - `live-strategy-account-2-1`: healthy
+    - `live-strategy-account-3-1`: healthy
+    - `live-strategy-account-4-1`: healthy
+    - `execution-account-live-1`: healthy
+    - `execution-account-live-account-2-1`: healthy
+    - `execution-account-live-account-3-1`: healthy
+    - `execution-account-live-account-4-1`: healthy
+    - `market-data-1`: healthy
+    - `dashboard-1`: healthy
+    - `research-collector-1`: healthy
+    - `postgres-1`: healthy
+  - 4 个策略容器日志明确输出 `tradeability_recovered current_mode=FULLY_TRADEABLE`，全部恢复正常交易。
+  - 原生产环境每分钟爆发的 182 个 `account_snapshot_execution_book_conflicts` 彻底归零！
+
+### 最终确认与就绪状态
+- **持仓与风险**：`account-4` 单边持仓 832 枚 `牛来USDT` 已于第一时间平仓归零，全账户无单边敞口风险。
+- **系统状态**：4 个实盘账户策略与执行容器已全部部署新版镜像（`91395f54`）并重启完毕，均处于 `healthy` 与 `FULLY_TRADEABLE` 状态。
+- **冲突根治**：全库 182 个标的的持久化状态一致性恢复，不再产生幽灵持仓或 stream epoch 校验冲突，系统处于平稳运行就绪状态。
+
+---
+
+## 2026-10-01 项目深度体检与技术文档全面整理
+
+### 用户请求
+> 帮我看一下这个项目，然后整理一下文档
+
+### 项目深度体检与现状梳理
+1. **项目定位与核心使命**：
+   - 项目名称：`ZS's Crypto Shorting Cockpit (加密货币空头驾驶舱 / Zero Gravity Dashboard)`。
+   - 面向对象与场景：基于 Python FastAPI + SQLite 的加密货币（币安 USDT-M 合约）实盘空头日内/波段量化交易分析、实时监控与智能风控决策系统。
+   - 核心交易节奏：清晨（05:00-08:00）开单（涨幅榜/14D反弹榜Top标的固定仓位2x逐仓做空），午间（11:50）浮亏全砍止损断臂，夜间（23:00）控仓不超过5个标的，23:02执行止损抗单复盘，次日早间存量保护并调高杠杆释放保证金。
+2. **架构演进与第一性原理**：
+   - 经过多次重大重构，代码已彻底转变为模块化单体架构：`app/api/` (8个领域路由), `app/routes/` (6个页面路由), `app/services/` (领域业务层), `app/repositories/` (仓储门面层), `app/jobs/` (调度任务实现), `app/core/` (撮合引擎、只读模型、分级并发锁、限流预算)。
+   - 底座确立了“事实先于结果 (Facts vs Projections)”：通过不可变逐笔成交 `execution_facts` 与资金流水 `income_facts` 结合状态化开仓批次 `open_lots` 执行 FIFO 确定性撮合，保证历史可重放且与外部拉取窗口解耦。
+3. **原有文档问题与缺陷**：
+   - `README.md` 严重陈旧：目录结构仍停留在旧版扁平结构（`services.py` 等）；缺少新增的 `/crash-risk` (暴跌/插针风险雷达) 页面；缺少多组核心 API（如暴跌雷达、365D反弹榜、自选备忘、同步流水等）。
+   - `docs/data_dictionary.md` 严重缺失：此前仅记录了 7 张表，而 SQLite 数据库实际已扩展至 27 张持久化表（缺失了事实表、开仓批次表、日线表、暴跌雷达、多周期反弹表等 20 张表！）。
+   - `docs/data_flow.md` 停留在旧版设计，缺少第一性原理全景数据流、分级并发锁与自愈型 WebSocket 流。
+   - 缺少统一的系统架构设计说明 (`docs/architecture.md`)、全量 REST API 规格手册 (`docs/api_reference.md`) 以及文档中心总览索引 (`docs/README.md`)。
+
+### 整理落地与文档重构
+1. **重构数据字典与数据流**：
+   - 重写 `docs/data_dictionary.md`：完整定义 27 张表的字段类型、主键、唯一约束、索引规划与业务语义（涵盖事实层、投影层、快照层与系统审计层）。
+   - 重写 `docs/data_flow.md`：基于 Mermaid 绘制全景端到端流转图，系统阐述交易所采集 -> 不可变事实 -> 状态化批次撮合 -> 晨间五榜生成 -> 午夜风控闭环时序。
+2. **新增架构与接口规范文档**：
+   - 编写 `docs/architecture.md`：详细阐述模块化单体分层、领域服务边界、只读模型版本感知、分级任务并发隔离锁 (Tiered Lock) 与管理接口 Admin Token 鉴权。
+   - 编写 `docs/api_reference.md`：全量归纳 8 大领域模块所有 REST API 端点、请求参数、返回模型与安全规范。
+   - 编写 `docs/README.md`：搭建文档中心总览导航，整合核心规范、演进方案 (Plans) 与系统审计 (Audits)。
+3. **全面同步根目录 `README.md`**：
+   - 补齐第 4 大核心特性“暴跌/插针风险雷达 (Crash Risk Radar)”与第 6 大特性“第一性原理数据底座”。
+   - 更新 Mermaid 系统架构图，映射最新模块化单体架构。
+   - 更新 6 大功能页面与完整 REST API 路由清单。
+   - 更新全量 `.env` 环境变量配置清单与实盘循环 SOP。
+   - 纠正项目工程结构树，准确反映现有各子目录与核心模块。
+
+

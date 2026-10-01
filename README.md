@@ -7,7 +7,18 @@
 
 > **"Slow is Smooth, Smooth is Fast." (慢就是快)**
 >
-> 这是一个为量化交易者打造的、**移动端优先**的专业级加密货币交易分析与实时监控系统。它不仅仅是一个记账工具，更是一个集成了机构级风控标准、绩效归因分析和实时战场监控的完整解决方案。
+> 这是一个专为加密货币（币安 USDT-M 合约）量化交易者打造的、**移动端优先**的专业级交易分析、实时监控与智能风控决策系统。系统基于“第一性原理 (Facts vs Projections)”构建，集成了机构级风控协议、确定性历史账本、实时战场监控与每日市场信号快照。
+
+---
+
+## 📚 项目技术文档中心
+
+项目提供了完备的工程设计与规格文档，详细内容请参阅 [docs/ 目录](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/README.md)：
+- 🏛️ [系统架构设计 (Architecture)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/architecture.md)：模块化单体分层、领域服务编排、第一性原理账本与分级隔离锁。
+- 🌊 [全景数据流设计 (Data Flow)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/data_flow.md)：端到端数据采集、状态化批次撮合、07:00 晨间五榜与风控闭环时序。
+- 📖 [全量数据字典 (Data Dictionary)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/data_dictionary.md)：全库 27 张持久化表结构、字段含义、主键约束与索引规划。
+- 🔌 [REST API 规格手册 (API Reference)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/api_reference.md)：8 大业务领域所有 REST API 端点规格、参数与权限说明。
+- 📜 [系统审计与演进提案 (Audits & Plans)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/README.md#架构演进与设计提案-plans)：第一性原理重构、暴跌风险雷达设计与历史审计验证报告。
 
 ---
 
@@ -18,78 +29,84 @@
 - **机构级绩效评估**: 自动计算 **夏普比率 (Sharpe)**、**卡玛比率 (Calmar)**、**索提诺比率 (Sortino)** 和 **系统质量数 (SQN)**。
 - **资金管理辅助**: 内置 **凯利公式 (Kelly Criterion)** 建议，基于历史胜赔率动态推荐最佳仓位比例。
 - **可视化报表**:
-  - **权益曲线**: 精确的累计净值走势（已剔除充提币影响）。
-  - **盈亏分布**: 散点图分析持仓时间与盈亏的关系（Duration Analysis）。
+  - **权益曲线**: 精确的累计净值走势（自动剔除充提币出入金影响，支持百万点等步长下采样秒开）。
+  - **持仓时长与盈亏分布**: 散点图分析持仓时间与盈亏的关系（Duration Analysis）。
   - **时段分析**: 24小时盈亏热力图，识别最佳交易时段。
-  - **红黑榜**: 自动统计各币种的胜率与贡献度。
+  - **红黑榜**: 自动统计各币种的胜率、盈亏贡献度与交易频次。
+  - **月度目标追踪**: 实时对比月度收益目标与达成进度条。
 
 ### 📱 2. 实时战场监控 (Live Monitor)
 专为多屏协同和移动办公设计的实时监控台：
 - **秒级同步**: 并行数据加载架构，确保价格、持仓和账户余额毫秒级刷新。
 - **移动端适配**: 独创的 **"Card View" (卡片视图)**，在手机端自动将宽表格转换为卡片，关键信息（uPnL, ROI, 持仓时长）一目了然。
-- **全景风险视图**: 实时计算 **真实杠杆率 (Real Leverage)**、**风险敞口 (Exposure)** 和 **未结盈亏**。
+- **全景风险视图**: 实时计算 **真实杠杆率 (Real Leverage)**、**净风险敞口 (Net Exposure)** 和 **持仓集中度 (HHI / Top3)**。
+- **自选与备注 (Watch Notes)**: 支持一键标记自选观察标的，并持久化保存。
 
-### 🛡️ 3. 智能风控协议 (Risk Protocols)
+### 🛡️ 3. 智能风控与复盘协议 (Risk Protocols)
 系统内置自动化风控规则，时刻监控账户健康：
 - **回撤熔断**: 实时监控当前回撤 (Drawdown)，配合账户健康度评分系统 (Health Score)。
 - **僵尸仓位预警**: 自动标记持仓超过 **48小时** 的短线订单 (Stale Position)。
-- **过夜风险提示**: 监控每日 23:00 后的持仓符号数量，防止过度分散。
+- **过夜风险提示**: 监控每日 23:00 后的持仓符号数量，防止过度分散（默认不超过 5 个）。
 - **连败保护**: 监控近期连续亏损笔数，触发“熔断”建议。
-- **午间浮亏快照**: 每天 **11:50 (UTC+8)** 记录“若全部止损”的预计亏损、占余额比例及逐币种快照。
-- **夜间止损复盘**: 每天 **23:02 (UTC+8, 可配)** 复盘午间建议币种，统计“若不砍仓”到夜间的实际亏损与差值，支持按天对比。
+- **午间浮亏快照**: 每天 **11:50 (UTC+8)** 自动记录“若全部止损”的预计亏损、占余额比例及逐币种快照。
+- **夜间止损复盘**: 每天 **23:02 (UTC+8)** 自动复盘午间建议标的，量化统计“若不砍仓抗单”到夜间的实际亏损与基线差值，支持近 14 天逐币种明细对比下钻。
 
-### 🏆 4. 每日涨幅榜快照与复盘 (Leaderboard Snapshot)
-- **共享日线缓存**: **06:15 (UTC+8)** 以滚动 60 秒 200 权重上限回填/增量更新 `daily_klines`；首次读取 365 根，之后每币只补最新 2 根。
-- **一次生成五榜**: **07:00 (UTC+8)** 只请求一次全市场 ticker，再从同一份本地数据生成涨跌幅榜及 14D / 30D / 60D / 365D 反弹榜。
-- **快照通知**: **07:30 (UTC+8)** 直接读取已保存快照发送通知，不触发历史或逐币 K 线请求。
-- **历史回看**: 支持按日期查看历史快照（今天、昨天、近7天等），便于盘前/盘后复盘。
-- **持仓联动**: 榜单会标记“已持仓”币种，帮助快速识别“榜上标的 vs 当前仓位”的重叠。
-- **非实时设计**: 榜单页默认读取数据库快照，不依赖实时计算，稳定且可追溯。
-- **多周期反弹榜**: 14D 保留 `rebound-7d` 兼容路径，四个窗口的计算阶段均为零 REST 请求。
+### ⚡ 4. 暴跌/插针风险雷达 (Crash Risk Radar)
+基于涨幅榜衍生计算的多因子崩盘风险感知模块：
+- **三级风险阶段**: 自动判定标的处于 `HIGH_RISK` (高危)、`WARNING` (预警) 还是 `WATCH` (观察)。
+- **多维度评分**: 综合评估极端涨幅偏离、持仓量 (OI) 异动衰减、多周期技术面过热等多维驱动因子。
 
-### ⚡ 5. 极致性能与体验
-- **骨架屏加载 (Skeleton UI)**: 拒绝白屏和跳动，提供原生 App 般的流畅加载体验。
-- **暗黑模式 (Dark Mode)**: 深度适配的 OLED 黑夜模式，不仅护眼，更是交易员的信仰。
-- **本地化架构**: 核心数据存储于本地 SQLite，不依赖第三方云服务，数据绝对私有安全。
+### 🏆 5. 每日涨幅榜快照与复盘 (Market Leaderboard & Rebound)
+- **共享日线缓存**: **06:15 (UTC+8)** 增量回填 `daily_klines`，首次补齐 365 根，后续每日仅拉最新 1~2 根完结日线。
+- **一次生成五榜**: **07:00 (UTC+8)** 仅请求一次全市场 Ticker，纯本地零网络开销生成：
+  1. 24H 涨跌幅榜 (`leaderboard`)
+  2. 14D 反弹榜 (`rebound-7d`)
+  3. 30D 反弹榜 (`rebound-30d`)
+  4. 60D 反弹榜 (`rebound-60d`)
+  5. 365D 年化反弹榜 (`rebound-365d`)
+- **快照极速通知**: **07:30 (UTC+8)** 直接读取已保存快照推送微信/Server酱通知，不触发外部网络请求。
+- **持仓联动与回看**: 支持历史任意日期快照回溯，并自动标记“已持仓”标的。
+
+### 💎 6. 第一性原理数据底座与极致性能
+- **不可变事实账本**: 逐笔成交 (`execution_facts`) 与资金流水 (`income_facts`) 作为底层事实持久化，计算与采集解耦，支持任意时点无损重放。
+- **状态化批次撮合**: 持久化开仓在途批次 (`open_lots`)，采用 FIFO 撮合引擎，彻底解决跨窗口上下文丢失与双向持仓覆盖。
+- **骨架屏与长缓存**: 静态资源长缓存 + 骨架屏加载，拒绝白屏跳动；纯原生无框架依赖，秒级极速响应。
 
 ---
 
 ## 🛠️ 系统架构
 
-本项目采用 **前后端分离** 的设计思想，基于 Python 生态构建：
+本项目采用**模块化单体 (Modular Monolith)** 分层设计：
 
 ```mermaid
 graph TD
-    User["用户 (PC/Mobile)"] -->|"HTTP/WebSocket"| Nginx["Nginx / Uvicorn"]
-    Nginx --> FastAPI["FastAPI 后端"]
+    User["用户 (PC / Mobile)"] -->|"HTTP / REST"| FastAPI["FastAPI 路由聚合层 (app/api + app/routes)"]
+    Admin["管理操作"] -->|"Token 鉴权"| Security["Security 拦截器 (DASHBOARD_ADMIN_TOKEN)"]
+    Security --> FastAPI
 
-    subgraph "Core System"
-        FastAPI -->|"Query"| SQLite[("SQLite 数据库")]
-        Scheduler["APScheduler 定时任务"] -->|"Write"| SQLite
-        Scheduler -->|"REST API"| Binance["Binance Exchange"]
+    subgraph "Application Core"
+        FastAPI --> Services["领域服务层 (app/services)"]
+        Services --> Core["核心算法/撮合/读模型/分级锁 (app/core)"]
+        Services --> Repositories["仓储门面层 (app/repositories)"]
+        Scheduler["APScheduler 定时任务 (app/jobs)"] --> Services
     end
 
-    subgraph "Frontend"
-        HTML["Jinja2 Templates"]
-        JS["Vanilla JS + ApexCharts"]
-        CSS["TailwindCSS"]
+    subgraph "Persistence (Local SQLite)"
+        Repositories --> Facts[("不可变事实: execution_facts / income_facts / daily_klines")]
+        Repositories --> Projections[("业务投影: trades / open_lots / open_positions / snapshots")]
     end
 
-    FastAPI -->|"Render"| HTML
-    HTML --> JS
-    HTML --> CSS
+    subgraph "External Integrations"
+        Binance_REST["Binance Futures REST API"]
+        Binance_WS["Binance User Data Stream (WebSocket)"]
+        ServerChan["Server酱 消息通知"]
+        
+        Scheduler -->|"预算限流请求"| Binance_REST
+        Binance_WS -->|"自动保活与重连"| UserStream["UserStream 守护进程 (app/user_stream)"]
+        UserStream --> Repositories
+        Scheduler --> ServerChan
+    end
 ```
-
-- **后端**: FastAPI (高性能异步框架) + APScheduler (后台调度)
-- **数据层**: Pandas (清洗计算) + SQLite (持久化存储)
-- **前端**: 原生 JavaScript (无框架依赖) + Tailwind CSS + ApexCharts.js
-
-### Refactor Layers (Zero-Behavior)
-- `app/api/`: API 路由聚合层（按领域拆分）
-- `app/services/`: 业务聚合层（保持接口行为不变）
-- `app/repositories/`: 数据访问门面层（对 `Database` 做兼容封装）
-- `app/jobs/`: 调度任务实现层（由 `scheduler.py` 统一注册）
-- `app/core/`: 通用依赖与时间工具
 
 ---
 
@@ -106,252 +123,215 @@ git clone <repository_url>
 cd crypto_dashboard
 
 # 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
 ```
 
-开发测试（TDD）：
-```bash
-python -m pytest
-```
-
 ### 2. 配置
-复制环境变量模板并填入您的 API Key：
+复制环境变量并填入您的 API Key：
 ```bash
 touch .env
 ```
 
-在 `.env` 文件中填入：
+在 `.env` 文件中配置关键项（完整环境变量参考下文）：
 ```ini
-# 币安 API 凭证 (必须)
+# 币安 API 凭证 (只读权限即可)
 BINANCE_API_KEY=your_api_key_here
 BINANCE_API_SECRET=your_api_secret_here
 
-# 系统配置 (可选)
-# 交易增量同步基础间隔 (分钟)
-# 当 ENABLE_TRIGGERED_TRADES_COMPENSATION=0 时生效
-UPDATE_INTERVAL_MINUTES=3
-# 启用“未平仓变化触发的闭仓补偿同步”（默认开启）
-ENABLE_TRIGGERED_TRADES_COMPENSATION=1
-# 启用触发补偿时，增量兜底任务间隔（分钟，默认1440=每天一次）
-TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES=1440
-# 触发补偿与各端点游标重叠窗口（分钟）
-TRADES_COMPENSATION_LOOKBACK_MINUTES=30
-SYNC_LOOKBACK_MINUTES=30
-SYMBOL_SYNC_OVERLAP_MINUTES=30
-# 普通轮询
-OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES=5
-BALANCE_SYNC_INTERVAL_MINUTES=15
-# 同步回溯天数
-DAYS_TO_FETCH=60
-# 爆仓额外损失收入类型（参与净PnL扣减，逗号分隔）
-# 默认 INSURANCE_CLEAR；保留 COMMISSION/FUNDING_FEE 固定参与
-EXTRA_LOSS_INCOME_TYPES=INSURANCE_CLEAR
-# 调度器时区（建议 Asia/Shanghai，对应 UTC+8）
-SCHEDULER_TIMEZONE=Asia/Shanghai
+# 管理写操作接口安全令牌 (生产环境必须配置随机高强度Token)
+DASHBOARD_ADMIN_TOKEN=your_secure_random_token_here
 
 # Server酱通知 (可选)
 SERVERCHAN_SENDKEY=your_serverchan_key_here
-
-# 市场数据流水线：06:15 更新日线，07:00 生成快照，07:30 发送通知
-DAILY_KLINE_UPDATE_HOUR=6
-DAILY_KLINE_UPDATE_MINUTE=15
-MARKET_SNAPSHOT_HOUR=7
-MARKET_SNAPSHOT_MINUTE=0
-HISTORICAL_TASK_WEIGHT_BUDGET_PER_60S=200
-BACKGROUND_WEIGHT_BUDGET_PER_60S=250
-ENABLE_LEADERBOARD_ALERT=1
-LEADERBOARD_ALERT_HOUR=7
-LEADERBOARD_ALERT_MINUTE=30
-LEADERBOARD_TOP_N=10
-# 最小24h成交额筛选，单位 USDT（默认 5000 万）
-LEADERBOARD_MIN_QUOTE_VOLUME=50000000
-# 候选币种上限（0=不设上限，默认120）
-LEADERBOARD_MAX_SYMBOLS=120
-
-# 四个反弹榜由 07:00 的同一个本地计算任务生成
-# 变量名保留 REBOUND_7D_*，语义对应14D
-ENABLE_REBOUND_7D_SNAPSHOT=1
-REBOUND_7D_TOP_N=10
-ENABLE_REBOUND_30D_SNAPSHOT=1
-REBOUND_30D_TOP_N=10
-ENABLE_REBOUND_60D_SNAPSHOT=1
-REBOUND_60D_TOP_N=10
-ENABLE_REBOUND_365D_SNAPSHOT=1
-REBOUND_365D_TOP_N=10
-
-# 每天 02:10 仅校验最近 48 小时；周日默认执行一次最近 60 天全量校验
-HISTORY_VALIDATION_HOUR=2
-HISTORY_VALIDATION_MINUTE=10
-HISTORY_VALIDATION_LOOKBACK_HOURS=48
-ENABLE_DAILY_FULL_SYNC=1
-ENABLE_DAILY_OPEN_POSITIONS_FULL_SYNC=0
-
-# 午间止损夜间复盘任务 (可选，默认每天 23:02 UTC+8)
-NOON_REVIEW_HOUR=23
-NOON_REVIEW_MINUTE=2
-
-# API任务互斥锁等待秒数（默认8；0=关闭互斥锁）
-API_JOB_LOCK_WAIT_SECONDS=8
-
-# 管理写接口鉴权（生产环境必须配置）
-DASHBOARD_ADMIN_TOKEN=replace-with-a-strong-random-token
 ```
-
-说明：
-- `LEADERBOARD_MAX_SYMBOLS=0` 表示涨幅榜候选池不设上限。
-- `REBOUND_7D_*` 是历史变量名，语义对应 **14D反弹榜**；四组反弹榜共享本地日线，不再配置逐币 K 线并发。
-- `API_JOB_LOCK_WAIT_SECONDS=0` 可关闭 API 任务互斥锁（高并发下可能增加请求冲突风险）。
-- 启用 `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 后，交易增量会采用“低频兜底 + 触发补偿”模式，建议将 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 设为 `1440`（每天一次）。
-- `TRADES_COMPENSATION_LOOKBACK_MINUTES` 仅在触发补偿未提供 symbol 级精确起点时生效。
-- 必须设置 `DASHBOARD_ADMIN_TOKEN` 才能使用写接口；前端会在首次写操作时提示输入，并在当前标签页保存。
 
 ### 3. 运行
 ```bash
 # 启动开发服务器
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-访问 `http://localhost:8000` 即可看到仪表盘。
+访问 `http://localhost:8000` 即可使用仪表盘。
 
-生产部署建议（调度器安全）：
-- 推荐单实例运行内置 scheduler：`WEB_CONCURRENCY=1`（或 `UVICORN_WORKERS=1`）。
-- 当 worker 数大于 1 时，应用会默认禁用 scheduler，避免重复触发定时任务。
-- 仅在你确认外部有去重机制时，才设置 `SCHEDULER_ALLOW_MULTI_WORKER=1` 强制启用。
-
-### 4. 页面与接口
-- 页面：
-  - `/`：交易分析主面板（TRADES）
-  - `/live-monitor`：实时监控（MONITOR）
-  - `/leaderboard`：涨幅榜快照（LEADERBOARD）
-  - `/metrics`：指标文档（METRICS）
-  - `/logs`：系统日志（LOGS）
-- `MONITOR` 页面复盘入口：
-  - 左侧新增 `Daily Stop-Loss Review Comparison` 对比表（近14天默认）。
-  - 点击某一日期行可展开当日逐币种明细（`Symbol / Noon Loss / Night Loss / Delta`）。
-  - 右侧 `Daily Stats` 保留当日摘要提示，详细复盘以左侧表格为准。
-- 涨幅榜相关接口：
-  - `/api/leaderboard`：读取最新快照
-  - `/api/leaderboard?date=YYYY-MM-DD`：读取指定日期快照
-  - `/api/leaderboard/dates`：读取可选快照日期列表（倒序）
-- 14D反弹榜相关接口：
-  - `/api/rebound-7d`：读取最新快照
-  - `/api/rebound-7d?date=YYYY-MM-DD`：读取指定日期快照
-  - `/api/rebound-7d/dates`：读取可选快照日期列表（倒序）
-- 30D反弹榜相关接口：
-  - `/api/rebound-30d`：读取最新快照
-  - `/api/rebound-30d?date=YYYY-MM-DD`：读取指定日期快照
-  - `/api/rebound-30d/dates`：读取可选快照日期列表（倒序）
-- 60D反弹榜相关接口：
-  - `/api/rebound-60d`：读取最新快照
-  - `/api/rebound-60d?date=YYYY-MM-DD`：读取指定日期快照
-  - `/api/rebound-60d/dates`：读取可选快照日期列表（倒序）
-- 午间浮亏与复盘接口：
-  - `/api/open-positions`：返回午间快照与夜间复盘摘要（`summary.recent_loss_*`、`summary.noon_review_*`）
-  - `/api/noon-loss-review-history?limit=14`：返回近 N 天“午间建议 vs 夜间结果”对比（支持前端展开逐币种明细）
-- 交易分析接口：
-  - `/api/summary`：交易汇总指标
-  - `/api/trades?limit=10&offset=0`：交易明细分页
-  - `/api/trades-aggregates?window=all|7d|30d`：图表/榜单聚合数据（默认 `all`）
-
-### 5. 内置调度任务（默认）
-- `sync_trades_incremental`：
-  - `ENABLE_TRIGGERED_TRADES_COMPENSATION=0` 时，每 `UPDATE_INTERVAL_MINUTES` 分钟执行
-  - `ENABLE_TRIGGERED_TRADES_COMPENSATION=1` 时，每 `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` 分钟执行（通常设为每天一次兜底）
-- `sync_trades_compensation_pending`：当未平仓减少（检测到可能平仓）时触发补偿同步
-- `sync_open_positions`：每 5 分钟做一次持仓 REST 校验
-- `sync_balance`：每 15 分钟同步余额与 TRANSFER income（启用用户数据流时跳过）
-- `validate_recent_trade_history`：每天 02:10 仅校验最近 24～48 小时
-- `sync_trades_full_weekly`：默认每周日 03:30 校验最近 `DAYS_TO_FETCH=60` 天；该任务忽略 `START_DATE`
-- `refresh_daily_klines`：每天 06:15 回填缺失日线，或只补每币最新 1～2 根
-- `build_all_market_snapshots`：每天 07:00 只请求一次全市场 ticker，再从本地日线生成涨跌幅榜与 14/30/60/365D 四组反弹榜
-- `risk_check_sleep`：每天 23:00 执行睡前风控检查（UTC+8）
-- `check_losses_noon`：每天 11:50 执行午间浮亏检查（UTC+8）
-- `review_noon_loss_night`：每天 23:02 执行午间止损夜间复盘（UTC+8，可通过 `NOON_REVIEW_HOUR/MINUTE` 调整）
-- `send_morning_top_gainers`：每天 07:30 仅读取已生成快照并发送通知（UTC+8，可关闭）
-
-页面读取 `/api/open-positions`、涨幅榜及反弹榜时只访问数据库/本地缓存，不会触发 Binance 历史同步或行情 REST 请求。
-
-### 6. Hardening 验证报告
-- 2026-02-18 一周加固执行与验证记录：`docs/plans/2026-02-18-hardening-verification-report.md`
-
-### 7. Performance Refactor 验证报告
-- 2026-02-21 性能优先重构验证记录：`docs/plans/2026-02-20-performance-refactor-verification-report.md`
-- 关键对比（baseline -> post）：
-  - `/api/open-positions` P95：`3.975 ms -> 1.421 ms`（-64.25%）
-  - `sync_trades_data` P95（mocked IO）：`5.319 ms -> 5.988 ms`（+12.58%）
-  - `get_open_positions` 热查询 P95（8k rows）：`40.564 ms -> 39.603 ms`（-2.37%）
-
-### 8. 风控复盘数据落库
-- `noon_loss_snapshots`：保存每天 11:50 午间浮亏快照（汇总 + 逐币种 rows）。
-- `noon_loss_review_snapshots`：保存每天夜间复盘结果（汇总 + 逐币种 rows）。
-- 两张表均以 `snapshot_date` 唯一键，支持按天覆盖更新，便于稳定复盘与回溯。
-
-### 9. 实盘策略SOP（当前版本）
-以下为当前实盘执行流程（循环制）：
-
-1. `05:00-08:00` 开单窗口（UTC+8）
-- 标的池来源：
-  - 当日涨幅榜 Top10
-  - 14D 反弹榜 Top10
-  - 昨日涨幅榜Top10中“今日仍上涨”的延续池（优先关注仍在今日涨幅榜中的标的）
-- 每个标的固定名义仓位 `3000U`，`2x` 杠杆，`逐仓` 做空。
-
-2. `11:55` 午间持仓检查
-- 浮亏仓位全部平掉。
-- 其余仓位继续持有。
-
-3. `23:00` 过夜仓位检查
-- 常规情况下，过夜持仓不超过 `5` 个标的。
-- 仅在“整体行情明显偏弱”时，允许放宽。
-
-4. 次日 `05:00-08:00` 前存量仓位处理
-- 旧仓位调至最大杠杆倍数，核心目标是释放保证金。
-- 以某个前序 `1H` 高点设置止盈/保护价。
-- 保护价设置后，尽量降低保证金占用，为新开仓腾挪资金。
-
-5. 进入下一轮循环。
-
-执行评价（策略特征）：
-- 优势：节奏固定、资金利用率高、午间与夜间有明确风控闸门。
-- 风险点：标的同质化较高（均来自强势池），单边行情下做空可能连续逆风。
-- 关键前提：旧仓位升杠杆前，必须先完成保护单设置并确认有效，再执行减保证金操作。
+生产部署建议：
+- 推荐单实例运行内置 scheduler：`UVICORN_WORKERS=1`。
+- 多 Worker 部署时应用会自动禁用内置 scheduler 防重复触发，需指定单进程执行任务。
 
 ---
 
-## 📂 项目结构
+## 🖥️ 页面与 API 汇总
+
+### 1. 前端页面视图
+- `/`：交易分析主面板（TRADES - 胜率、权益曲线、盈亏散点图、时段热力图、月度目标）
+- `/live-monitor`：实时战场监控（MONITOR - 实时持仓卡片、杠杆敞口、午间浮亏快照、夜间止损对比复盘）
+- `/leaderboard`：每日榜单快照与复盘（LEADERBOARD - 24H涨跌幅榜、14D/30D/60D/365D 反弹榜）
+- `/crash-risk`：暴跌/插针风险雷达（RADAR - 高危标的崩盘风险评分与预警）
+- `/metrics`：量化指标与风控协议说明（METRICS）
+- `/logs`：系统运行与同步审计日志（LOGS）
+
+### 2. 核心 REST API 路由
+- **交易与分析**：
+  - `GET /api/summary`：交易全局汇总指标与净值曲线
+  - `GET /api/trades?limit=10&offset=0`：已平仓交易分页明细
+  - `GET /api/daily-stats`：按日统计的战绩汇总
+  - `GET /api/trades-aggregates?window=all|7d|30d`：持仓时长与盈亏聚合数据
+  - `GET /api/monthly-progress`：月度盈利目标进度
+  - `POST /api/monthly-target` 🔒：更新月度盈利目标
+- **实时持仓与风控**：
+  - `GET /api/open-positions`：当前持仓全景与午夜风控快照（支持版本感知增量）
+  - `POST /api/positions/set-long-term` 🔒：设置标的长期持有状态
+  - `GET /api/balance-history?time_range=1d`：账户保证金余额历史曲线（支持 1h/1d/1w/1m/1y 下采样）
+  - `GET /api/noon-loss-review-history?limit=14`：近 N 天午间建议 vs 夜间实际对比复盘明细
+- **市场快照与反弹榜**：
+  - `GET /api/leaderboard?date=YYYY-MM-DD`：读取指定日期 24H 涨幅榜快照
+  - `GET /api/leaderboard/dates`：可选涨幅榜快照日期列表
+  - `GET /api/leaderboard/metrics-history`：涨幅榜次日动量指标历史
+  - `GET /api/rebound-{7d|30d|60d|365d}?date=YYYY-MM-DD`：各周期反弹榜快照
+  - `GET /api/rebound-{7d|30d|60d|365d}/dates`：各周期反弹榜历史日期列表
+- **暴跌风险雷达**：
+  - `GET /api/crash-risk`：读取最新暴跌风险雷达评分与阶段
+  - `POST /api/crash-risk/refresh`：重新触发暴跌风险评分计算
+- **观察自选备忘**：
+  - `GET /api/watch-notes`：获取自选关注标的列表
+  - `POST /api/watch-notes` 🔒：添加自选关注标的
+  - `DELETE /api/watch-notes/{note_id}` 🔒：移除自选关注标的
+- **系统与运行状态**：
+  - `GET /api/status`：系统健康度、调度器与 WebSocket 连通性
+  - `GET /api/logs`：实时系统运行日志
+  - `GET /api/sync-runs`：同步作业流水审计日志
+  - `POST /api/sync/manual` 🔒：手动触发数据同步作业
+
+*注：标注 🔒 的写操作接口需在请求头携带 `X-Admin-Token`。*
+
+---
+
+## ⚙️ 关键配置参数说明 (`.env`)
+
+| 配置项 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `BINANCE_API_KEY` | - | 币安 API Key（需只读权限） |
+| `BINANCE_API_SECRET` | - | 币安 API Secret |
+| `DASHBOARD_ADMIN_TOKEN` | - | 管理写接口授权令牌（生产环境必填） |
+| `SERVERCHAN_SENDKEY` | - | Server酱微信推送 Key |
+| `ENABLE_USER_STREAM` | `0` | 是否启用 WebSocket 用户数据流（带断线自愈守护） |
+| `UPDATE_INTERVAL_MINUTES` | `3` | 增量同步轮询基础间隔 |
+| `ENABLE_TRIGGERED_TRADES_COMPENSATION` | `1` | 启用未平仓变动触发的闭仓补偿同步 |
+| `TRADES_INCREMENTAL_FALLBACK_INTERVAL_MINUTES` | `1440` | 触发补偿模式下的全量兜底任务间隔（分钟） |
+| `OPEN_POSITIONS_UPDATE_INTERVAL_MINUTES` | `5` | 持仓 REST 校验周期（分钟） |
+| `BALANCE_SYNC_INTERVAL_MINUTES` | `15` | 余额轮询间隔（分钟，支持浮点数如 `0.5` 即30秒） |
+| `DAYS_TO_FETCH` | `60` | 默认同步回溯天数（最大不超过 90 天） |
+| `DAILY_KLINE_UPDATE_HOUR` / `MINUTE` | `6:15` | 共享日线增量同步时点 (UTC+8) |
+| `MARKET_SNAPSHOT_HOUR` / `MINUTE` | `7:00` | 晨间全市场五大榜单生成时点 (UTC+8) |
+| `LEADERBOARD_ALERT_HOUR` / `MINUTE` | `7:30` | 榜单微信推送通知时点 (UTC+8) |
+| `NOON_LOSS_CHECK_HOUR` / `MINUTE` | `11:50` | 午间浮亏快照执行时点 (UTC+8) |
+| `NOON_REVIEW_HOUR` / `MINUTE` | `23:02` | 午间止损夜间复盘对比执行时点 (UTC+8) |
+| `HISTORICAL_TASK_WEIGHT_BUDGET_PER_60S` | `200` | 历史任务每 60 秒权重预算上限 |
+
+---
+
+## 🎯 实盘策略 SOP（循环制）
+
+1. **`05:00-08:00` 开单窗口（UTC+8）**
+   - 标的池来源：当日涨幅榜 Top10、14D 反弹榜 Top10、昨日涨幅榜强势延续池。
+   - 仓位管理：每个标的固定名义仓位（如 `3000U`），`2x` 杠杆，**逐仓做空**。
+2. **`11:50-11:55` 午间持仓纪律检查**
+   - 浮亏仓位全部砍掉止损。
+   - 浮盈或持平仓位继续持有。
+3. **`23:00` 过夜仓位检查**
+   - 常规情况下，过夜持仓总数严格控制在 **5 个标的** 以内，杜绝过度分散。
+4. **次日 `05:00-08:00` 存量仓位轮转**
+   - 旧盈利仓位在前序 1H 高点设置保护止盈单。
+   - 保护单生效后，上调杠杆倍数以释放保证金，为新开仓腾出资金。
+5. **进入下一轮循环**。
+
+---
+
+## 📂 项目工程目录结构
 
 ```
 crypto_dashboard/
-├── app/
-│   ├── main.py            # FastAPI 入口与路由
-│   ├── scheduler.py       # 后台数据同步调度器
-│   ├── services.py        # 业务逻辑层
-│   ├── models.py          # 数据模型定义
-│   └── database.py        # 数据库连接管理
-├── data/
-│   └── trades.db          # SQLite 数据库文件 (自动生成)
-├── templates/             # 前端页面
-│   ├── index.html         # 主仪表盘 (Dashboard)
-│   ├── live_monitor.html  # 实时监控 (Monitor)
-│   ├── leaderboard.html   # 涨幅榜快照与复盘 (Leaderboard)
-│   ├── logs.html          # 系统日志
-│   └── metrics.html       # 指标说明文档
-├── static/                # 静态资源 (CSS/JS)
-├── requirements.txt       # 项目依赖
-└── trade_analyzer.py      # (Legacy) 独立分析脚本
+├── app/                              # 应用核心代码
+│   ├── main.py                       # FastAPI 启动入口、生命周期与路由装配
+│   ├── scheduler.py                  # APScheduler 调度器注册与状态管理
+│   ├── user_stream.py                # 币安 WebSocket 用户流（自愈重连守护）
+│   ├── binance_client.py             # 币安 REST API 客户端（Session复用与限流）
+│   ├── notifier.py                   # Server酱消息推送通知组件
+│   ├── models.py                     # 全局 Pydantic 响应与请求模型
+│   ├── security.py                   # 管理写接口 Admin Token 鉴权依赖
+│   ├── static_assets.py              # 静态资源版本号生成工具
+│   ├── api/                          # REST API 领域路由层
+│   │   ├── balance_api.py            # 余额历史与资金曲线
+│   │   ├── crash_risk_api.py         # 暴跌/插针风险雷达
+│   │   ├── leaderboard_api.py        # 涨跌幅榜快照与指标历史
+│   │   ├── positions_api.py          # 实时持仓与风控快照
+│   │   ├── rebound_api.py            # 14D/30D/60D/365D 反弹榜快照
+│   │   ├── system_api.py             # 系统日志、复盘历史与同步流水
+│   │   ├── trades_api.py             # 交易明细、全局指标与目标设置
+│   │   └── watchnotes_api.py         # 自选观察标的备忘录
+│   ├── routes/                       # 前端 HTML 页面渲染路由
+│   │   ├── trades.py                 # 交易分析主页 (/)
+│   │   ├── leaderboard.py            # 涨幅榜页面 (/leaderboard)
+│   │   ├── crash_risk.py             # 暴跌雷达页面 (/crash-risk)
+│   │   └── system.py                 # 健康状态与日志 (/logs, /metrics)
+│   ├── services/                     # 业务领域服务层
+│   │   ├── positions_service.py      # 持仓计算与读模型编排
+│   │   ├── balance_service.py        # 余额下采样与资金时序
+│   │   ├── market_snapshot_service.py# 晨间五榜快照原子生成
+│   │   ├── crash_risk_service.py     # 暴跌风险综合评分引擎
+│   │   ├── trade_etl_service.py      # 交易增量同步与批次撮合
+│   │   └── leaderboard_service.py    # 榜单历史查询与动量计算
+│   ├── repositories/                 # 数据持久化仓储门面层 (SQL 操作)
+│   │   ├── sync_write_repository.py  # 事实与批次撮合写入
+│   │   ├── trade_read_repository.py  # 交易战绩与聚合查询
+│   │   ├── daily_kline_repository.py # 日 K 线本地缓存管理
+│   │   ├── snapshot_repository.py    # 各类快照持久化
+│   │   └── crash_risk_repository.py  # 暴跌雷达快照存储
+│   ├── jobs/                         # APScheduler 后台调度任务实现
+│   │   ├── market_snapshot_jobs.py   # 日线回填与五榜生成任务
+│   │   ├── noon_loss_job.py          # 午间浮亏与夜间复盘任务
+│   │   ├── balance_sync_job.py       # 余额与出入金同步任务
+│   │   └── alert_jobs.py             # 晨间榜单与风控告警通知任务
+│   └── core/                         # 核心算法与底层基础设施
+│       ├── trade_matching.py         # FIFO 状态化批次撮合引擎
+│       ├── read_model.py             # 版本感知与写失效读模型缓存
+│       ├── job_runtime.py            # 分级任务并发隔离锁 (Tiered Lock)
+│       ├── binance_request_budget.py # 交易所请求权重预算限流器
+│       ├── time.py                   # 统一时间解析与 UTC/UTC+8 转换
+│       └── db_migrations/            # 数据库版本化迁移脚本
+├── templates/                        # Jinja2 前端页面模板
+│   ├── index.html                    # 交易分析仪表盘 (TRADES)
+│   ├── live_monitor.html             # 实时战场监控台 (MONITOR)
+│   ├── leaderboard.html              # 每日涨幅榜快照 (LEADERBOARD)
+│   ├── crash_risk.html               # 暴跌/插针风险雷达 (RADAR)
+│   ├── metrics.html                  # 指标说明与公式文档 (METRICS)
+│   └── logs.html                     # 实时日志与审计流水 (LOGS)
+├── static/                           # 前端静态资源 (CSS / JS)
+├── data/                             # 数据存储目录
+│   └── trades.db                     # SQLite 数据库文件 (WAL 模式，27 张表)
+├── docs/                             # 系统完备技术文档库
+│   ├── README.md                     # 文档中心总览索引导航
+│   ├── architecture.md               # 模块化单体架构与设计模式
+│   ├── data_flow.md                  # 第一性原理端到端全景数据流
+│   ├── data_dictionary.md            # 27 张持久化表全量数据字典
+│   ├── api_reference.md              # 8 大领域全量 REST API 规格手册
+│   ├── plans/                        # 历史演进与重构设计提案
+│   └── audits/                       # 系统审计报告与离线探针脚本
+├── tests/                            # 自动化测试用例集合 (67 个测试文件)
+├── requirements.txt                  # Python 依赖清单
+└── IMPLEMENTATION_PLAN.md            # 实施计划与执行记录
 ```
 
 ---
 
 ## ⚠️ 免责声明
 
-本软件仅供**教育和研究目的**使用。
-- 加密货币交易具有极高风险，可能导致资金全额损失。
-- 开发者不对因软件错误、API故障或网络延迟导致的任何资金损失负责。
-- 请务必在实盘使用前充分测试。
+本系统仅供**量化研究与个人交易辅助**使用：
+- 加密货币衍生品交易具有极高市场风险，可能导致本金全额损失。
+- 作者不对因代码缺陷、网络延迟、交易所 API 故障或不可抗力导致的资金损失承担任何法律责任。
+- 实盘使用前请务必使用小额资金充分验证所有策略与风控规则。
 
 ---
 
