@@ -468,32 +468,3 @@ def build_top_gainers_snapshot(scheduler, utc8):
     snapshot["request_weight"] = session.total_weight
     return snapshot
 
-
-def build_rebound_snapshot(
-    scheduler,
-    *,
-    utc8,
-    window_days: int,
-    top_n: int,
-    kline_workers: int,
-    weight_budget_per_minute: int,
-    label: str,
-):
-    """Compatibility entry point; no per-symbol K-line requests are emitted."""
-    del kline_workers, weight_budget_per_minute, label
-    now_utc = datetime.now(timezone.utc)
-    market_view = _load_daily_market_view(scheduler, now_utc=now_utc)
-    session = WeightedRequestSession(scheduler.processor.client)
-    ticker_data = session.public_get("/fapi/v1/ticker/24hr")
-    if not ticker_data or not isinstance(ticker_data, list):
-        raise RuntimeError("无法获取全市场 ticker")
-    snapshot = calculate_rebound_snapshots(
-        ticker_data=ticker_data,
-        daily_klines_by_symbol=market_view,
-        utc8=utc8,
-        now_utc=now_utc,
-        top_n_by_window={int(window_days): int(top_n)},
-        windows=(int(window_days),),
-    )[int(window_days)]
-    snapshot["request_weight"] = session.total_weight
-    return snapshot

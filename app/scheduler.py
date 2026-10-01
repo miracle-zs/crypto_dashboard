@@ -23,13 +23,10 @@ from app.jobs.trades_compensation_jobs import (
 )
 from app.jobs.market_snapshot_jobs import (
     build_and_save_all_market_snapshots_job,
-    build_rebound_snapshot_job,
     build_top_gainers_snapshot_job,
-    get_rebound_snapshot_job,
     get_top_gainers_snapshot_job,
     refresh_daily_kline_cache_job,
     send_morning_top_gainers_job,
-    snapshot_morning_rebound_job,
 )
 from app.jobs.sync_pipeline_jobs import (
     fetch_and_analyze_closed_trades,
@@ -422,145 +419,6 @@ class TradeDataScheduler:
             schedule_hour=self.leaderboard_alert_hour,
             schedule_minute=self.leaderboard_alert_minute,
             utc8=UTC8,
-        )
-
-    def _build_rebound_snapshot(
-        self,
-        *,
-        window_days: int,
-        top_n: int,
-        kline_workers: int,
-        weight_budget_per_minute: int,
-        label: str
-    ):
-        return build_rebound_snapshot_job(
-            self,
-            utc8=UTC8,
-            window_days=window_days,
-            top_n=top_n,
-            kline_workers=kline_workers,
-            weight_budget_per_minute=weight_budget_per_minute,
-            label=label,
-        )
-
-    def _build_rebound_7d_snapshot(self):
-        """构建14D反弹幅度榜快照（兼容历史函数名）。"""
-        return self._build_rebound_snapshot(
-            window_days=14,
-            top_n=self.rebound_7d_top_n,
-            kline_workers=self.rebound_7d_kline_workers,
-            weight_budget_per_minute=self.rebound_7d_weight_budget_per_minute,
-            label="14D反弹榜"
-        )
-
-    def _build_rebound_30d_snapshot(self):
-        """构建30D反弹幅度榜快照。"""
-        return self._build_rebound_snapshot(
-            window_days=30,
-            top_n=self.rebound_30d_top_n,
-            kline_workers=self.rebound_30d_kline_workers,
-            weight_budget_per_minute=self.rebound_30d_weight_budget_per_minute,
-            label="30D反弹榜"
-        )
-
-    def _build_rebound_60d_snapshot(self):
-        """构建60D反弹幅度榜快照。"""
-        return self._build_rebound_snapshot(
-            window_days=60,
-            top_n=self.rebound_60d_top_n,
-            kline_workers=self.rebound_60d_kline_workers,
-            weight_budget_per_minute=self.rebound_60d_weight_budget_per_minute,
-            label="60D反弹榜"
-        )
-
-    def _build_rebound_365d_snapshot(self):
-        """构建365D反弹幅度榜快照。"""
-        return self._build_rebound_snapshot(
-            window_days=365,
-            top_n=self.rebound_365d_top_n,
-            kline_workers=self.rebound_365d_kline_workers,
-            weight_budget_per_minute=self.rebound_365d_weight_budget_per_minute,
-            label="365D反弹榜"
-        )
-
-    def get_rebound_7d_snapshot(self, source: str = "14D反弹榜接口"):
-        """获取14D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(
-            self,
-            source=source,
-            load_snapshot=self.snapshot_repo.get_latest_rebound_7d_snapshot,
-        )
-
-    def snapshot_morning_rebound_7d(self):
-        """每天早上07:30生成14D反弹幅度Top榜快照并入库。"""
-        return snapshot_morning_rebound_job(
-            self,
-            source="晨间14D反弹榜",
-            label="14D反弹榜",
-            schedule_hour=self.rebound_7d_hour,
-            schedule_minute=self.rebound_7d_minute,
-            get_snapshot=self.get_rebound_7d_snapshot,
-            save_snapshot=self.snapshot_repo.save_rebound_7d_snapshot,
-        )
-
-    def get_rebound_30d_snapshot(self, source: str = "30D反弹榜接口"):
-        """获取30D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(
-            self,
-            source=source,
-            load_snapshot=self.snapshot_repo.get_latest_rebound_30d_snapshot,
-        )
-
-    def snapshot_morning_rebound_30d(self):
-        """每天早上生成30D反弹幅度Top榜快照并入库。"""
-        return snapshot_morning_rebound_job(
-            self,
-            source="晨间30D反弹榜",
-            label="30D反弹榜",
-            schedule_hour=self.rebound_30d_hour,
-            schedule_minute=self.rebound_30d_minute,
-            get_snapshot=self.get_rebound_30d_snapshot,
-            save_snapshot=self.snapshot_repo.save_rebound_30d_snapshot,
-        )
-
-    def get_rebound_60d_snapshot(self, source: str = "60D反弹榜接口"):
-        """获取60D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(
-            self,
-            source=source,
-            load_snapshot=self.snapshot_repo.get_latest_rebound_60d_snapshot,
-        )
-
-    def snapshot_morning_rebound_60d(self):
-        """每天早上生成60D反弹幅度Top榜快照并入库。"""
-        return snapshot_morning_rebound_job(
-            self,
-            source="晨间60D反弹榜",
-            label="60D反弹榜",
-            schedule_hour=self.rebound_60d_hour,
-            schedule_minute=self.rebound_60d_minute,
-            get_snapshot=self.get_rebound_60d_snapshot,
-            save_snapshot=self.snapshot_repo.save_rebound_60d_snapshot,
-        )
-
-    def get_rebound_365d_snapshot(self, source: str = "365D反弹榜接口"):
-        """获取365D反弹榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_rebound_snapshot_job(
-            self,
-            source=source,
-            load_snapshot=self.snapshot_repo.get_latest_rebound_365d_snapshot,
-        )
-
-    def snapshot_morning_rebound_365d(self):
-        """每天早上生成365D反弹幅度Top榜快照并入库。"""
-        return snapshot_morning_rebound_job(
-            self,
-            source="晨间365D反弹榜",
-            label="365D反弹榜",
-            schedule_hour=self.rebound_365d_hour,
-            schedule_minute=self.rebound_365d_minute,
-            get_snapshot=self.get_rebound_365d_snapshot,
-            save_snapshot=self.snapshot_repo.save_rebound_365d_snapshot,
         )
 
     @staticmethod

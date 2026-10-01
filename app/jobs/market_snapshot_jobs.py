@@ -5,7 +5,6 @@ from app.logger import logger
 from app.notifier import send_server_chan_notification
 from app.services.market_snapshot_service import (
     build_all_market_snapshots,
-    build_rebound_snapshot,
     build_top_gainers_snapshot,
     update_daily_kline_cache,
 )
@@ -141,97 +140,3 @@ def send_morning_top_gainers_job(scheduler, *, source: str, schedule_hour: int, 
         f"elapsed={time.perf_counter() - started_at:.2f}s"
     )
 
-
-def build_rebound_snapshot_job(
-    scheduler,
-    *,
-    utc8,
-    window_days: int,
-    top_n: int,
-    kline_workers: int,
-    weight_budget_per_minute: int,
-    label: str,
-):
-    return build_rebound_snapshot(
-        scheduler,
-        utc8=utc8,
-        window_days=window_days,
-        top_n=top_n,
-        kline_workers=kline_workers,
-        weight_budget_per_minute=weight_budget_per_minute,
-        label=label,
-    )
-
-
-def get_rebound_snapshot_job(scheduler, *, source: str, build_snapshot=None, load_snapshot=None):
-    if load_snapshot is not None:
-        try:
-            snapshot = load_snapshot()
-        except Exception as exc:
-            logger.error(f"{source}读取快照失败: {exc}")
-            return {"ok": False, "reason": "exception", "message": str(exc)}
-        if not snapshot or snapshot.get("top", 0) <= 0:
-            return {"ok": False, "reason": "no_data", "message": "尚未生成反弹榜快照"}
-        return {"ok": True, **snapshot}
-
-    if not scheduler.processor:
-        return {"ok": False, "reason": "api_keys_missing", "message": "API密钥未配置"}
-    if scheduler._is_api_cooldown_active(source=source):
-        return {"ok": False, "reason": "cooldown_active", "message": "Binance API处于冷却中"}
-    if not try_enter_slot(scheduler, source=source, category=JobCategory.HEAVY):
-        return {"ok": False, "reason": "lock_busy", "message": "任务槽位繁忙"}
-
-    try:
-        snapshot = build_snapshot()
-        if snapshot["top"] <= 0:
-            return {"ok": False, "reason": "no_data", "message": "未生成有效榜单", **snapshot}
-        return {"ok": True, **snapshot}
-    except Exception as exc:
-        logger.error(f"{source}失败: {exc}")
-        return {"ok": False, "reason": "exception", "message": str(exc)}
-    finally:
-        scheduler._release_api_job_slot()
-
-
-def snapshot_morning_rebound_job(
-    scheduler,
-    *,
-    source: str,
-    label: str,
-    schedule_hour: int,
-    schedule_minute: int,
-    get_snapshot,
-    save_snapshot,
-):
-    started_at = time.perf_counter()
-    logger.info(
-        f"晨间{label}任务开始执行: "
-        f"schedule={schedule_hour:02d}:{schedule_minute:02d}"
-    )
-    result = get_snapshot(source=source)
-    logger.info(
-        f"晨间{label}快照结果: "
-        f"ok={result.get('ok')}, "
-        f"reason={result.get('reason', '')}, "
-        f"candidates={result.get('candidates', 0)}, "
-        f"effective={result.get('effective', 0)}, "
-        f"top={result.get('top', 0)}"
-    )
-    if not result.get("ok"):
-        logger.warning(
-            f"晨间{label}任务跳过: reason={result.get('reason')}, message={result.get('message', '')}"
-        )
-        return
-
-    try:
-        save_snapshot(result)
-        logger.info(
-            f"{label}快照已保存: date={result.get('snapshot_date')}, top={result.get('top')}"
-        )
-    except Exception as exc:
-        logger.error(f"保存{label}快照失败: {exc}")
-
-    logger.info(
-        f"晨间{label}任务完成: "
-        f"elapsed={time.perf_counter() - started_at:.2f}s"
-    )
