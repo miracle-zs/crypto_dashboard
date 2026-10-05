@@ -21,6 +21,7 @@ from app.jobs.trades_compensation_jobs import (
     run_pending_trades_compensation_job,
     sync_trades_compensation_job,
 )
+from app.jobs.context import JobContext
 from app.jobs.market_snapshot_jobs import (
     build_and_save_all_market_snapshots_job,
     build_top_gainers_snapshot_job,
@@ -39,7 +40,7 @@ from app.core.job_runtime import JobCategory, JobRuntimeController
 from app.core.metrics import log_job_metric, measure_ms
 from app.core.scheduler_config import load_scheduler_config
 from app.core.scheduler_binding import SCHEDULER_CONFIG_FIELDS, apply_scheduler_config_fields
-from app.core.scheduler_runtime import get_scheduler_singleton, should_start_scheduler_runtime
+from app.core.scheduler_runtime import should_start_scheduler_runtime
 from app.core.symbols import normalize_futures_symbol
 from app.logger import logger
 from app.repositories import (
@@ -63,7 +64,7 @@ class TradeDataScheduler:
 
     _CONFIG_FIELDS = SCHEDULER_CONFIG_FIELDS
 
-    def __init__(self):
+    def __init__(self, db: Database | None = None):
         config = load_scheduler_config()
         self.config = config
         scheduler_tz = config.scheduler_timezone
@@ -72,7 +73,7 @@ class TradeDataScheduler:
         except Exception as exc:
             logger.warning(f"无效的调度器时区 {scheduler_tz}: {exc}，使用默认时区")
             self.scheduler = BackgroundScheduler()
-        self.db = Database()
+        self.db = db or Database()
         self.sync_repo = SyncRepository(self.db)
         self.risk_repo = RiskRepository(self.db)
         self.snapshot_repo = SnapshotRepository(self.db)
@@ -98,6 +99,20 @@ class TradeDataScheduler:
         )
         self.runtime_controller = JobRuntimeController(lock_wait_seconds=self.api_job_lock_wait_seconds)
         self._pending_compensation_since_ms: dict[str, int] = {}
+        self.job_context = JobContext(
+            scheduler=self.scheduler,
+            config=self.config,
+            processor=self.processor,
+            sync_repo=self.sync_repo,
+            risk_repo=self.risk_repo,
+            snapshot_repo=self.snapshot_repo,
+            trade_repo=self.trade_repo,
+            daily_kline_repo=self.daily_kline_repo,
+            runtime_controller=self.runtime_controller,
+            resolve_sync_window=resolve_sync_window,
+            fetch_and_analyze_closed_trades=fetch_and_analyze_closed_trades,
+            persist_closed_trades_and_watermarks=persist_closed_trades_and_watermarks,
+        )
 
     def _apply_scheduler_config(self, config):
         apply_scheduler_config_fields(self, config)
@@ -188,9 +203,9 @@ class TradeDataScheduler:
         full_lookback_days: int | None = None,
     ):
         if validation_lookback_hours is None and full_lookback_days is None:
-            return run_sync_trades_data_impl(self, force_full=force_full)
+            return run_sync_trades_data_impl(self.job_context, force_full=force_full)
         return run_sync_trades_data_impl(
-            self,
+            self.job_context,
             force_full=force_full,
             validation_lookback_hours=validation_lookback_hours,
             full_lookback_days=full_lookback_days,
@@ -251,7 +266,7 @@ class TradeDataScheduler:
         status = "success"
         with measure_ms("scheduler.sync_open_positions_data") as metric:
             try:
-                return run_sync_open_positions(self)
+                return run_sync_open_positions(self.job_context)
             except Exception:
                 status = "error"
                 raise
@@ -263,7 +278,7 @@ class TradeDataScheduler:
         with measure_ms("scheduler.sync_open_positions_full_window") as metric:
             try:
                 return run_sync_open_positions(
-                    self,
+                    self.job_context,
                     lookback_days=self.open_positions_full_lookback_days,
                     mode="full",
                 )
@@ -296,14 +311,14 @@ class TradeDataScheduler:
         symbol_since_ms: dict[str, int] | None = None,
     ):
         return request_trades_compensation_job(
-            self,
+            self.job_context,
             symbols,
             reason=reason,
             symbol_since_ms=symbol_since_ms,
         )
 
     def _run_pending_trades_compensation(self):
-        return run_pending_trades_compensation_job(self)
+        return run_pending_trades_compensation_job(self.job_context)
 
     def sync_trades_compensation(
         self,
@@ -313,7 +328,7 @@ class TradeDataScheduler:
         symbol_since_ms: dict[str, int] | None = None,
     ):
         return sync_trades_compensation_job(
-            self,
+            self.job_context,
             symbols=symbols,
             reason=reason,
             symbol_since_ms=symbol_since_ms,
@@ -365,19 +380,19 @@ class TradeDataScheduler:
             return None
 
     def check_same_symbol_reentry_alert(self):
-        return run_reentry_alert_check(self)
+        return run_reentry_alert_check(self.job_context)
 
     def check_open_positions_profit_alert(self, threshold_pct: float):
-        return run_profit_alert_check(self, threshold_pct)
+        return run_profit_alert_check(self.job_context, threshold_pct)
 
     def check_long_held_positions(self):
-        return run_long_held_positions_check(self)
+        return run_long_held_positions_check(self.job_context)
 
     def check_risk_before_sleep(self):
-        return run_sleep_risk_check(self)
+        return run_sleep_risk_check(self.job_context)
 
     def check_recent_losses_at_noon(self):
-        return run_noon_loss_check(self)
+        return run_noon_loss_check(self.job_context)
 
     def review_noon_loss_at_night(
         self,
@@ -385,7 +400,7 @@ class TradeDataScheduler:
         send_notification: bool = True
     ):
         return run_noon_loss_review(
-            self,
+            self.job_context,
             snapshot_date=snapshot_date,
             send_notification=send_notification,
         )
@@ -399,22 +414,22 @@ class TradeDataScheduler:
         self.review_noon_loss_at_night(snapshot_date=snapshot_date, send_notification=send_notification)
 
     def _build_top_gainers_snapshot(self):
-        return build_top_gainers_snapshot_job(self, UTC8)
+        return build_top_gainers_snapshot_job(self.job_context, UTC8)
 
     def refresh_daily_kline_cache(self):
-        return refresh_daily_kline_cache_job(self)
+        return refresh_daily_kline_cache_job(self.job_context)
 
     def build_and_save_all_market_snapshots(self):
-        return build_and_save_all_market_snapshots_job(self, UTC8)
+        return build_and_save_all_market_snapshots_job(self.job_context, UTC8)
 
     def get_top_gainers_snapshot(self, source: str = "涨幅榜接口"):
         """获取涨幅榜快照（带冷却与互斥保护），供API或任务复用。"""
-        return get_top_gainers_snapshot_job(self, source=source, utc8=UTC8)
+        return get_top_gainers_snapshot_job(self.job_context, source=source, utc8=UTC8)
 
     def send_morning_top_gainers(self):
         """每天早上发送币安合约涨跌幅榜（按UTC当日开盘到当前涨跌幅）"""
         return send_morning_top_gainers_job(
-            self,
+            self.job_context,
             source="晨间涨幅榜",
             schedule_hour=self.leaderboard_alert_hour,
             schedule_minute=self.leaderboard_alert_minute,
@@ -431,7 +446,7 @@ class TradeDataScheduler:
         with measure_ms("scheduler.sync_balance_data") as metric:
             status = "success"
             try:
-                status = run_balance_sync_job(self)
+                status = run_balance_sync_job(self.job_context)
             finally:
                 log_job_metric(job_name="sync_balance_data", status=status, snapshot=metric)
 
@@ -462,6 +477,6 @@ def should_start_scheduler() -> tuple[bool, str]:
     return should_start_scheduler_runtime()
 
 
-def get_scheduler() -> TradeDataScheduler:
-    """获取调度器单例"""
-    return get_scheduler_singleton(TradeDataScheduler)
+def get_scheduler(*, db: Database) -> TradeDataScheduler:
+    """Build the scheduler for the current application's explicit dependencies."""
+    return TradeDataScheduler(db=db)

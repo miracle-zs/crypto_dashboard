@@ -1,7 +1,7 @@
 # Performance Refactor Verification Report
 
 **Date:** 2026-02-21  
-**Plan:** `docs/plans/2026-02-20-performance-refactor-implementation-plan.md`  
+**Plan:** [`2026-02-20-performance-refactor-design.md`](2026-02-20-performance-refactor-design.md)
 **Branch:** `codex/perf-refactor-exec`
 
 ## 1. Verification Commands

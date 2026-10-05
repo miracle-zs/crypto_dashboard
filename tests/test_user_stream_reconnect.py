@@ -88,6 +88,7 @@ def test_user_stream_supervisor_reconnect_lifecycle(monkeypatch):
 
     stream = BinanceUserDataStream(
         api_key="test_key",
+        db=MagicMock(),
         reconnect_delay_seconds=0.01,
         max_reconnect_delay_seconds=0.05,
     )
@@ -118,7 +119,7 @@ def test_user_stream_keepalive_failure_invalidates_key(monkeypatch):
         lambda *args, **kwargs: put_calls.append(kwargs) or FakeErrorResponse(),
     )
 
-    stream = BinanceUserDataStream(api_key="test_key")
+    stream = BinanceUserDataStream(api_key="test_key", db=MagicMock())
     stream.listen_key = "test_listen_key"
     stream._running = True
 

@@ -234,7 +234,7 @@ def test_sync_repository_get_open_position_symbols_returns_distinct_symbols(tmp_
 def test_save_open_positions_raises_when_state_load_fails(tmp_path):
     db = Database(db_path=str(tmp_path / "positions_state_error.db"))
     repo = SyncRepository(db)
-    repo._write._open_positions_state_columns = ("symbol", "order_id", "missing_col")
+    repo._open_positions_state_columns = ("symbol", "order_id", "missing_col")
 
     rows = [
         {
@@ -279,4 +279,3 @@ def test_get_completed_exit_order_ids(tmp_path):
 
     sol_exits = repo.get_completed_exit_order_ids("SOL")
     assert sol_exits == set()
-

@@ -1,10 +1,4 @@
 import os
-from typing import Callable, TypeVar
-
-
-T = TypeVar("T")
-
-_scheduler_instance = None
 
 
 def env_is_truthy(value: str | None) -> bool:
@@ -32,10 +26,3 @@ def should_start_scheduler_runtime() -> tuple[bool, str]:
         return False, "multi_worker_unsupported"
 
     return True, "ok"
-
-
-def get_scheduler_singleton(factory: Callable[[], T]) -> T:
-    global _scheduler_instance
-    if _scheduler_instance is None:
-        _scheduler_instance = factory()
-    return _scheduler_instance

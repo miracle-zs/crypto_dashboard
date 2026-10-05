@@ -9,7 +9,7 @@ from app.logger import logger
 
 
 def _register_sync_jobs(scheduler, *, utc8):
-    scheduler.scheduler.add_job(partial(run_sync_open_positions, scheduler), "date")
+    scheduler.scheduler.add_job(partial(run_sync_open_positions, scheduler.job_context), "date")
     scheduler.scheduler.add_job(scheduler.sync_balance_data, "date")
 
     trades_interval_minutes = (
@@ -18,7 +18,7 @@ def _register_sync_jobs(scheduler, *, utc8):
         else scheduler.update_interval_minutes
     )
     scheduler.scheduler.add_job(
-        func=partial(run_sync_trades_incremental, scheduler),
+        func=partial(run_sync_trades_incremental, scheduler.job_context),
         trigger=IntervalTrigger(minutes=trades_interval_minutes),
         id="sync_trades_incremental",
         name="同步交易数据(游标增量)",
@@ -28,7 +28,7 @@ def _register_sync_jobs(scheduler, *, utc8):
         replace_existing=True,
     )
     scheduler.scheduler.add_job(
-        func=partial(run_sync_open_positions, scheduler),
+        func=partial(run_sync_open_positions, scheduler.job_context),
         trigger=IntervalTrigger(minutes=scheduler.open_positions_update_interval_minutes),
         id="sync_open_positions",
         name="同步未平仓订单",
@@ -217,7 +217,7 @@ def _register_risk_jobs(scheduler, *, utc8):
         replace_existing=True,
     )
     scheduler.scheduler.add_job(
-        func=partial(run_noon_loss_check, scheduler),
+        func=partial(run_noon_loss_check, scheduler.job_context),
         trigger=CronTrigger(
             hour=scheduler.noon_loss_check_hour,
             minute=scheduler.noon_loss_check_minute,

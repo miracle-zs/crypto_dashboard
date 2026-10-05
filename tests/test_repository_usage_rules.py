@@ -99,6 +99,16 @@ def test_sync_repository_avoids_direct_passthrough_for_summary_queries():
         assert pattern not in text
 
 
+def test_trade_and_sync_repositories_do_not_keep_read_write_delegate_objects():
+    for file_path in [
+        "app/repositories/trade_repository.py",
+        "app/repositories/sync_repository.py",
+    ]:
+        text = Path(file_path).read_text(encoding="utf-8")
+        assert "self._read =" not in text
+        assert "self._write =" not in text
+
+
 def test_settings_repository_avoids_direct_passthrough():
     text = Path("app/repositories/settings_repository.py").read_text(encoding="utf-8")
     assert "return self.db.set_position_long_term(symbol, order_id, is_long_term)" not in text
@@ -106,9 +116,9 @@ def test_settings_repository_avoids_direct_passthrough():
 
 def test_services_avoid_direct_db_calls_for_system_watchnotes_and_trades():
     service_files = [
-        "app/services/trades_api_service.py",
-        "app/services/system_api_service.py",
         "app/services/watchnotes_service.py",
+        "app/services/trade_query_service.py",
+        "app/api/system_api.py",
         "app/routes/system.py",
         "app/routes/trades.py",
     ]

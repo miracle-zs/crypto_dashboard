@@ -3,7 +3,7 @@ from app.user_stream import BinanceUserDataStream
 
 
 def test_user_stream_incremental_positions_does_not_wipe_other_positions():
-    stream = BinanceUserDataStream(api_key="test")
+    stream = BinanceUserDataStream(api_key="test", db=MagicMock())
     stream.trade_repo = MagicMock()
 
     # Event 1: Initial state has BTC (+100) and ETH (+200)

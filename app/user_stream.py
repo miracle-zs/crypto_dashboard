@@ -23,14 +23,14 @@ class BinanceUserDataStream:
     def __init__(
         self,
         api_key: str,
-        db: Optional[Database] = None,
+        db: Database,
         rest_base_url: Optional[str] = None,
         ws_base_url: Optional[str] = None,
         reconnect_delay_seconds: float = 2.0,
         max_reconnect_delay_seconds: float = 60.0,
     ):
         self.api_key = api_key
-        self.db = db or Database()
+        self.db = db
         self.trade_repo = TradeRepository(self.db)
         self.rest_base_url = rest_base_url or os.getenv("BINANCE_FAPI_BASE_URL", "https://fapi.binance.com")
         self.ws_base_url = ws_base_url or os.getenv("BINANCE_FAPI_WS_BASE_URL", "wss://fstream.binance.com")

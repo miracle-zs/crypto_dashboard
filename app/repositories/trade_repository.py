@@ -4,22 +4,11 @@ from app.repositories.trade_read_repository import TradeReadRepository
 from app.repositories.trade_write_repository import TradeWriteRepository
 
 
-class TradeRepository:
-    """Backward-compatible facade for trade read/write repositories."""
+class TradeRepository(TradeReadRepository, TradeWriteRepository):
+    """The public persistence interface for the trade aggregate."""
 
     def __init__(self, db):
         self.db = db
-        self._read = TradeReadRepository(db)
-        self._write = TradeWriteRepository(db)
-
-    def get_trade_summary(self):
-        return self._read.get_trade_summary()
-
-    def get_statistics(self):
-        return self._read.get_statistics()
-
-    def get_cached_total_trades(self):
-        return self._read.get_cached_total_trades()
 
     def recompute_trade_summary(self):
         conn = self.db._get_connection()
@@ -54,18 +43,17 @@ class TradeRepository:
                 "expected_value": 0.0,
                 "risk_reward_ratio": 0.0,
             }
-            self._write.save_trade_summary(summary)
+            self.save_trade_summary(summary)
             return summary
 
         pnl_values = np.array([float(row["pnl_net"] or 0.0) for row in rows], dtype=float)
         fees_values = np.array([float(row["fees"] or 0.0) for row in rows], dtype=float)
-
         total_pnl = float(pnl_values.sum())
         total_fees = float(fees_values.sum())
         win_count = int(np.sum(pnl_values > 0))
         loss_count = int(np.sum(pnl_values < 0))
         total_trades = int(len(pnl_values))
-        win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0.0
+        win_rate = (win_count / total_trades * 100) if total_trades else 0.0
         equity_curve = np.cumsum(pnl_values).tolist()
 
         current_streak = 0
@@ -73,16 +61,10 @@ class TradeRepository:
         for pnl in reversed(pnl_values):
             if pnl == 0:
                 break
-            if last_pnl > 0:
-                if pnl > 0:
-                    current_streak += 1
-                else:
-                    break
-            elif last_pnl < 0:
-                if pnl < 0:
-                    current_streak -= 1
-                else:
-                    break
+            if (last_pnl > 0 and pnl > 0) or (last_pnl < 0 and pnl < 0):
+                current_streak += 1 if last_pnl > 0 else -1
+            else:
+                break
 
         best_win_streak = 0
         worst_loss_streak = 0
@@ -94,35 +76,27 @@ class TradeRepository:
                 streak = streak - 1 if streak <= 0 else -1
             else:
                 streak = 0
-            if streak > best_win_streak:
-                best_win_streak = streak
-            if streak < worst_loss_streak:
-                worst_loss_streak = streak
+            best_win_streak = max(best_win_streak, streak)
+            worst_loss_streak = min(worst_loss_streak, streak)
 
         max_single_loss = float(np.min(pnl_values))
         running_peak = np.maximum.accumulate(np.array(equity_curve, dtype=float))
-        drawdown_curve = np.array(equity_curve, dtype=float) - running_peak
-        max_drawdown = float(np.min(drawdown_curve)) if len(drawdown_curve) > 0 else 0.0
+        max_drawdown = float(np.min(np.array(equity_curve, dtype=float) - running_peak))
         total_wins = float(np.sum(pnl_values[pnl_values > 0]))
         total_losses = abs(float(np.sum(pnl_values[pnl_values < 0])))
-        profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
-
-        avg_win = total_wins / win_count if win_count > 0 else 0
-        avg_loss = total_losses / loss_count if loss_count > 0 else 0
-        win_prob = win_count / total_trades if total_trades > 0 else 0
-        loss_prob = loss_count / total_trades if total_trades > 0 else 0
-
-        if avg_loss > 0 and avg_win > 0:
-            kelly_criterion = (win_prob * avg_win - loss_prob * avg_loss) / avg_win
-        else:
-            kelly_criterion = 0.0
-
-        pnl_mean = float(np.mean(pnl_values)) if total_trades > 0 else 0.0
+        profit_factor = total_wins / total_losses if total_losses else 0.0
+        avg_win = total_wins / win_count if win_count else 0.0
+        avg_loss = total_losses / loss_count if loss_count else 0.0
+        win_prob = win_count / total_trades if total_trades else 0.0
+        loss_prob = loss_count / total_trades if total_trades else 0.0
+        kelly_criterion = (
+            (win_prob * avg_win - loss_prob * avg_loss) / avg_win
+            if avg_loss > 0 and avg_win > 0
+            else 0.0
+        )
+        pnl_mean = float(np.mean(pnl_values)) if total_trades else 0.0
         pnl_std = float(np.std(pnl_values, ddof=1)) if total_trades > 1 else 0.0
         sqn = (pnl_mean / pnl_std) * np.sqrt(total_trades) if pnl_std > 0 else 0.0
-
-        expected_value = (win_prob * avg_win) - (loss_prob * avg_loss)
-        risk_reward_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
 
         summary = {
             "total_pnl": total_pnl,
@@ -140,59 +114,8 @@ class TradeRepository:
             "profit_factor": profit_factor,
             "kelly_criterion": kelly_criterion,
             "sqn": float(sqn),
-            "expected_value": expected_value,
-            "risk_reward_ratio": risk_reward_ratio,
+            "expected_value": (win_prob * avg_win) - (loss_prob * avg_loss),
+            "risk_reward_ratio": avg_win / avg_loss if avg_loss > 0 else 0.0,
         }
-        self._write.save_trade_summary(summary)
+        self.save_trade_summary(summary)
         return summary
-
-    def get_all_trades(self, limit: int = None, offset: int = 0):
-        return self._read.get_all_trades(limit=limit, offset=offset)
-
-    def get_open_positions(self):
-        return self._read.get_open_positions()
-
-    def get_open_position_symbols(self):
-        return self._read.get_open_position_symbols()
-
-    def get_balance_history(self, **kwargs):
-        return self._read.get_balance_history(**kwargs)
-
-    def get_transfers(self):
-        return self._read.get_transfers()
-
-    def get_transfer_timeline(self):
-        return self._read.get_transfer_timeline()
-
-    def save_balance_history(self, balance: float, wallet_balance: float = 0.0):
-        return self._write.save_balance_history(balance=balance, wallet_balance=wallet_balance)
-
-    def prune_balance_history(
-        self,
-        days_to_keep_raw: int = 7,
-        days_to_keep_hourly: int = 90,
-        days_to_keep_daily: int = 365,
-    ) -> int:
-        return self._write.prune_balance_history(
-            days_to_keep_raw=days_to_keep_raw,
-            days_to_keep_hourly=days_to_keep_hourly,
-            days_to_keep_daily=days_to_keep_daily,
-        )
-
-    def save_ws_event(self, event_type: str, event_time: int, payload):
-        return self._write.save_ws_event(event_type=event_type, event_time=event_time, payload=payload)
-
-    def get_daily_stats(self):
-        return self._read.get_daily_stats()
-
-    def get_monthly_target(self):
-        return self._read.get_monthly_target()
-
-    def set_monthly_target(self, target: float):
-        return self._write.set_monthly_target(target=target)
-
-    def get_monthly_pnl(self):
-        return self._read.get_monthly_pnl()
-
-    def get_trade_aggregates(self, window: str = "all"):
-        return self._read.get_trade_aggregates(window=window)

@@ -1,19 +1,13 @@
-from app.binance_client import BinanceFuturesRestClient
+from collections.abc import Generator
+
+from fastapi import Request
+
 from app.database import Database
 
-_db_singleton = None
 
-
-def get_db_singleton() -> Database:
-    global _db_singleton
-    if _db_singleton is None:
-        _db_singleton = Database()
-    return _db_singleton
-
-
-def get_db():
-    yield get_db_singleton()
-
-
-def get_public_rest():
-    return BinanceFuturesRestClient()
+def get_db(request: Request) -> Generator[Database, None, None]:
+    """Expose the database owned by this FastAPI application's lifespan."""
+    context = getattr(request.app.state, "context", None)
+    if context is None:
+        raise RuntimeError("application context is not initialized")
+    yield context.db

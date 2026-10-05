@@ -198,12 +198,12 @@ def test_scheduler_noon_methods_delegate_to_job_module(monkeypatch):
 
     def fake_noon(s):
         calls["noon"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "noon-ok"
 
     def fake_review(s, snapshot_date=None, send_notification=True):
         calls["review"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return f"review:{snapshot_date}:{send_notification}"
 
     monkeypatch.setattr("app.scheduler.run_noon_loss_check", fake_noon)
@@ -222,7 +222,7 @@ def test_scheduler_open_positions_sync_delegates_to_job_module(monkeypatch):
 
     def fake_open_sync(s):
         calls["open"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "open-ok"
 
     monkeypatch.setattr("app.scheduler.run_sync_open_positions", fake_open_sync)
@@ -239,12 +239,12 @@ def test_scheduler_risk_methods_delegate_to_job_module(monkeypatch):
 
     def fake_stale(s):
         calls["stale"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "stale-ok"
 
     def fake_sleep(s):
         calls["sleep"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "sleep-ok"
 
     monkeypatch.setattr("app.scheduler.run_long_held_positions_check", fake_stale)
@@ -263,12 +263,12 @@ def test_scheduler_alert_methods_delegate_to_job_module(monkeypatch):
 
     def fake_reentry(s):
         calls["reentry"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "reentry-ok"
 
     def fake_profit(s, threshold_pct):
         calls["profit"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return f"profit-ok:{threshold_pct}"
 
     monkeypatch.setattr("app.scheduler.run_reentry_alert_check", fake_reentry)
@@ -287,17 +287,17 @@ def test_scheduler_compensation_methods_delegate_to_job_module(monkeypatch):
 
     def fake_request(s, symbols, reason="open_positions_change", symbol_since_ms=None):
         calls["request"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return ("request", symbols, reason, symbol_since_ms)
 
     def fake_pending(s):
         calls["pending"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return "pending-ok"
 
     def fake_sync(s, symbols, reason="triggered", symbol_since_ms=None):
         calls["sync"] += 1
-        assert s is scheduler
+        assert s is scheduler.job_context
         return ("sync", symbols, reason, symbol_since_ms)
 
     monkeypatch.setattr("app.scheduler.request_trades_compensation_job", fake_request)
@@ -316,7 +316,7 @@ def test_scheduler_sync_trades_impl_delegates_to_job_module(monkeypatch):
     scheduler = TradeDataScheduler()
 
     def fake_impl(s, force_full=False):
-        assert s is scheduler
+        assert s is scheduler.job_context
         return f"impl:{force_full}"
 
     monkeypatch.setattr("app.scheduler.run_sync_trades_data_impl", fake_impl)
@@ -347,14 +347,14 @@ def test_sync_trades_data_handles_empty_symbol_list(monkeypatch):
         def log_sync_run(self, **kwargs):
             return None
 
-    scheduler.processor = FakeProcessor()
-    scheduler.sync_repo = FakeSyncRepo()
+    scheduler.job_context.processor = FakeProcessor()
+    scheduler.job_context.sync_repo = FakeSyncRepo()
 
-    monkeypatch.setattr(scheduler, "_is_leaderboard_guard_window", lambda: False)
-    monkeypatch.setattr(scheduler, "_is_api_cooldown_active", lambda source: False)
-    monkeypatch.setattr(scheduler, "_try_enter_api_job_slot", lambda source: True)
-    monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
-    monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
+    monkeypatch.setattr(scheduler.job_context, "_is_leaderboard_guard_window", lambda: False)
+    monkeypatch.setattr(scheduler.job_context, "_is_api_cooldown_active", lambda source: False)
+    monkeypatch.setattr(scheduler.job_context, "_try_enter_api_job_slot", lambda source, category=None: True)
+    monkeypatch.setattr(scheduler.job_context, "_release_api_job_slot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler.job_context, "check_long_held_positions", lambda: None)
 
     assert scheduler._sync_trades_data_impl(force_full=False) is True
 
@@ -402,14 +402,14 @@ def test_sync_trades_data_uses_batch_watermark_updates(monkeypatch):
             return None
 
     fake_repo = FakeSyncRepo()
-    scheduler.processor = FakeProcessor()
-    scheduler.sync_repo = fake_repo
+    scheduler.job_context.processor = FakeProcessor()
+    scheduler.job_context.sync_repo = fake_repo
 
-    monkeypatch.setattr(scheduler, "_is_leaderboard_guard_window", lambda: False)
-    monkeypatch.setattr(scheduler, "_is_api_cooldown_active", lambda source: False)
-    monkeypatch.setattr(scheduler, "_try_enter_api_job_slot", lambda source: True)
-    monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
-    monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
+    monkeypatch.setattr(scheduler.job_context, "_is_leaderboard_guard_window", lambda: False)
+    monkeypatch.setattr(scheduler.job_context, "_is_api_cooldown_active", lambda source: False)
+    monkeypatch.setattr(scheduler.job_context, "_try_enter_api_job_slot", lambda source, category=None: True)
+    monkeypatch.setattr(scheduler.job_context, "_release_api_job_slot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler.job_context, "check_long_held_positions", lambda: None)
 
     assert scheduler._sync_trades_data_impl(force_full=False) is False
     assert len(fake_repo.success_batch_calls) == 1
@@ -451,14 +451,14 @@ def test_sync_trades_data_prefers_single_income_pass_api(monkeypatch):
         def log_sync_run(self, **kwargs):
             return None
 
-    scheduler.processor = FakeProcessor()
-    scheduler.sync_repo = FakeSyncRepo()
+    scheduler.job_context.processor = FakeProcessor()
+    scheduler.job_context.sync_repo = FakeSyncRepo()
 
-    monkeypatch.setattr(scheduler, "_is_leaderboard_guard_window", lambda: False)
-    monkeypatch.setattr(scheduler, "_is_api_cooldown_active", lambda source: False)
-    monkeypatch.setattr(scheduler, "_try_enter_api_job_slot", lambda source: True)
-    monkeypatch.setattr(scheduler, "_release_api_job_slot", lambda: None)
-    monkeypatch.setattr(scheduler, "check_long_held_positions", lambda: None)
+    monkeypatch.setattr(scheduler.job_context, "_is_leaderboard_guard_window", lambda: False)
+    monkeypatch.setattr(scheduler.job_context, "_is_api_cooldown_active", lambda source: False)
+    monkeypatch.setattr(scheduler.job_context, "_try_enter_api_job_slot", lambda source, category=None: True)
+    monkeypatch.setattr(scheduler.job_context, "_release_api_job_slot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler.job_context, "check_long_held_positions", lambda: None)
 
     assert scheduler._sync_trades_data_impl(force_full=False) is True
 
@@ -589,9 +589,9 @@ def test_request_trades_compensation_merges_symbols_with_earliest_since(monkeypa
     )
 
     assert added["count"] == 2
-    assert "BTCUSDT" in scheduler._pending_compensation_since_ms
-    assert "ETHUSDT" in scheduler._pending_compensation_since_ms
-    assert scheduler._pending_compensation_since_ms["BTCUSDT"] <= now_ms - 3 * 60 * 60 * 1000
+    assert "BTCUSDT" in scheduler.job_context._pending_compensation_since_ms
+    assert "ETHUSDT" in scheduler.job_context._pending_compensation_since_ms
+    assert scheduler.job_context._pending_compensation_since_ms["BTCUSDT"] <= now_ms - 3 * 60 * 60 * 1000
 
 
 def test_request_trades_compensation_normalizes_base_symbols(monkeypatch):
@@ -608,4 +608,4 @@ def test_request_trades_compensation_normalizes_base_symbols(monkeypatch):
         symbol_since_ms={"PIPPIN": now_ms - 5 * 60 * 60 * 1000},
     )
 
-    assert "PIPPINUSDT" in scheduler._pending_compensation_since_ms
+    assert "PIPPINUSDT" in scheduler.job_context._pending_compensation_since_ms

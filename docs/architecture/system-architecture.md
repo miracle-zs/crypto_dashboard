@@ -55,16 +55,23 @@
 | 目录/模块 | 核心职责 | 依赖规范 |
 | :--- | :--- | :--- |
 | `app/main.py` | 应用入口、生命周期管理 (`lifespan`)、中间件注册、路由挂载。 | 协调全局实例，不承载具体业务。 |
-| `app/api/` | 细粒度的 REST API 路由实现（按领域拆为 8 个子模块）。 | 仅处理参数校验与 HTTP 状态码，依赖 `services`。 |
+| `app/api/` | 细粒度的 REST API 路由实现（按领域拆为 8 个子模块）。 | 仅处理参数校验、HTTP 状态码与异步边缘适配；调用有业务行为的 `services` 或直接调用只读仓储。 |
 | `app/routes/` | 页面模板路由渲染（6 个主功能视图）。 | 注入前端静态资源版本，返回 HTML。 |
 | `app/services/` | 核心业务领域编排，维持各接口逻辑闭环。 | 依赖 `repositories` 和 `core`，无 HTTP 框架耦合。 |
 | `app/repositories/`| 数据持久化封装与 SQL 抽象层。 | 只负责 SQLite 数据库交互，不参与复杂业务逻辑。 |
-| `app/jobs/` | APScheduler 后台调度任务实现集合。 | 纯任务入口，调用对应的 service 执行具体计算。 |
+| `app/jobs/` | APScheduler 后台调度任务实现集合。 | 仅接收 `JobContext` 中显式提供的协作者；不依赖或反向引用 `TradeDataScheduler`。 |
 | `app/core/` | 算法核心、只读模型、限流预算、时间工具、数据库版本迁移。 | 纯计算与低层基础设施，不依赖外部上层服务。 |
 | `app/binance_client.py` | 币安合约 REST API 客户端。 | 内置 Session 复用、重试退避与权重开销追踪。 |
 | `app/user_stream.py` | 币安 WebSocket 用户数据流管理。 | 包含心跳保活、断线重连守护线程与事件持久化。 |
 | `app/notifier.py` | 微信/Server酱通知客户端。 | 负责将告警与复盘消息推送至移动端。 |
 | `app/scheduler.py` | 后台定时任务的组装与生命周期控制器。 | 负责调度器注册、互斥锁分配与环境隔离控制。 |
+
+### 依赖方向与组合规则
+
+- `app.main` 是进程组合根：在 lifespan 内创建 `ApplicationContext`，将同一数据库实例显式传给 HTTP 依赖、调度器和 User Stream。
+- 页面路由只返回 HTML；所有 `/api/*` 端点只能定义在 `app/api/`。
+- 后台任务通过 `JobContext` 取得配置、仓储、处理器和运行锁；任务模块不得接收完整调度器实例。
+- `TradeRepository` 与 `SyncRepository` 分别是其聚合唯一的公开持久化接口。读写实现为内部实现细节，不向调用方暴露委托对象。
 
 ---
 

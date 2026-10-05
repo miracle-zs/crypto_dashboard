@@ -7,15 +7,14 @@ import pandas as pd
 
 from app.database import Database
 from app.models import Trade, TradeSummary
-from app.repositories import TradeRepository
+from app.repositories import SettingsRepository, TradeRepository
 
 
 class TradeQueryService:
     """交易数据查询服务 - 从数据库读取 (Read-Only)"""
 
-    def __init__(self, db: Optional[Database] = None, api_key: str = None, api_secret: str = None):
-        # API密钥用于定时任务，这里只负责读取数据库
-        self.db = db or Database()
+    def __init__(self, db: Database):
+        self.db = db
         self.repo = TradeRepository(self.db)
 
     def get_summary(self) -> TradeSummary:
@@ -75,3 +74,23 @@ class TradeQueryService:
             trades.append(trade)
 
         return trades
+
+    def get_daily_stats(self):
+        return self.repo.get_daily_stats()
+
+    def get_trade_aggregates(self, window: str = "all"):
+        return self.repo.get_trade_aggregates(window)
+
+    def get_monthly_progress(self):
+        target = self.repo.get_monthly_target()
+        current_pnl = self.repo.get_monthly_pnl()
+        progress = (current_pnl / target * 100) if target > 0 else 0
+        return {"target": target, "current": current_pnl, "progress": round(progress, 1)}
+
+    def set_monthly_target(self, target: float):
+        self.repo.set_monthly_target(target)
+        return {"message": "目标已更新", "target": target}
+
+    def set_position_long_term(self, symbol: str, order_id: int, is_long_term: bool):
+        SettingsRepository(self.db).set_position_long_term(symbol, order_id, is_long_term)
+        return {"message": "状态已更新", "symbol": symbol, "is_long_term": is_long_term}

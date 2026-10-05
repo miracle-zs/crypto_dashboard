@@ -29,3 +29,8 @@ def test_system_api_has_no_run_in_executor_logic():
 def test_positions_api_has_no_run_in_executor_logic():
     text = Path("app/api/positions_api.py").read_text(encoding="utf-8")
     assert "run_in_executor" not in text
+
+
+def test_hollow_trade_and_system_api_services_are_removed():
+    assert not Path("app/services/trades_api_service.py").exists()
+    assert not Path("app/services/system_api_service.py").exists()

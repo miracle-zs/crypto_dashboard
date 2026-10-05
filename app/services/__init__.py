@@ -3,8 +3,6 @@ from .leaderboard_service import LeaderboardService
 from .crash_risk_service import CrashRiskService
 from .positions_service import PositionsService
 from .rebound_service import ReboundService
-from .system_api_service import SystemApiService
-from .trades_api_service import TradesApiService
 from .trade_query_service import TradeQueryService
 from .trade_api_gateway import (
     fetch_account_balance,
@@ -28,9 +26,7 @@ __all__ = [
     "PositionsService",
     "ReboundService",
     "LeaderboardHistoryService",
-    "TradesApiService",
     "WatchNotesService",
-    "SystemApiService",
     "fetch_income_history",
     "fetch_all_orders",
     "fetch_user_trades",

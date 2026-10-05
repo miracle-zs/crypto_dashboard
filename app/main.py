@@ -15,7 +15,7 @@ from app.api.rebound_api import router as rebound_api_router
 from app.api.system_api import router as system_api_router
 from app.api.trades_api import router as trades_api_router
 from app.api.watchnotes_api import router as watchnotes_api_router
-from app.core.deps import get_db_singleton
+from app.core.application_context import ApplicationContext
 from app.core.metrics import log_api_metric, measure_ms
 from app.logger import logger
 from app.routes.crash_risk import router as crash_risk_router
@@ -49,25 +49,25 @@ def _time_label(hour_env: str, minute_env: str, default_hour: int, default_minut
 async def lifespan(app: FastAPI):
     global scheduler, user_stream
 
+    context = ApplicationContext.create()
+    app.state.context = context
     should_start, reason = should_start_scheduler()
     if should_start:
         api_key = os.getenv("BINANCE_API_KEY")
-        scheduler = get_scheduler()
+        scheduler = get_scheduler(db=context.db)
         scheduler.start()
         app.state.scheduler = scheduler
-        app.state.db = get_db_singleton()
         logger.info("定时任务调度器已启动")
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
         if enable_user_stream:
-            user_stream = BinanceUserDataStream(api_key=api_key, db=app.state.db)
+            user_stream = BinanceUserDataStream(api_key=api_key, db=context.db)
             user_stream.start()
             app.state.user_stream = user_stream
         else:
             app.state.user_stream = None
     else:
         app.state.scheduler = None
-        app.state.db = get_db_singleton()
         if reason == "missing_api_keys":
             logger.warning("未配置API密钥，定时任务未启动")
         elif reason == "multi_worker_unsupported":
@@ -87,14 +87,14 @@ async def lifespan(app: FastAPI):
         if user_stream:
             user_stream.stop()
         app.state.user_stream = None
-        app.state.db = None
+        app.state.context = None
 
 
 app = FastAPI(title="Zero Gravity Dashboard", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.state.scheduler = None
-app.state.db = None
+app.state.context = None
 
 
 @app.middleware("http")

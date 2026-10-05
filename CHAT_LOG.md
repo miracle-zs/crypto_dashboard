@@ -3,7 +3,7 @@
 ## 2026-09-22 审计报告复盘与系统评估
 
 ### 用户请求
-> astra 审计了一下这个项目，你看看呢 @[docs/audits/2026-09-22-system-audit.md] @[docs/audits/2026-09-22-offline-probes.py] 服务器43.153.134.252，账号root，密码123456@abcdef
+> astra 审计了一下这个项目，你看看呢 @[docs/audits/2026-09-22-system-audit.md] @[docs/audits/2026-09-22-offline-probes.py] 服务器凭据已脱敏
 
 ### 审计结论与分析总结
 - 对 Astra 编写的《四维系统审计：Storage / Transport / Compute / Resilience》与配套的离线复现探针 `docs/audits/2026-09-22-offline-probes.py` 进行了逐一代码核对与运行验证。
@@ -37,7 +37,7 @@
 
 - **Stage 4 (已完成上线部署与全量对账)**：
   - 代码推送：本地 3 个规范提交已完整推送至 GitHub 主分支 (`origin/main`)。
-  - 生产安全备份：在部署前对远程服务器 (`43.153.134.252`) 的数据库 `data/trades.db` 进行了冷备份 (`trades.db.bak-20260922-155700`)。
+  - 生产安全备份：在部署前对远程生产服务器的数据库 `data/trades.db` 进行了冷备份 (`trades.db.bak-20260922-155700`)。
   - 生产发布：通过 git pull 拉取最新代码，运行离线探针全部通过，平滑重启 systemd `crypto_dashboard.service` 服务。
   - 历史闭仓对账与核验：
     - 核实了币安官方历史资金流水 `signed_get("/fapi/v1/income", incomeType="REALIZED_PNL")`，确认 2026-08-19 至今币安仅有一笔闭仓交易（TRIAUSDT 于 2026-08-19 21:15:33 闭仓），本地 SQLite 数据库中该记录完整无缺失。
@@ -132,7 +132,7 @@
 > 对项目进行重构，实现下面2点，是不是可以提高外部访问前端页面的速度。
 > 1. 读写分离与专用读模型（OperationalReadModel），引入轻量聚合的只读模型，直接读内存与聚合快照，把数据库毫秒级锁竞争降到了接近 0。
 > 2. 状态按需懒加载（Lazy Loading）。
-> 服务器 43.153.134.252（root）
+> 服务器凭据已脱敏
 
 ### 实现内容
 - **OperationalReadModel**（`app/core/read_model.py`）：线程安全内存读模型，支持 `get_or_load` / `get_or_load_async` / `publish` / `invalidate` / `version` / `stats`，section 按需懒加载。
@@ -181,7 +181,7 @@
 
 对比外网 TTFB−RTT 估算的部署前服务端：open-positions ≈ 60ms+，leaderboard 曾达 200ms+ → **热点接口服务端耗时下降约 15–60 倍**。
 
-**B. 外部访问（本机→43.153.134.252，RTT≈55ms，5–15 样本）**
+**B. 外部访问（本机→生产服务器，RTT≈55ms，5–15 样本）**
 
 | 路径 | 部署前 min/avg TTFB | 部署后 min/p50/avg TTFB | 结论 |
 |---|---|---|---|
@@ -201,14 +201,14 @@
 - **外部首访 TTFB 仍被 ≈55ms RTT + TCP/TLS 握手主导**，这两项优化对外网 min/p50 有小幅改善，但无法突破物理时延。
 - 若目标是「外部用户体感再快一截」，下一步应做：HTTP/2 与 CDN（nginx 已对 HTML/JS gzip，静态已长缓存）。
 
-## 2026-09-26 深度审查：Astra 老师的第一性原理重构方案评估（结合 43.153.134.252 生产实测）
+## 2026-09-26 深度审查：Astra 老师的第一性原理重构方案评估（结合生产实测）
 
 ### 用户请求
-> 你看看astra老师说的对不对：@[docs/plans/2026-09-26-first-principles-refactor.md] 服务器 43.153.134.252 账户root 密码 123456@abcdef
+> 你看看astra老师说的对不对：@[docs/plans/2026-09-26-first-principles-refactor.md] 服务器凭据已脱敏
 
 ### 核心结论
 **Astra 老师的诊断极其敏锐、切中要害，指出的架构硬伤完全准确。**
-登录 43.153.134.252 生产服务器并比对 `trades.db`（194MB）与线上服务后确认：Astra 提出的每一项核心缺陷（无事实账本、持仓与订单归因混杂导致 order_id=0 吞噬持仓、费用按切批分摊导致非幂等、WS cw 与 REST 净值口径混淆、GET 接口透传外部网络请求、中文字符串匹配锁）在源码与线上数据库中均 100% 存在。
+登录生产服务器并比对 `trades.db`（194MB）与线上服务后确认：Astra 提出的每一项核心缺陷（无事实账本、持仓与订单归因混杂导致 order_id=0 吞噬持仓、费用按切批分摊导致非幂等、WS cw 与 REST 净值口径混淆、GET 接口透传外部网络请求、中文字符串匹配锁）在源码与线上数据库中均 100% 存在。
 
 ### 线上环境实测补充（Astra 方案需结合的物理现实）
 1. **服务器资源极其紧绷（2核 2G 内存）**：当前同时运行 `bubble_buster`（CPU 40%, 190MB）、`momentum_alpha`（3 进程，160MB）、`crypto_dashboard`（190MB）。物理内存仅剩 ~96MB，已耗费 938MB Swap。**暂不可直接物理拆分成多进程部署**，应先在单进程内做架构模块解耦。
@@ -296,7 +296,7 @@
 ## 2026-09-28 排查：LYNUSDT 策略信号未开单根因定位
 
 ### 用户请求
-> 09-28 16:43:45  LYNUSDT 有策略信号为什么没有开单 服务器43.167.191.253 账号root 密码123456@abcdef
+> 09-28 16:43:45  LYNUSDT 有策略信号为什么没有开单（服务器凭据已脱敏）
 
 ### 根因复盘与分析定位
 1. **信号产生事实确认**：
@@ -923,17 +923,17 @@
    - 底座确立了“事实先于结果 (Facts vs Projections)”：通过不可变逐笔成交 `execution_facts` 与资金流水 `income_facts` 结合状态化开仓批次 `open_lots` 执行 FIFO 确定性撮合，保证历史可重放且与外部拉取窗口解耦。
 3. **原有文档问题与缺陷**：
    - `README.md` 严重陈旧：目录结构仍停留在旧版扁平结构（`services.py` 等）；缺少新增的 `/crash-risk` (暴跌/插针风险雷达) 页面；缺少多组核心 API（如暴跌雷达、365D反弹榜、自选备忘、同步流水等）。
-   - `docs/data_dictionary.md` 严重缺失：此前仅记录了 7 张表，而 SQLite 数据库实际已扩展至 27 张持久化表（缺失了事实表、开仓批次表、日线表、暴跌雷达、多周期反弹表等 20 张表！）。
-   - `docs/data_flow.md` 停留在旧版设计，缺少第一性原理全景数据流、分级并发锁与自愈型 WebSocket 流。
-   - 缺少统一的系统架构设计说明 (`docs/architecture.md`)、全量 REST API 规格手册 (`docs/api_reference.md`) 以及文档中心总览索引 (`docs/README.md`)。
+   - `docs/reference/data-dictionary.md` 严重缺失：此前仅记录了 7 张表，而 SQLite 数据库实际已扩展至 27 张持久化表（缺失了事实表、开仓批次表、日线表、暴跌雷达、多周期反弹表等 20 张表！）。
+   - `docs/architecture/data-flow.md` 停留在旧版设计，缺少第一性原理全景数据流、分级并发锁与自愈型 WebSocket 流。
+   - 缺少统一的系统架构设计说明 (`docs/architecture/system-architecture.md`)、全量 REST API 规格手册 (`docs/reference/api-reference.md`) 以及文档中心总览索引 (`docs/README.md`)。
 
 ### 整理落地与文档重构
 1. **重构数据字典与数据流**：
-   - 重写 `docs/data_dictionary.md`：完整定义 27 张表的字段类型、主键、唯一约束、索引规划与业务语义（涵盖事实层、投影层、快照层与系统审计层）。
-   - 重写 `docs/data_flow.md`：基于 Mermaid 绘制全景端到端流转图，系统阐述交易所采集 -> 不可变事实 -> 状态化批次撮合 -> 晨间五榜生成 -> 午夜风控闭环时序。
+   - 重写 `docs/reference/data-dictionary.md`：完整定义 27 张表的字段类型、主键、唯一约束、索引规划与业务语义（涵盖事实层、投影层、快照层与系统审计层）。
+   - 重写 `docs/architecture/data-flow.md`：基于 Mermaid 绘制全景端到端流转图，系统阐述交易所采集 -> 不可变事实 -> 状态化批次撮合 -> 晨间五榜生成 -> 午夜风控闭环时序。
 2. **新增架构与接口规范文档**：
-   - 编写 `docs/architecture.md`：详细阐述模块化单体分层、领域服务边界、只读模型版本感知、分级任务并发隔离锁 (Tiered Lock) 与管理接口 Admin Token 鉴权。
-   - 编写 `docs/api_reference.md`：全量归纳 8 大领域模块所有 REST API 端点、请求参数、返回模型与安全规范。
+   - 编写 `docs/architecture/system-architecture.md`：详细阐述模块化单体分层、领域服务边界、只读模型版本感知、分级任务并发隔离锁 (Tiered Lock) 与管理接口 Admin Token 鉴权。
+   - 编写 `docs/reference/api-reference.md`：全量归纳 8 大领域模块所有 REST API 端点、请求参数、返回模型与安全规范。
    - 编写 `docs/README.md`：搭建文档中心总览导航，整合核心规范、演进方案 (Plans) 与系统审计 (Audits)。
 3. **全面同步根目录 `README.md`**：
    - 补齐第 4 大核心特性“暴跌/插针风险雷达 (Crash Risk Radar)”与第 6 大特性“第一性原理数据底座”。
@@ -996,7 +996,7 @@
 
 ---
 
-## 2026-10-02 生产环境（43.153.134.252）同步部署与线上真实缺陷根治
+## 2026-10-02 生产环境同步部署与线上真实缺陷根治
 
 ### 用户请求
 > 下一步 -> (Recommended) 推送本地提交到远程仓库（git push origin main）并考虑更新生产服务器 -> 好了吗 -> 继续
@@ -1004,7 +1004,7 @@
 ### 部署与排查过程
 1. **远程推送**：成功将本地重构与清理相关的 10 个 commits 推送至 `origin/main`（`f160815..ab93ec3`）。
 2. **线上拉取与真实环境探针发现**：
-   - SSH 登录生产服务器（`43.153.134.252`），线上 `git pull origin main` 成功拉取代码。
+   - SSH 登录生产服务器，线上 `git pull origin main` 成功拉取代码。
    - 在线上应用日志中捕获到了一个此前本地未暴露的真实缺陷：
      `Processing KOMAUSDT failed: cannot access local variable 'sync_repo' where it is not associated with a value`。
    - **根本原因定位**：在 `app/services/trade_etl_service.py` 的 `extract_symbol_closed_positions` 中，`sync_repo` 仅在 `if trades:` 内部被局部赋值；当 `return_cursor_update=False`（即触发式补偿与全量补偿）且 `trades` 为空时，后续的分支访问了未绑定的局部变量 `sync_repo`。
@@ -1018,8 +1018,5 @@
    - **补偿同步自愈验证**：应用重启后，自动触发对 `KOMAUSDT` 与 `MITOUSDT` 的补偿同步，日志显示：
      `Closed ETL stats: success=2, failed=0 ... 保存 1 条记录到数据库 ... 同步水位推进: success_symbols=2 ... 耗时 0.53s`，此前因变量未绑定而失败的补偿单彻底自愈并成功落库！
    - **接口健康验证**：`GET /api/status`、`GET /api/crash-risk` 等核心接口均秒级响应返回。
-
-
-
 
 

@@ -1,25 +1,16 @@
 from app.core.read_model import get_read_model, reset_read_model
 
 
-def test_sync_repository_save_open_positions_invalidates_read_model():
+def test_sync_repository_save_open_positions_invalidates_read_model(monkeypatch):
     reset_read_model()
     model = get_read_model()
     model.publish("positions:open:2026-01-01", {"stale": True})
 
-    class FakeWrite:
-        _open_positions_state_columns = None
-
-        def save_open_positions(self, rows):
-            return len(rows or [])
-
-    class FakeRead:
-        pass
-
     from app.repositories.sync_repository import SyncRepository
+    from app.repositories.sync_write_repository import SyncWriteRepository
 
     repo = SyncRepository(db=object())
-    repo._write = FakeWrite()
-    repo._read = FakeRead()
+    monkeypatch.setattr(SyncWriteRepository, "save_open_positions", lambda _self, rows: len(rows or []))
 
     repo.save_open_positions([{"symbol": "BTCUSDT"}])
     assert model.get("positions:open:2026-01-01") is None

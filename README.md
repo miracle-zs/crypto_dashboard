@@ -13,12 +13,12 @@
 
 ## 📚 项目技术文档中心
 
-项目提供了完备的工程设计与规格文档，详细内容请参阅 [docs/ 目录](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/README.md)：
-- 🏛️ [系统架构设计 (Architecture)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/architecture.md)：模块化单体分层、领域服务编排、第一性原理账本与分级隔离锁。
-- 🌊 [全景数据流设计 (Data Flow)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/data_flow.md)：端到端数据采集、状态化批次撮合、07:00 晨间五榜与风控闭环时序。
-- 📖 [全量数据字典 (Data Dictionary)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/data_dictionary.md)：全库 27 张持久化表结构、字段含义、主键约束与索引规划。
-- 🔌 [REST API 规格手册 (API Reference)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/api_reference.md)：8 大业务领域所有 REST API 端点规格、参数与权限说明。
-- 📜 [系统审计与演进提案 (Audits & Plans)](file:///Users/zhangshuai/PycharmProjects/crypto_dashboard/docs/README.md#架构演进与设计提案-plans)：第一性原理重构、暴跌风险雷达设计与历史审计验证报告。
+项目提供了完备的工程设计与规格文档，详细内容请参阅 [文档中心](docs/README.md)：
+- 🏛️ [系统架构设计](docs/architecture/system-architecture.md)：模块化单体分层、领域服务编排、第一性原理账本与分级隔离锁。
+- 🌊 [全景数据流设计](docs/architecture/data-flow.md)：端到端数据采集、状态化批次撮合、07:00 晨间五榜与风控闭环时序。
+- 📖 [数据字典](docs/reference/data-dictionary.md)：全库持久化表结构、字段含义、主键约束与索引规划。
+- 🔌 [REST API 参考](docs/reference/api-reference.md)：业务领域 REST API 端点、参数与权限说明。
+- 📜 [系统审计与演进资料](docs/README.md)：第一性原理重构、暴跌风险雷达设计与历史审计验证报告。
 
 ---
 
@@ -311,17 +311,14 @@ crypto_dashboard/
 ├── static/                           # 前端静态资源 (CSS / JS)
 ├── data/                             # 数据存储目录
 │   └── trades.db                     # SQLite 数据库文件 (WAL 模式，27 张表)
-├── docs/                             # 系统完备技术文档库
-│   ├── README.md                     # 文档中心总览索引导航
-│   ├── architecture.md               # 模块化单体架构与设计模式
-│   ├── data_flow.md                  # 第一性原理端到端全景数据流
-│   ├── data_dictionary.md            # 27 张持久化表全量数据字典
-│   ├── api_reference.md              # 8 大领域全量 REST API 规格手册
+├── docs/                             # 系统技术文档库
+│   ├── README.md                     # 文档中心与分类约定
+│   ├── architecture/                 # 当前系统架构与数据流
+│   ├── reference/                    # API 与数据字典
 │   ├── plans/                        # 历史演进与重构设计提案
 │   └── audits/                       # 系统审计报告与离线探针脚本
 ├── tests/                            # 自动化测试用例集合 (67 个测试文件)
 ├── requirements.txt                  # Python 依赖清单
-└── IMPLEMENTATION_PLAN.md            # 实施计划与执行记录
 ```
 
 ---
