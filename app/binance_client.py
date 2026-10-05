@@ -21,6 +21,15 @@ from app.core.binance_request_budget import RollingWeightLimiter, binance_reques
 _ORIGINAL_REQUESTS_REQUEST = requests.request
 
 
+def _http_error_log_message(*, method: str, path: str, status_code: int | None, error_code, error_message) -> str:
+    """Render HTTP failures without including signed request query parameters."""
+    message = str(error_message or "unknown")[:500]
+    return (
+        "API request failed: "
+        f"method={method.upper()} path={path} status={status_code} code={error_code} message={message}"
+    )
+
+
 class BinanceFuturesRestClient:
     """Lightweight REST client for Binance USD-M Futures."""
     _cooldown_until_ms = 0
@@ -241,14 +250,26 @@ class BinanceFuturesRestClient:
                         reason=f"status={status_code}, code={err_code}"
                     )
                     # -1003 means request budget is exhausted; stop retrying to avoid prolonging ban.
-                    logger.error(f"API request failed: {exc}")
-                    if hasattr(exc, "response") and exc.response is not None:
-                        logger.error(f"Response: {exc.response.text}")
+                    logger.error(
+                        _http_error_log_message(
+                            method=method,
+                            path=path,
+                            status_code=status_code,
+                            error_code=err_code,
+                            error_message=err_msg,
+                        )
+                    )
                     return None
 
-                logger.error(f"API request failed: {exc}")
-                if hasattr(exc, "response") and exc.response is not None:
-                    logger.error(f"Response: {exc.response.text}")
+                logger.error(
+                    _http_error_log_message(
+                        method=method,
+                        path=path,
+                        status_code=status_code,
+                        error_code=err_code,
+                        error_message=err_msg,
+                    )
+                )
                 return None
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 if is_idempotent and attempt < max_retries:

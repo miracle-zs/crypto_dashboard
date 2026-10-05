@@ -110,10 +110,15 @@ class JobContext:
 
         return run_profit_alert_check(self, threshold_pct)
 
-    def request_trades_compensation(self, symbols, *, reason: str):
+    def request_trades_compensation(self, symbols, *, reason: str, symbol_since_ms=None):
         from app.jobs.trades_compensation_jobs import request_trades_compensation_job
 
-        return request_trades_compensation_job(self, symbols, reason=reason)
+        return request_trades_compensation_job(
+            self,
+            symbols,
+            reason=reason,
+            symbol_since_ms=symbol_since_ms,
+        )
 
     def sync_trades_compensation(self, **kwargs):
         from app.jobs.trades_compensation_jobs import sync_trades_compensation_job

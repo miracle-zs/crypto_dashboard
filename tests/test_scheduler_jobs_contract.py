@@ -123,6 +123,54 @@ def test_weekly_full_window_ignores_custom_start_date():
     assert since > custom_start_ms
 
 
+def test_full_sync_window_keeps_a_safety_margin_inside_binance_history_limit():
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from app.jobs.sync_pipeline_jobs import resolve_sync_window
+
+    scheduler = SimpleNamespace(
+        start_date=None,
+        end_date=None,
+        days_to_fetch=90,
+        sync_lookback_minutes=30,
+    )
+
+    since, until, is_full = resolve_sync_window(
+        scheduler,
+        force_full=True,
+        last_entry_time=None,
+        utc8=ZoneInfo("Asia/Shanghai"),
+        full_lookback_days=90,
+    )
+
+    assert is_full is True
+    assert until - since <= 89 * 24 * 60 * 60 * 1000 + 2_000
+
+
+def test_custom_full_sync_start_is_capped_to_the_queryable_history_window():
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from app.jobs.sync_pipeline_jobs import resolve_sync_window
+
+    scheduler = SimpleNamespace(
+        start_date="2026-01-01",
+        end_date=None,
+        days_to_fetch=90,
+        sync_lookback_minutes=30,
+    )
+
+    since, until, _ = resolve_sync_window(
+        scheduler,
+        force_full=True,
+        last_entry_time=None,
+        utc8=ZoneInfo("Asia/Shanghai"),
+    )
+
+    assert until - since <= 89 * 24 * 60 * 60 * 1000 + 2_000
+
+
 def test_scheduler_trades_incremental_uses_fallback_interval_when_triggered_enabled(monkeypatch):
     from app.scheduler import TradeDataScheduler
 
@@ -609,3 +657,36 @@ def test_request_trades_compensation_normalizes_base_symbols(monkeypatch):
     )
 
     assert "PIPPINUSDT" in scheduler.job_context._pending_compensation_since_ms
+
+
+def test_job_context_forwards_symbol_since_map_to_compensation(monkeypatch):
+    from app.scheduler import TradeDataScheduler
+
+    scheduler = TradeDataScheduler()
+    captured = {}
+
+    def fake_request(context, symbols, *, reason, symbol_since_ms=None):
+        captured["context"] = context
+        captured["symbols"] = symbols
+        captured["reason"] = reason
+        captured["symbol_since_ms"] = symbol_since_ms
+        return "scheduled"
+
+    monkeypatch.setattr(
+        "app.jobs.trades_compensation_jobs.request_trades_compensation_job",
+        fake_request,
+    )
+
+    result = scheduler.job_context.request_trades_compensation(
+        ["BTCUSDT"],
+        reason="open_position_closed",
+        symbol_since_ms={"BTCUSDT": 123},
+    )
+
+    assert result == "scheduled"
+    assert captured == {
+        "context": scheduler.job_context,
+        "symbols": ["BTCUSDT"],
+        "reason": "open_position_closed",
+        "symbol_since_ms": {"BTCUSDT": 123},
+    }

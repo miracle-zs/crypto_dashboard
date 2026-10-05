@@ -7,6 +7,12 @@ from app.logger import logger
 from app.services.sync_planning_service import build_symbol_since_map
 
 
+# Binance accepts order-history queries only from the recent 90 days.  Leave a
+# full-day buffer because a multi-symbol scan can start individual requests
+# several minutes after its common window was calculated.
+BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS = 89
+
+
 def resolve_sync_window(
     scheduler,
     *,
@@ -19,7 +25,10 @@ def resolve_sync_window(
     if force_full:
         is_full_sync_run = True
         if full_lookback_days is not None:
-            bounded_days = min(90, max(1, int(full_lookback_days)))
+            bounded_days = min(
+                BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS,
+                max(1, int(full_lookback_days)),
+            )
             since = int((datetime.now(utc8) - timedelta(days=bounded_days)).timestamp() * 1000)
             logger.info(f"周期全量校验 - 固定回溯最近 {bounded_days} 天")
         elif scheduler.start_date:
@@ -30,10 +39,10 @@ def resolve_sync_window(
                 logger.info(f"全量更新模式(FORCE_FULL_SYNC) - 从自定义日期 {scheduler.start_date} 开始")
             except ValueError as exc:
                 logger.error(f"日期格式错误: {exc}，使用默认DAYS_TO_FETCH")
-                effective_days = min(90, int(scheduler.days_to_fetch))
+                effective_days = min(BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS, int(scheduler.days_to_fetch))
                 since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
         else:
-            effective_days = min(90, int(scheduler.days_to_fetch))
+            effective_days = min(BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS, int(scheduler.days_to_fetch))
             logger.warning("FORCE_FULL_SYNC=1 但未设置 START_DATE，回退为 DAYS_TO_FETCH 窗口")
             since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
     elif last_entry_time:
@@ -43,10 +52,10 @@ def resolve_sync_window(
             logger.info(f"增量更新模式 - 从最近入场时间 {last_entry_time} 回溯 {scheduler.sync_lookback_minutes} 分钟")
         except ValueError as exc:
             logger.error(f"入场时间解析失败: {exc}，使用默认DAYS_TO_FETCH")
-            effective_days = min(90, int(scheduler.days_to_fetch))
+            effective_days = min(BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS, int(scheduler.days_to_fetch))
             since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
     else:
-        effective_days = min(90, int(scheduler.days_to_fetch))
+        effective_days = min(BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS, int(scheduler.days_to_fetch))
         logger.info(f"增量冷启动 - 获取最近 {effective_days} 天数据")
         since = int((datetime.now(utc8) - timedelta(days=effective_days)).timestamp() * 1000)
 
@@ -60,6 +69,21 @@ def resolve_sync_window(
             until = int(datetime.now(utc8).timestamp() * 1000)
     else:
         until = int(datetime.now(utc8).timestamp() * 1000)
+
+    earliest_queryable_since = int(
+        (datetime.now(utc8) - timedelta(days=BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS)).timestamp() * 1000
+    )
+    if since < earliest_queryable_since:
+        if until < earliest_queryable_since:
+            raise ValueError(
+                "请求的订单历史已超出 Binance 可查询范围；请通过导出文件导入历史数据"
+            )
+        logger.warning(
+            "同步窗口早于 Binance 可查询范围，"
+            f"已裁剪为最近 {BINANCE_ORDER_HISTORY_SAFE_LOOKBACK_DAYS} 天；"
+            "更早历史请通过导出文件导入"
+        )
+        since = earliest_queryable_since
     return since, until, is_full_sync_run
 
 

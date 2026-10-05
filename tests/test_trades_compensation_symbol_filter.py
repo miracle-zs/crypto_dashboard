@@ -97,3 +97,22 @@ def test_sync_trades_compensation_returns_when_no_supported_symbols():
     assert ok is True
     assert scheduler.processor.analyze_called is False
     assert scheduler.released is True
+
+
+def test_sync_trades_compensation_records_partial_status_when_a_symbol_fails():
+    scheduler = _FakeScheduler()
+
+    def analyze_orders(**kwargs):
+        return [], ["BTCUSDT"], {"ETHUSDT": "upstream error"}
+
+    scheduler.processor.analyze_orders = analyze_orders
+
+    ok = sync_trades_compensation_job(
+        scheduler,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        reason="triggered",
+    )
+
+    assert ok is False
+    assert scheduler.sync_repo.logged[-1]["status"] == "partial"
+    assert scheduler.sync_repo.logged[-1]["error_message"] == "partial: failed=1"

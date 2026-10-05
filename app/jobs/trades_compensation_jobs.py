@@ -162,22 +162,26 @@ def sync_trades_compensation_job(
             until=until,
         )
         elapsed = time.perf_counter() - started_at
+        failed_count = len(failure_symbols)
+        run_status = "success" if not failed_count else "partial" if success_symbols else "error"
+        error_message = None if not failed_count else f"{run_status}: failed={failed_count}"
         scheduler.sync_repo.log_sync_run(
             run_type="trades_compensation",
             mode="triggered",
-            status="success",
+            status=run_status,
             symbol_count=len(filtered_symbols),
             rows_count=len(df),
             trades_saved=trades_saved,
             open_saved=0,
             elapsed_ms=int(elapsed * 1000),
+            error_message=error_message,
         )
         logger.info(
             "触发式补偿同步完成: "
             f"symbols={len(filtered_symbols)}, rows={len(df)}, saved={trades_saved}, "
             f"save_elapsed={save_elapsed:.2f}s, total_elapsed={elapsed:.2f}s"
         )
-        return True
+        return not failure_symbols
     except Exception as exc:
         elapsed = time.perf_counter() - started_at
         scheduler.sync_repo.log_sync_run(
