@@ -1068,3 +1068,43 @@
 4. **致命原因 3：已实现盈亏归属日期定义严重错误**：
    - `app/core/trade_position_utils.py:59` 将交易日期定义为 `Date: entry_dt.strftime("%Y%m%d")`（开仓日而非平仓日）。
    - 导致 9 月底开仓、10 月初平仓的大额止损单（如 LYN 亏损 -8418 USDT、C98 亏损 -692 USDT、MITO 亏损 -268 USDT 等）全部被倒推算入 9 月份，在 10 月份完全隐形，导致月度统计和日报彻底失真。
+
+---
+
+## 2026-10-11 缺陷修复、端到端测试与生产数据自愈闭环
+
+### 用户指令
+> 是（确认立即开始修复并纠正线上数据）
+
+### 执行过程与实施成果
+按照 `IMPLEMENTATION_PLAN.md` 规范推进 4 个阶段全部闭环：
+
+#### Stage 1: 撮合引擎时间因果律加固 [Commit: 6f7437d]
+1. **强制平仓时间序**：在 `app/core/trade_matching.py` 中的 `match_position_side` 与 `match_one_way_orders` 中增加因果律断言校验：平仓单严禁撮合入场时间在其之后的批次（`order["time"] >= entry["time"]`），杜绝时间倒流与负持有时间。
+2. **防范历史订单冲撞未来 open_lots**：在 `app/services/trade_etl_service.py` 的 `extract_symbol_closed_positions` 中增加防御：当加载的 orders 包含早于当前已存 `open_lots` 的历史记录时，自动丢弃未来快照，基于纯正向历史订单流重构批次。
+3. **单测覆盖**：在 `tests/test_trade_matching_causality.py` 中编写 3 组时序错乱场景专用单元测试，全绿通过。
+
+#### Stage 2: 修正已实现盈亏账期归属日为平仓日 [Commit: a467290]
+1. **修正 Date 字段定义**：在 `app/core/trade_position_utils.py` 与 `app/core/trade_dataframe_utils.py` 中，将已平仓交易的归属日期 `Date` 严格对齐平仓日 `exit_dt.strftime("%Y%m%d")`。
+2. **聚合统计对齐**：在 `app/repositories/trade_aggregates_query.py` 中，将 7d/30d 窗口过滤条件由 `entry_time` 切换为 `exit_time`。
+3. **单测验证**：在 `tests/test_trade_repository_stats.py` 中增加跨月持仓已实现盈亏归属日测试。
+
+#### Stage 3: 本地全量回归测试 [Commit: a467290]
+- 全量 246 个测试用例全部通过（**246 passed, 0 failed, 6.08s**）。
+- 离线审计探针 `docs/audits/2026-09-22-offline-probes.py` 全部通过（**8 passed**）。
+
+#### Stage 4: 生产服务器数据矫正、热更新与币安对账核验
+1. **生产冷备份**：执行 `cp data/trades.db data/trades.db.bak-20261011-122816`（186M 完整快照）。
+2. **代码发布**：生产端 `git pull origin main`，生产环境全量测试 **246 passed, 0 failed, 4.91s**。
+3. **数据库自愈操作**：
+   - 清除幽灵虚假交易 `DELETE FROM trades WHERE id = 842889`（删除 1 条）。
+   - 历史平仓归属日校准：更新了历史 840 条跨天波段平仓记录的 `date = strftime('%Y%m%d', exit_time)`。
+   - 矫正 LYNUSDT 未平仓批次：清除历史已平仓的旧批次，保留真实的当前开仓订单 `1680978379`（292,056 币 @ 0.01712）。
+   - 清除失效的聚合缓存 `trade_aggregates_cache` 与 `trade_summary`。
+4. **服务平滑热更新与对账核验**：
+   - 重启 systemd 服务，WebSocket 与调度器正常启动，内存仅 91MB。
+   - `/api/status`：`total_trades` 由 1721 纠正为 1720，`readiness: healthy`。
+   - `/api/open-positions`：正常返回唯一的 1 笔真实持仓 `LYNUSDT 292056 @ 0.01712`。
+   - `/api/monthly-progress`：10 月收益由虚假暴利 +$11,501.82 真实校正为 **-15,559.12 USDT**（真实反映 10 月全部止损出场）。
+   - `/api/summary`：权益曲线末端突兀的 1.2 万暴涨断层彻底消除，恢复平滑、真实的历史净值轨迹。
+
