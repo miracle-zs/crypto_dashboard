@@ -35,7 +35,7 @@ def merge_same_entry_positions(df: pd.DataFrame) -> pd.DataFrame:
 
         merged_row = {
             "No": group.iloc[0]["No"],
-            "Date": group.iloc[0]["Date"],
+            "Date": exit_time.strftime("%Y%m%d"),
             "Entry_Time": entry_time.strftime("%Y-%m-%d %H:%M:%S"),
             "Exit_Time": exit_time.strftime("%Y-%m-%d %H:%M:%S"),
             "Holding_Time": holding_time,

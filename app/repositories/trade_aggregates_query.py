@@ -17,7 +17,7 @@ def fetch_trade_aggregates(db, window: str = "all"):
         window_since = (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
 
     if window_since is not None:
-        source_where = " WHERE entry_time IS NOT NULL AND entry_time >= ? "
+        source_where = " WHERE exit_time IS NOT NULL AND exit_time >= ? "
         source_params = (window_since,)
     else:
         source_where = ""
@@ -115,7 +115,7 @@ def fetch_trade_aggregates(db, window: str = "all"):
     """
     duration_bucket_params = []
     if window_since is not None:
-        duration_bucket_sql += " AND entry_time >= ? "
+        duration_bucket_sql += " AND exit_time >= ? "
         duration_bucket_params.append(window_since)
     duration_bucket_sql += """
         ) t

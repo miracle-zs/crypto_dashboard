@@ -56,7 +56,7 @@ def position_to_trade_row(
 
     return {
         "No": idx,
-        "Date": entry_dt.strftime("%Y%m%d"),
+        "Date": exit_dt.strftime("%Y%m%d"),
         "Entry_Time": entry_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "Exit_Time": exit_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "Holding_Time": hold_time,

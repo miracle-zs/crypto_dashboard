@@ -48,3 +48,36 @@ def test_trade_repository_get_statistics_aggregates_in_single_result(tmp_path):
         "latest_trade": "2026-02-22 11:00:00",
         "unique_symbols": 2,
     }
+
+
+def test_cross_month_trade_realized_pnl_date_belongs_to_exit_month():
+    from zoneinfo import ZoneInfo
+    from app.core.trade_position_utils import position_to_trade_row
+
+    utc8 = ZoneInfo("Asia/Shanghai")
+    # Position opened in September, exited in October
+    pos = {
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entry_price": 50000.0,
+        "exit_price": 48000.0,
+        "entry_time": 1790555462000,  # 2026-09-28
+        "exit_time": 1791000000000,   # 2026-10-03
+        "qty": 1.0,
+        "pnl": -2000.0,
+        "pnl_before_fees": -2000.0,
+        "entry_order_id": 1,
+        "exit_order_id": 2,
+    }
+
+    formatted = position_to_trade_row(
+        pos,
+        idx=1,
+        open_price_cache={},
+        utc8=utc8,
+        get_utc_day_start=lambda t: 0,
+    )
+    # The Date MUST belong to the exit date (October 2026), NOT September!
+    assert formatted["Date"].startswith("202610")
+    assert formatted["Exit_Time"].startswith("2026-10")
+
