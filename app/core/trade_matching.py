@@ -59,6 +59,10 @@ def match_position_side(
 
             while exit_qty_remaining > 0 and open_positions:
                 entry = open_positions[0]
+                if int(order["time"]) < int(entry["time"]):
+                    # 因果律约束：平仓订单时间不得早于开仓进场时间
+                    break
+
                 close_qty = min(exit_qty_remaining, entry["qty"])
 
                 if side == "LONG":
@@ -151,6 +155,9 @@ def match_one_way_orders(
 
         while remaining > 0 and open_entries and open_entries[0]["side"] == closing_side:
             entry = open_entries[0]
+            if int(order["time"]) < int(entry["time"]):
+                # 因果律约束：平仓/反向订单时间不得早于开仓进场时间
+                break
             close_qty = min(remaining, entry["qty"])
             if closing_side == "LONG":
                 pnl_before_fees = (order["price"] - entry["price"]) * close_qty

@@ -221,6 +221,15 @@ def extract_symbol_closed_positions(
         except Exception as exc:
             logger.debug(f"Failed to load open lots for {symbol}: {exc}")
 
+    if initial_lots and filled_orders:
+        earliest_order_time = min(int(o.get("updateTime", 0)) for o in filled_orders)
+        if any(int(l.get("time_ms", 0)) >= earliest_order_time for l in initial_lots):
+            logger.info(
+                f"[{symbol}] 订单起始时间 ({earliest_order_time}) 早于或重叠已存 open_lots，"
+                "基于历史订单流重新撮合构建"
+            )
+            initial_lots = [l for l in initial_lots if int(l.get("time_ms", 0)) < earliest_order_time]
+
     match_fn = getattr(processor, "match_orders_to_positions", match_orders_to_positions_core)
     try:
         matching_res = match_fn(
