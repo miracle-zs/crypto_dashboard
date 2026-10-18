@@ -183,7 +183,7 @@ def update_daily_kline_cache(
                     "symbol": symbol,
                     "interval": "1d",
                     "startTime": int(latest_open_time),
-                    "limit": 2,
+                    "limit": 5,
                 }
                 incremental_symbols += 1
 

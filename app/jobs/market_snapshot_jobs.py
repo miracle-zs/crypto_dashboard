@@ -69,7 +69,8 @@ def build_top_gainers_snapshot_job(scheduler, utc8):
 
 
 def get_top_gainers_snapshot_job(scheduler, *, source: str, utc8):
-    del utc8
+    from datetime import datetime
+    today_str = datetime.now(utc8).strftime("%Y-%m-%d")
     try:
         snapshot = scheduler.snapshot_repo.get_latest_leaderboard_snapshot()
     except Exception as exc:
@@ -77,6 +78,22 @@ def get_top_gainers_snapshot_job(scheduler, *, source: str, utc8):
         return {"ok": False, "reason": "exception", "message": str(exc)}
     if not snapshot or snapshot.get("top", 0) <= 0:
         return {"ok": False, "reason": "no_data", "message": "尚未生成涨幅榜快照"}
+    if str(snapshot.get("snapshot_date")) != today_str:
+        logger.warning(
+            f"{source}: 最新快照日期为 {snapshot.get('snapshot_date')}，并非今日 ({today_str})，尝试现场构建今日快照..."
+        )
+        try:
+            build_res = build_and_save_all_market_snapshots_job(scheduler, utc8)
+            if build_res.get("ok"):
+                snapshot = scheduler.snapshot_repo.get_latest_leaderboard_snapshot()
+        except Exception as exc:
+            logger.error(f"{source}现场构建快照失败: {exc}")
+    if not snapshot or str(snapshot.get("snapshot_date")) != today_str or snapshot.get("top", 0) <= 0:
+        return {
+            "ok": False,
+            "reason": "stale_data",
+            "message": f"快照非今日数据(快照日期: {snapshot.get('snapshot_date') if snapshot else 'None'}, 今日: {today_str})",
+        }
     return {"ok": True, **snapshot}
 
 
