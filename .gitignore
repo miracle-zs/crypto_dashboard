@@ -10,6 +10,7 @@ venv/
 .venv
 env.bak/
 venv.bak/
+node_modules/
 
 # IDEs
 .idea/

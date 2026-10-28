@@ -22,6 +22,8 @@ async def read_leaderboard_page(request: Request):
         {
             "leaderboard_snapshot_time_label": f"{leaderboard_hour:02d}:{leaderboard_minute:02d}",
             "rebound_snapshot_time_label": f"{rebound_hour:02d}:{rebound_minute:02d}",
+            "tailwind_css_url": static_asset_url("/static/css/tailwind.css"),
+            "lucide_js_url": static_asset_url("/static/vendor/lucide.min.js"),
             "leaderboard_css_url": static_asset_url("/static/dark-unified.css"),
             "leaderboard_js_url": static_asset_url("/static/js/leaderboard.js"),
         },

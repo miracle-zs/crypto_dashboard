@@ -1,0 +1,55 @@
+import { createIcons } from "lucide";
+import * as icons from "lucide";
+
+const iconSet = {
+    Activity: icons.Activity,
+    AlertCircle: icons.AlertCircle,
+    AlertTriangle: icons.AlertTriangle,
+    Award: icons.Award,
+    BarChart2: icons.BarChart2,
+    BarChart3: icons.BarChart3,
+    Calculator: icons.Calculator,
+    CheckCircle: icons.CheckCircle,
+    Clock: icons.Clock,
+    Clock3: icons.Clock3,
+    Crosshair: icons.Crosshair,
+    Flag: icons.Flag,
+    FlipHorizontal: icons.FlipHorizontal,
+    Flame: icons.Flame,
+    HeartPulse: icons.HeartPulse,
+    Inbox: icons.Inbox,
+    Info: icons.Info,
+    Layers: icons.Layers,
+    LineChart: icons.LineChart,
+    ListOrdered: icons.ListOrdered,
+    Minus: icons.Minus,
+    Moon: icons.Moon,
+    Mountain: icons.Mountain,
+    Percent: icons.Percent,
+    PieChart: icons.PieChart,
+    RefreshCw: icons.RefreshCw,
+    Rocket: icons.Rocket,
+    Scale: icons.Scale,
+    ScatterChart: icons.ScatterChart,
+    Settings: icons.Settings,
+    Shield: icons.Shield,
+    Slash: icons.Slash,
+    Sun: icons.Sun,
+    Target: icons.Target,
+    Terminal: icons.Terminal,
+    Timer: icons.Timer,
+    TrendingDown: icons.TrendingDown,
+    TrendingUp: icons.TrendingUp,
+    Triangle: icons.Triangle,
+    Wallet: icons.Wallet,
+    Waves: icons.Waves,
+    Workflow: icons.Workflow,
+    XCircle: icons.XCircle,
+    Zap: icons.Zap,
+};
+
+window.lucide = {
+    createIcons(options = {}) {
+        createIcons({ ...options, icons: iconSet });
+    },
+};

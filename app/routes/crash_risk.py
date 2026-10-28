@@ -14,6 +14,7 @@ async def read_crash_risk_page(request: Request):
         request,
         "crash_risk.html",
         {
+            "tailwind_css_url": static_asset_url("/static/css/tailwind.css"),
             "dark_css_url": static_asset_url("/static/dark-unified.css"),
             "page_js_url": static_asset_url("/static/js/crash-risk.js"),
         },

@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZS's CRYPTO SHORTING COCKPIT</title>
-    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <link rel="stylesheet" href="{{ tailwind_css_url }}">
+    <script src="{{ lucide_js_url }}" defer></script>
+    <script src="{{ apexcharts_js_url }}" defer></script>
 
     <script>
         // 立即执行：在页面渲染前设置 html class，防止白屏闪烁
@@ -808,6 +807,6 @@
         </div>
     </div>
 
-    <script src="{{ page_js_url }}"></script>
+    <script src="{{ page_js_url }}" defer></script>
 </body>
 </html>

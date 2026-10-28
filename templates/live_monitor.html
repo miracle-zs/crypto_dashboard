@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZS's CRYPTO SHORTING COCKPIT // MONITOR</title>
-    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="{{ tailwind_css_url }}">
+    <script src="{{ lucide_js_url }}" defer></script>
     <script>
         if (localStorage.getItem('theme') === 'dark') {
             document.documentElement.classList.add('dark-mode');
@@ -18,7 +17,7 @@
             color: #eaeaea !important;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="{{ apexcharts_js_url }}" defer></script>
 
     <style>
         :root {
@@ -984,4 +983,4 @@
             noonReviewTimeLabel: "{{ noon_review_time_label }}",
         };
     </script>
-    <script src="{{ page_js_url }}"></script>
+    <script src="{{ page_js_url }}" defer></script>

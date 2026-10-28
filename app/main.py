@@ -155,6 +155,9 @@ async def read_live_monitor(request: Request):
         {
             "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
             "noon_review_time_label": _time_label("NOON_REVIEW_HOUR", "NOON_REVIEW_MINUTE", 23, 2),
+            "tailwind_css_url": static_asset_url("/static/css/tailwind.css"),
+            "lucide_js_url": static_asset_url("/static/vendor/lucide.min.js"),
+            "apexcharts_js_url": static_asset_url("/static/vendor/apexcharts.min.js"),
             "dark_css_url": static_asset_url("/static/dark-unified.css"),
             "page_js_url": static_asset_url("/static/js/live-monitor.js"),
         },
@@ -168,6 +171,8 @@ async def read_metrics(request: Request):
         "metrics.html",
         {
             "noon_loss_check_time_label": _time_label("NOON_LOSS_CHECK_HOUR", "NOON_LOSS_CHECK_MINUTE", 11, 50),
+            "tailwind_css_url": static_asset_url("/static/css/tailwind.css"),
+            "lucide_js_url": static_asset_url("/static/vendor/lucide.min.js"),
             "dark_css_url": static_asset_url("/static/dark-unified.css"),
             "page_js_url": static_asset_url("/static/js/metrics.js"),
         },
@@ -180,6 +185,8 @@ async def read_logs_page(request: Request):
         request,
         "logs.html",
         {
+            "tailwind_css_url": static_asset_url("/static/css/tailwind.css"),
+            "lucide_js_url": static_asset_url("/static/vendor/lucide.min.js"),
             "dark_css_url": static_asset_url("/static/dark-unified.css"),
         },
     )
