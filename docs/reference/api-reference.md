@@ -21,7 +21,7 @@
 - **参数**: 无
 - **响应模型**: `TradeSummary`
 - **主要返回字段**:
-  - `total_pnl`: 累计净利润 (USDT)
+  - `total_pnl`: 已记录平仓交易的盈亏之和（USDT），资金费单独统计；历史交易可能采用旧费用口径
   - `win_rate`: 胜率 (%)
   - `win_count` / `loss_count` / `total_trades`: 盈亏与总笔数
   - `equity_curve`: 累计净值曲线数组 `[float]`
@@ -38,6 +38,9 @@
   - `offset` (Query, int, 默认 0): 分页偏移量
 - **响应模型**: `list[Trade]`
 - **主要返回字段**: 每笔交易的 `symbol`, `side`, `entry_time`, `exit_time`, `entry_price`, `exit_price`, `qty`, `fees`, `pnl_net`, `return_rate`, `holding_time`, `entry_order_id`, `exit_order_id`。
+
+### `GET /api/funding-summary`
+独立汇总已记录的 USDT 资金费流水，不分配到订单。返回 `amount`、`record_count`、`first_record_ms` 和 `last_record_ms`；无记录时 `amount` 为 `null`。首末记录时间不代表该区间已完整采集。历史交易可能已经分摊过资金费，不能直接将该数与历史交易盈亏相加。
 
 ### 3. `GET /api/daily-stats`
 获取按自然日统计的每日战绩汇总。
@@ -92,8 +95,9 @@
 - **响应模型**: `OpenPositionsResponse`
 - **主要返回字段**:
   - `version`: 当前数据集版本号
-  - `as_of` / `price_as_of`: 仓位时点与标记价格更新时点
-  - `positions`: 持仓列表，包含 `symbol`, `side`, `qty`, `entry_price`, `mark_price`, `unrealized_pnl`, `notional`, `holding_time`, `is_long_term`
+  - `as_of` / `price_as_of`: 响应生成时间与当前持仓中最早的可用价格时间；价格时间不代表仓位更新时间
+  - `stale`: 任一持仓价格缺失、没有时间或超过 15 分钟时为 `true`
+  - `positions`: 持仓列表，包含 `symbol`, `side`, `qty`, `entry_price`, `mark_price`, `price_as_of`, `price_stale`, `unrealized_pnl`, `notional`, `holding_time`, `is_long_term`
   - `summary`:
     - `total_notional`: 总名义持仓金额
     - `net_exposure`: 净敞口风险 (Long - Short)
@@ -153,12 +157,14 @@
 - **响应模型**: `CrashRiskResponse`
 - **返回字段**:
   - `as_of`: 计算时间
-  - `summary`: `total`, `high_risk` (高危数), `warning` (预警数), `watch` (观察数)
-  - `rows`: 逐标的风险评分，包含 `symbol`, `risk_score` (0~100), `stage` (`HIGH_RISK` / `WARNING` / `WATCH`), `drivers` (触发因子列表), `component_scores` (各维度细项分)
+  - `status`: `complete` 或 `partial`（行情不足）
+  - `summary`: `total`, `high_risk` (高危数), `warning` (警惕数), `watch` (观察数), `unknown` (数据不足数)
+  - `rows`: 逐标的评分，包含 `symbol`, `risk_score` (0~100，数据不足时为 `null`), `stage`（高危 / 警惕 / 观察 / 数据不足）、`drivers` 和 `component_scores`
 
 ### 2. `POST /api/crash-risk/refresh`
 手动触发基于当前涨幅榜快照重新计算暴跌风险。
 - **响应模型**: `CrashRiskResponse`
+- 若有标的数据不足，返回 `partial` 并保留此前保存的完整快照。
 
 ---
 

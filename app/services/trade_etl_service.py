@@ -629,23 +629,22 @@ def extract_open_positions_for_symbol(
         if abs(real_net_qty) > 0.0001:
             base = symbol[:-4] if symbol.endswith("USDT") else symbol
             side_str = "LONG" if real_net_qty > 0 else "SHORT"
-            tz = getattr(processor, "UTC8", UTC8)
-            dt = datetime.fromtimestamp(since / 1000, tz=tz)
-            entry_price = 0.0
+            entry_price = None
             raw_risk = getattr(processor, "_latest_position_risk_map", {})
             risk_info = raw_risk.get((symbol, side_str)) or raw_risk.get(symbol)
             if risk_info:
                 try:
-                    entry_price = float(risk_info.get("entryPrice", 0.0))
+                    candidate_price = float(risk_info.get("entryPrice"))
+                    entry_price = candidate_price if candidate_price > 0 else None
                 except (ValueError, TypeError):
                     pass
-            entry_amount = entry_price * abs(real_net_qty)
+            entry_amount = entry_price * abs(real_net_qty) if entry_price is not None else None
             fallback_pos = [
                 {
-                    "date": dt.strftime("%Y%m%d"),
+                    "date": None,
                     "symbol": base,
                     "side": side_str,
-                    "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_time": None,
                     "entry_price": entry_price,
                     "qty": abs(real_net_qty),
                     "entry_amount": entry_amount,
@@ -727,24 +726,37 @@ def extract_open_positions_for_symbol(
     side_str = "LONG" if real_net_qty > 0 else "SHORT"
     tz = getattr(processor, "UTC8", UTC8)
     output = build_open_position_output(symbol, side_str, final_entries, utc8=tz)
+    missing_qty = abs(real_net_qty) - sum(item["qty"] for item in output)
+    if output and missing_qty > 0.0001:
+        output.append({
+            "date": None,
+            "symbol": symbol[:-4] if symbol.endswith("USDT") else symbol,
+            "side": side_str,
+            "entry_time": None,
+            "entry_price": None,
+            "qty": missing_qty,
+            "entry_amount": None,
+            "order_id": 0,
+            "is_incomplete": True,
+        })
     if not output and abs(real_net_qty) > 0.0001:
         base = symbol[:-4] if symbol.endswith("USDT") else symbol
-        dt = datetime.fromtimestamp(since / 1000, tz=tz)
-        entry_price = 0.0
+        entry_price = None
         raw_risk = getattr(processor, "_latest_position_risk_map", {})
         risk_info = raw_risk.get((symbol, side_str)) or raw_risk.get(symbol)
         if risk_info:
             try:
-                entry_price = float(risk_info.get("entryPrice", 0.0))
+                candidate_price = float(risk_info.get("entryPrice"))
+                entry_price = candidate_price if candidate_price > 0 else None
             except (ValueError, TypeError):
                 pass
-        entry_amount = entry_price * abs(real_net_qty)
+        entry_amount = entry_price * abs(real_net_qty) if entry_price is not None else None
         output = [
             {
-                "date": dt.strftime("%Y%m%d"),
+                "date": None,
                 "symbol": base,
                 "side": side_str,
-                "entry_time": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "entry_time": None,
                 "entry_price": entry_price,
                 "qty": abs(real_net_qty),
                 "entry_amount": entry_amount,

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.core.cache import TTLCache
+from app.core.scheduler_config import _env_int
 from app.core.symbols import normalize_futures_symbol
 from app.core.time import UTC8
 from app.core.async_utils import run_in_thread
@@ -17,16 +18,6 @@ class ReboundService:
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
         return normalize_futures_symbol(symbol)
-
-    @staticmethod
-    def _read_int_env(name: str, default: int) -> int:
-        raw = os.getenv(name)
-        if raw is None:
-            return default
-        try:
-            return int(raw)
-        except ValueError:
-            return default
 
     @staticmethod
     def _with_drawdown_defaults(row: dict) -> dict:
@@ -75,25 +66,8 @@ class ReboundService:
             snapshot = await run_in_thread(latest)
 
         if not snapshot:
-            rebound_time_map = {
-                "7d": (
-                    self._read_int_env("REBOUND_7D_HOUR", 7),
-                    self._read_int_env("REBOUND_7D_MINUTE", 30),
-                ),
-                "30d": (
-                    self._read_int_env("REBOUND_30D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
-                    self._read_int_env("REBOUND_30D_MINUTE", 32),
-                ),
-                "60d": (
-                    self._read_int_env("REBOUND_60D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
-                    self._read_int_env("REBOUND_60D_MINUTE", 34),
-                ),
-                "365d": (
-                    self._read_int_env("REBOUND_365D_HOUR", self._read_int_env("REBOUND_7D_HOUR", 7)),
-                    self._read_int_env("REBOUND_365D_MINUTE", 36),
-                ),
-            }
-            r_hour, r_minute = rebound_time_map[window]
+            r_hour = _env_int("MARKET_SNAPSHOT_HOUR", 7, minimum=0)
+            r_minute = _env_int("MARKET_SNAPSHOT_MINUTE", 0, minimum=0)
             time_label = f"{r_hour % 24:02d}:{r_minute % 60:02d}"
             msg = {
                 "7d": f"暂无快照数据，请等待下一次{time_label}定时任务生成（14D）",

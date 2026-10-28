@@ -268,42 +268,42 @@ def fetch_real_positions(*, client) -> Optional[Dict[str, float]]:
 
         real_pos = {}
         mark_prices = {}
-        if positions:
-            for position in positions:
-                amt = float(position.get("positionAmt", 0))
-                symbol = position.get("symbol")
-                raw_mp = position.get("markPrice")
-                if symbol and raw_mp is not None:
-                    try:
-                        mp = float(raw_mp)
-                        if mp > 0:
-                            mark_prices[symbol] = mp
-                    except (TypeError, ValueError):
-                        pass
-                if abs(amt) > 0 and symbol:
-                    pos_side = position.get("positionSide")
-                    if pos_side and pos_side in ("LONG", "SHORT"):
-                        key = (symbol, pos_side)
-                    else:
-                        key = symbol
-                    real_pos[key] = amt
-            active_risk_list = [p for p in positions if abs(float(p.get("positionAmt", 0))) > 0]
-            risk_map = {}
-            for p in active_risk_list:
-                s = p.get("symbol")
-                ps = p.get("positionSide")
-                if s and ps in ("LONG", "SHORT"):
-                    risk_map[(s, ps)] = p
-                if s:
-                    risk_map[s] = p
-            setattr(client, "_latest_position_risk", active_risk_list)
-            setattr(client, "_latest_position_risk_map", risk_map)
-            if mark_prices:
+        for position in positions:
+            amt = float(position.get("positionAmt", 0))
+            symbol = position.get("symbol")
+            raw_mp = position.get("markPrice")
+            if symbol and raw_mp is not None:
                 try:
-                    from app.services.market_price_service import MarketPriceService
-                    MarketPriceService.set_cached_prices(mark_prices)
-                except Exception:
+                    mp = float(raw_mp)
+                    if mp > 0:
+                        mark_prices[symbol] = mp
+                except (TypeError, ValueError):
                     pass
+            if abs(amt) > 0 and symbol:
+                pos_side = position.get("positionSide")
+                if pos_side and pos_side in ("LONG", "SHORT"):
+                    key = (symbol, pos_side)
+                else:
+                    key = symbol
+                real_pos[key] = amt
+        active_risk_list = [p for p in positions if abs(float(p.get("positionAmt", 0))) > 0]
+        risk_map = {}
+        for p in active_risk_list:
+            s = p.get("symbol")
+            ps = p.get("positionSide")
+            if s and ps in ("LONG", "SHORT"):
+                risk_map[(s, ps)] = p
+            if s:
+                risk_map[s] = p
+        # An empty successful response is authoritative too; clear the previous risk rows.
+        setattr(client, "_latest_position_risk", active_risk_list)
+        setattr(client, "_latest_position_risk_map", risk_map)
+        if mark_prices:
+            try:
+                from app.services.market_price_service import MarketPriceService
+                MarketPriceService.set_cached_prices(mark_prices)
+            except Exception:
+                pass
 
         return real_pos
     except Exception as exc:

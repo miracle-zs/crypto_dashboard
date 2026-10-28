@@ -48,7 +48,7 @@ def test_summarize_income_records_tracks_extra_loss_income_types():
 
     assert set(symbols) == {"BTCUSDT", "ETHUSDT"}
     assert totals["BTCUSDT"] == -10.5
-    assert totals["ETHUSDT"] == -0.2
+    assert "ETHUSDT" not in totals
 
 
 def test_analyze_orders_return_symbol_status_with_no_symbols_returns_triplet():

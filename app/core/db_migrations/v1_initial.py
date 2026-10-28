@@ -360,13 +360,7 @@ def apply_v1_initial_schema(conn, logger):
     except sqlite3.OperationalError:
         logger.info("正在迁移数据库: 添加 max_single_loss 列...")
         try:
-            cursor.execute("ALTER TABLE trade_summary ADD COLUMN max_single_loss REAL DEFAULT 0.0")
-            cursor.execute(
-                """
-                UPDATE trade_summary
-                SET max_single_loss = COALESCE(max_single_loss, max_drawdown, 0.0)
-                """
-            )
+            cursor.execute("ALTER TABLE trade_summary ADD COLUMN max_single_loss REAL")
         except Exception as e:
             logger.warning(f"列添加失败(可能已存在): {e}")
 

@@ -33,8 +33,6 @@ def test_scheduler_config_defaults(monkeypatch):
     assert config.history_validation_lookback_hours == 48
     assert config.enable_rebound_365d_snapshot is True
     assert config.rebound_365d_top_n == 10
-    assert config.rebound_365d_hour == 7
-    assert config.rebound_365d_minute == 36
     assert config.noon_loss_check_hour == 11
     assert config.noon_loss_check_minute == 50
 
@@ -54,35 +52,19 @@ def test_scheduler_config_invalid_values_fallback(monkeypatch):
 def test_scheduler_weight_budgets_are_hard_capped(monkeypatch):
     monkeypatch.setenv("HISTORICAL_TASK_WEIGHT_BUDGET_PER_60S", "900")
     monkeypatch.setenv("BACKGROUND_WEIGHT_BUDGET_PER_60S", "1200")
-    monkeypatch.setenv("LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE", "900")
-    monkeypatch.setenv("REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE", "900")
-    monkeypatch.setenv("REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE", "900")
-    monkeypatch.setenv("REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE", "900")
-    monkeypatch.setenv("REBOUND_365D_WEIGHT_BUDGET_PER_MINUTE", "900")
-
     config = load_scheduler_config()
 
     assert config.historical_task_weight_budget_per_60s == 200
     assert config.background_weight_budget_per_60s == 250
-    assert config.leaderboard_weight_budget_per_minute == 200
-    assert config.rebound_7d_weight_budget_per_minute == 200
-    assert config.rebound_30d_weight_budget_per_minute == 200
-    assert config.rebound_60d_weight_budget_per_minute == 200
-    assert config.rebound_365d_weight_budget_per_minute == 200
 
 
 def test_scheduler_config_time_normalization(monkeypatch):
     monkeypatch.setenv("LEADERBOARD_ALERT_HOUR", "49")
     monkeypatch.setenv("LEADERBOARD_ALERT_MINUTE", "121")
-    monkeypatch.setenv("REBOUND_7D_MINUTE", "120")
-    monkeypatch.setenv("REBOUND_365D_MINUTE", "122")
-
     config = load_scheduler_config()
 
     assert config.leaderboard_alert_hour == 1
     assert config.leaderboard_alert_minute == 1
-    assert config.rebound_7d_minute == 0
-    assert config.rebound_365d_minute == 2
 
 
 def test_scheduler_config_balance_sync_float_interval(monkeypatch):

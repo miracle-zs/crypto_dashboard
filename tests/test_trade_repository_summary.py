@@ -110,3 +110,30 @@ def test_recompute_trade_summary_drawdown_differs_from_single_loss(tmp_path):
 
     assert summary["max_single_loss"] == -2.0
     assert summary["max_drawdown"] == -6.0
+
+
+def test_recompute_trade_summary_uses_exit_order_and_zero_initial_peak(tmp_path):
+    db = Database(db_path=str(tmp_path / "trade_summary_exit_order.db"))
+    repo = TradeRepository(db)
+    conn = db._get_connection()
+    conn.executemany(
+        """
+        INSERT INTO trades (
+            no, date, entry_time, exit_time, holding_time, symbol, side,
+            price_change_pct, entry_amount, entry_price, exit_price, qty,
+            fees, pnl_net, close_type, return_rate, open_price,
+            pnl_before_fees, entry_order_id, exit_order_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (1, "20260221", "2026-02-21 09:00:00", "2026-02-21 12:00:00", "3h", "A", "LONG", 0, 100, 100, 90, 1, 0, -10, "sl", "-10%", 100, -10, 1, "1"),
+            (2, "20260221", "2026-02-21 10:00:00", "2026-02-21 11:00:00", "1h", "B", "LONG", 0, 100, 100, 110, 1, 0, 10, "tp", "10%", 100, 10, 2, "2"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    summary = repo.recompute_trade_summary()
+
+    assert summary["equity_curve"] == [10.0, 0.0]
+    assert summary["max_drawdown"] == -10.0

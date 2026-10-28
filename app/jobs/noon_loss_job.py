@@ -7,6 +7,12 @@ from app.notifier import send_server_chan_notification
 UTC8 = ZoneInfo("Asia/Shanghai")
 
 
+def _report_incomplete(task: str, reason: str, *, notify: bool = True):
+    logger.error(f"{task}未完成：{reason}")
+    if notify:
+        send_server_chan_notification(f"⚠️ {task}未完成", f"{reason}。本次未生成风控结论，请检查数据后重试。")
+
+
 def run_noon_loss_check(scheduler):
     """每天中午检查全部非长期仓位中当前浮亏的订单"""
     try:
@@ -18,24 +24,34 @@ def run_noon_loss_check(scheduler):
                 continue
             candidate_positions.append(pos)
 
+        if any(pos.get("entry_price") is None for pos in candidate_positions):
+            _report_incomplete("午间浮亏检查", "部分持仓缺少开仓价格")
+            return
+
         symbol_fulls = [
             scheduler._normalize_futures_symbol(pos.get("symbol"))
             for pos in candidate_positions
             if pos.get("symbol")
         ]
         mark_prices = scheduler._get_mark_price_map(symbol_fulls) if symbol_fulls else {}
+        missing_symbols = sorted(set(symbol_fulls) - set(mark_prices))
+        if missing_symbols:
+            _report_incomplete("午间浮亏检查", f"缺少行情 {', '.join(missing_symbols)}")
+            return
         loss_positions = []
 
         for pos in candidate_positions:
             try:
                 symbol_for_quote = scheduler._normalize_futures_symbol(pos["symbol"])
                 current_price = mark_prices.get(symbol_for_quote)
-                if current_price is None:
-                    continue
                 current_price = float(current_price)
+                if current_price <= 0:
+                    raise ValueError(f"无效价格: {symbol_for_quote}")
                 entry_price = float(pos["entry_price"])
                 qty = float(pos["qty"])
                 side = pos["side"]
+                if entry_price <= 0 or qty <= 0 or side not in ("LONG", "SHORT"):
+                    raise ValueError(f"持仓数据无效: {symbol_for_quote}")
 
                 if side == "LONG":
                     pnl = (current_price - entry_price) * qty
@@ -48,15 +64,20 @@ def run_noon_loss_check(scheduler):
                 if pnl < 0:
                     loss_positions.append(pos)
             except Exception as e:
-                logger.warning(f"获取实时价格失败: {e}")
+                _report_incomplete("午间浮亏检查", str(e))
+                return
 
         count = len(loss_positions)
         total_stop_loss = sum(abs(float(pos.get("current_pnl", 0.0))) for pos in loss_positions)
-        latest_balance = 0.0
         balance_history = scheduler.trade_repo.get_balance_history(limit=1)
-        if balance_history:
-            latest_balance = float(balance_history[-1].get("balance") or 0.0)
-        stop_loss_pct_of_balance = (total_stop_loss / latest_balance * 100) if latest_balance > 0 else 0.0
+        if not balance_history or balance_history[-1].get("balance") is None:
+            _report_incomplete("午间浮亏检查", "缺少账户余额")
+            return
+        latest_balance = float(balance_history[-1]["balance"])
+        if latest_balance <= 0:
+            _report_incomplete("午间浮亏检查", "账户余额不大于零，无法计算占比")
+            return
+        stop_loss_pct_of_balance = total_stop_loss / latest_balance * 100
 
         loss_positions.sort(key=lambda x: x.get("current_pnl", 0.0))
         snapshot_rows = []
@@ -147,40 +168,12 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
         noon_snapshot = scheduler.risk_repo.get_noon_loss_snapshot_by_date(snapshot_date)
 
         if not noon_snapshot:
-            scheduler.risk_repo.save_noon_loss_review_snapshot(
-                {
-                    "snapshot_date": snapshot_date,
-                    "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
-                    "noon_loss_count": 0,
-                    "not_cut_count": 0,
-                    "noon_cut_loss_total": 0.0,
-                    "hold_loss_total": 0.0,
-                    "delta_loss_total": 0.0,
-                    "pct_of_balance": 0.0,
-                    "balance": 0.0,
-                    "rows": [],
-                }
-            )
-            logger.info(f"午间止损复盘已记录空快照: date={snapshot_date}, reason=no_noon_snapshot")
+            _report_incomplete("午间止损复盘", f"{snapshot_date} 的午间快照缺失", notify=send_notification)
             return
 
         noon_rows = noon_snapshot.get("rows", []) or []
-        if not noon_rows:
-            scheduler.risk_repo.save_noon_loss_review_snapshot(
-                {
-                    "snapshot_date": snapshot_date,
-                    "review_time": now.strftime("%Y-%m-%d %H:%M:%S"),
-                    "noon_loss_count": 0,
-                    "not_cut_count": 0,
-                    "noon_cut_loss_total": 0.0,
-                    "hold_loss_total": 0.0,
-                    "delta_loss_total": 0.0,
-                    "pct_of_balance": 0.0,
-                    "balance": 0.0,
-                    "rows": [],
-                }
-            )
-            logger.info(f"午间止损复盘已记录空快照: date={snapshot_date}, reason=no_noon_rows")
+        if not noon_rows and int(noon_snapshot.get("loss_count", 0)) > 0:
+            _report_incomplete("午间止损复盘", f"{snapshot_date} 的午间亏损明细缺失", notify=send_notification)
             return
 
         symbol_fulls = []
@@ -189,17 +182,16 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
             if not symbol:
                 continue
             symbol_fulls.append(scheduler._normalize_futures_symbol(symbol))
-        mark_prices = scheduler._get_mark_price_map(symbol_fulls)
+        mark_prices = scheduler._get_mark_price_map(symbol_fulls) if symbol_fulls else {}
+        missing_symbols = sorted(set(symbol_fulls) - set(mark_prices))
+        if missing_symbols:
+            _report_incomplete("午间止损复盘", f"缺少行情 {', '.join(missing_symbols)}", notify=send_notification)
+            return
 
         review_rows = []
         noon_cut_loss_total = 0.0
         hold_loss_total = 0.0
         evaluated_count = 0
-        price_source_stats = {
-            "mark_price": 0,
-            "noon_snapshot_price": 0,
-            "entry_price_fallback": 0,
-        }
         night_loss_count = 0
         night_profit_count = 0
         night_flat_count = 0
@@ -212,28 +204,26 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
             evaluated_count += 1
             row_order_id = item.get("order_id")
 
-            noon_pnl = float(item.get("current_pnl", 0.0) or 0.0)
-            noon_cut_pnl = noon_pnl
             side = str(item.get("side", "")).upper()
-            qty = float(item.get("qty", 0.0) or 0.0)
-            entry_price = float(item.get("entry_price", 0.0) or 0.0)
+            try:
+                noon_pnl = float(item["current_pnl"])
+                qty = float(item["qty"])
+                entry_price = float(item["entry_price"])
+                if qty <= 0 or entry_price <= 0 or side not in ("LONG", "SHORT"):
+                    raise ValueError("持仓数据无效")
+            except (KeyError, TypeError, ValueError):
+                _report_incomplete("午间止损复盘", f"{symbol} 的午间持仓数据不完整", notify=send_notification)
+                return
+            noon_cut_pnl = noon_pnl
 
-            current_price = None
-            price_source = "mark_price"
             symbol_for_quote = scheduler._normalize_futures_symbol(symbol)
             current_price = mark_prices.get(symbol_for_quote)
             if current_price is not None and current_price <= 0:
                 current_price = None
 
             if current_price is None:
-                fallback_price = item.get("current_price")
-                if fallback_price is not None and float(fallback_price) > 0:
-                    current_price = float(fallback_price)
-                    price_source = "noon_snapshot_price"
-                else:
-                    current_price = entry_price
-                    price_source = "entry_price_fallback"
-            price_source_stats[price_source] = price_source_stats.get(price_source, 0) + 1
+                _report_incomplete("午间止损复盘", f"行情无效 {symbol_for_quote}", notify=send_notification)
+                return
 
             if side == "SHORT":
                 night_pnl = (entry_price - current_price) * qty
@@ -261,7 +251,7 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
                     "qty": qty,
                     "entry_price": entry_price,
                     "current_price": current_price,
-                    "price_source": price_source,
+                    "price_source": "mark_price",
                     "noon_pnl": noon_pnl,
                     "night_pnl": night_pnl,
                     "noon_loss": noon_cut_pnl,
@@ -271,11 +261,15 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
             )
 
         delta_loss_total = noon_cut_loss_total - hold_loss_total
-        latest_balance = 0.0
         balance_history = scheduler.trade_repo.get_balance_history(limit=1)
-        if balance_history:
-            latest_balance = float(balance_history[-1].get("balance") or 0.0)
-        pct_of_balance = (delta_loss_total / latest_balance * 100) if latest_balance > 0 else 0.0
+        if not balance_history or balance_history[-1].get("balance") is None:
+            _report_incomplete("午间止损复盘", "缺少账户余额", notify=send_notification)
+            return
+        latest_balance = float(balance_history[-1]["balance"])
+        if latest_balance <= 0:
+            _report_incomplete("午间止损复盘", "账户余额不大于零，无法计算占比", notify=send_notification)
+            return
+        pct_of_balance = delta_loss_total / latest_balance * 100
 
         scheduler.risk_repo.save_noon_loss_review_snapshot(
             {
@@ -300,9 +294,7 @@ def run_noon_loss_review(scheduler, snapshot_date: str | None = None, send_notif
         )
         logger.info(
             "午间止损复盘取价统计: "
-            f"mark_price={price_source_stats.get('mark_price', 0)}, "
-            f"noon_snapshot_price={price_source_stats.get('noon_snapshot_price', 0)}, "
-            f"entry_price_fallback={price_source_stats.get('entry_price_fallback', 0)}, "
+            f"mark_price={evaluated_count}, "
             f"night_loss_count={night_loss_count}, "
             f"night_profit_count={night_profit_count}, "
             f"night_flat_count={night_flat_count}"

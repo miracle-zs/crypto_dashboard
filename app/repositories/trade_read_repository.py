@@ -11,6 +11,22 @@ class TradeReadRepository:
     def __init__(self, db):
         self.db = db
 
+    def get_funding_summary(self):
+        conn = self.db._get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT SUM(income) AS amount, COUNT(*) AS record_count,
+                       MIN(time_ms) AS first_record_ms, MAX(time_ms) AS last_record_ms
+                FROM income_facts
+                WHERE venue = ? AND income_type = ? AND asset = ?
+                """,
+                ("binance_futures", "FUNDING_FEE", "USDT"),
+            ).fetchone()
+            return {"asset": "USDT", **dict(row)}
+        finally:
+            conn.close()
+
     def get_trade_summary(self):
         conn = self.db._get_connection()
         cursor = conn.cursor()
@@ -57,12 +73,8 @@ class TradeReadRepository:
             data["equity_curve"] = []
         max_single_loss = data.get("max_single_loss")
         max_drawdown = data.get("max_drawdown")
-        if max_single_loss is None:
-            max_single_loss = max_drawdown
-        if max_drawdown is None:
-            max_drawdown = max_single_loss
-        data["max_single_loss"] = float(max_single_loss or 0.0)
-        data["max_drawdown"] = float(max_drawdown or 0.0)
+        data["max_single_loss"] = float(max_single_loss) if max_single_loss is not None else None
+        data["max_drawdown"] = float(max_drawdown) if max_drawdown is not None else None
         return data
 
     def get_statistics(self):
@@ -262,6 +274,8 @@ class TradeReadRepository:
             SELECT
                 date,
                 SUM(trade_count) as trade_count,
+                SUM(closed_trade_count) as closed_trade_count,
+                SUM(open_position_count) as open_position_count,
                 SUM(total_amount) as total_amount,
                 SUM(total_pnl) as total_pnl,
                 SUM(win_count) as win_count,
@@ -270,6 +284,8 @@ class TradeReadRepository:
                 SELECT
                     date,
                     COUNT(*) as trade_count,
+                    COUNT(*) as closed_trade_count,
+                    0 as open_position_count,
                     SUM(entry_amount) as total_amount,
                     SUM(pnl_net) as total_pnl,
                     SUM(CASE WHEN pnl_net > 0 THEN 1 ELSE 0 END) as win_count,
@@ -280,11 +296,14 @@ class TradeReadRepository:
                 SELECT
                     date,
                     COUNT(*) as trade_count,
+                    0 as closed_trade_count,
+                    COUNT(*) as open_position_count,
                     SUM(entry_amount) as total_amount,
                     0 as total_pnl,
                     0 as win_count,
                     0 as loss_count
                 FROM open_positions
+                WHERE date IS NOT NULL
                 GROUP BY date
             )
             GROUP BY date
@@ -297,17 +316,20 @@ class TradeReadRepository:
         results = []
         for row in rows:
             trade_count = row["trade_count"]
+            closed_trade_count = row["closed_trade_count"]
             win_count = row["win_count"]
-            win_rate = (win_count / trade_count * 100) if trade_count > 0 else 0.0
+            win_rate = (win_count / closed_trade_count * 100) if closed_trade_count > 0 else None
             results.append(
                 {
                     "date": row["date"],
                     "trade_count": trade_count,
+                    "closed_trade_count": closed_trade_count,
+                    "open_position_count": row["open_position_count"],
                     "total_amount": float(row["total_amount"] or 0),
                     "total_pnl": float(row["total_pnl"] or 0),
                     "win_count": win_count,
                     "loss_count": row["loss_count"],
-                    "win_rate": round(win_rate, 2),
+                    "win_rate": round(win_rate, 2) if win_rate is not None else None,
                 }
             )
         return results

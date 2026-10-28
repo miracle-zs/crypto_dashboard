@@ -28,6 +28,8 @@ def run_long_held_positions_check(scheduler):
                 continue
 
             entry_time_str = pos["entry_time"]
+            if not entry_time_str:
+                continue
             try:
                 entry_dt = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
             except ValueError:

@@ -294,14 +294,14 @@ class TradeDataProcessor:
         until: int,
         client: Optional[BinanceFuturesRestClient] = None,
     ) -> Dict[int, float]:
-        """Get commission and funding fees for a symbol."""
+        """Get commissions for a symbol; funding remains in the income ledger."""
         records = self._fetch_income_history(since=since, until=until, client=client)
         fees_map = {}
         if records:
             for record in records:
                 if record.get("symbol") != symbol:
                     continue
-                if record.get("incomeType") in ("COMMISSION", "FUNDING_FEE"):
+                if record.get("incomeType") == "COMMISSION":
                     time_ts = int(record["time"])
                     income = float(record["income"])
                     fees_map[time_ts] = fees_map.get(time_ts, 0.0) + income

@@ -128,6 +128,8 @@ def run_profit_alert_check(scheduler, threshold_pct: float):
         for pos in candidates:
             symbol = str(pos.get("symbol", "")).upper()
             side = str(pos.get("side", "")).upper()
+            if pos.get("entry_price") is None:
+                continue
             qty = float(pos.get("qty", 0.0) or 0.0)
             entry_price = float(pos.get("entry_price", 0.0) or 0.0)
             entry_amount = float(pos.get("entry_amount", 0.0) or 0.0)

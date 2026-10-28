@@ -175,8 +175,8 @@
 | `entry_price` | REAL | 开仓均价 |
 | `exit_price` | REAL | 平仓均价 |
 | `qty` | REAL | 撮合成交数量 |
-| `fees` | REAL | 本笔交易承担的手续费与资金费总和 |
-| `pnl_net` | REAL | 扣除所有费用后的纯净盈亏（USDT） |
+| `fees` | REAL | 新生成记录包含手续费及配置的其他费用；资金费独立记账。历史记录可能包含资金费 |
+| `pnl_net` | REAL | 价格盈亏加本笔已归集费用；不保证包含资金费 |
 | `close_type` | TEXT | 平仓类型标记 |
 | `return_rate` | TEXT | 收益率百分比字符串（如 `+12.50%`） |
 | `open_price` | REAL | 开仓当日 00:00 UTC 的基准开盘价 |
@@ -237,7 +237,7 @@
 | :--- | :--- | :--- |
 | `id` | INTEGER | 固定为 1 |
 | `total_pnl` | REAL | 累计净盈亏 |
-| `total_fees` | REAL | 累计支付手续费与资金费 |
+| `total_fees` | REAL | 已记录交易费用之和；历史记录可能混入资金费 |
 | `win_rate` | REAL | 胜率（百分比） |
 | `win_count` | INTEGER | 盈利笔数 |
 | `loss_count` | INTEGER | 亏损笔数 |

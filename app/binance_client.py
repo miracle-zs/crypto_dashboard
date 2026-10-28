@@ -18,9 +18,6 @@ import requests
 from app.logger import logger
 from app.core.binance_request_budget import RollingWeightLimiter, binance_request_weight
 
-_ORIGINAL_REQUESTS_REQUEST = requests.request
-
-
 def _http_error_log_message(*, method: str, path: str, status_code: int | None, error_code, error_message) -> str:
     """Render HTTP failures without including signed request query parameters."""
     message = str(error_message or "unknown")[:500]
@@ -203,22 +200,13 @@ class BinanceFuturesRestClient:
                     request_params["timestamp"] = int(time.time() * 1000 + self._time_offset_ms)
                     request_params["signature"] = self._sign_params(request_params)
 
-                if requests.request is not _ORIGINAL_REQUESTS_REQUEST:
-                    response = requests.request(
-                        method=method,
-                        url=url,
-                        headers=self._headers(),
-                        params=request_params,
-                        timeout=30,
-                    )
-                else:
-                    response = self._session.request(
-                        method=method,
-                        url=url,
-                        headers=self._headers(),
-                        params=request_params,
-                        timeout=30,
-                    )
+                response = self._session.request(
+                    method=method,
+                    url=url,
+                    headers=self._headers(),
+                    params=request_params,
+                    timeout=30,
+                )
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.HTTPError as exc:

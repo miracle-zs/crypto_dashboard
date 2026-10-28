@@ -21,7 +21,7 @@ def test_summarize_income_records_collects_symbols_and_tracked_costs():
 
     assert set(symbols) == {"BTCUSDT", "ETHUSDT"}
     assert totals["BTCUSDT"] == -10.5
-    assert totals["ETHUSDT"] == -0.2
+    assert "ETHUSDT" not in totals
 
 
 def test_aggregate_fee_totals_by_symbol_ignores_untracked_income_types():
@@ -38,7 +38,7 @@ def test_aggregate_fee_totals_by_symbol_ignores_untracked_income_types():
         extra_loss_income_types={"INSURANCE_CLEAR"},
     )
 
-    assert totals == {"BTCUSDT": -1.0, "ETHUSDT": -0.8}
+    assert totals == {"BTCUSDT": -1.0, "ETHUSDT": -0.3}
 
 
 def test_summarize_income_records_tracks_symbol_activity_ranges():
@@ -51,5 +51,5 @@ def test_summarize_income_records_tracks_symbol_activity_ranges():
     symbols, totals, ranges = summarize_income_records_with_ranges(records)
 
     assert set(symbols) == {"BTCUSDT", "ETHUSDT"}
-    assert totals == {"BTCUSDT": -1.0, "ETHUSDT": -0.1}
+    assert totals == {"BTCUSDT": -1.0}
     assert ranges == {"BTCUSDT": (1000, 3000), "ETHUSDT": (2000, 2000)}

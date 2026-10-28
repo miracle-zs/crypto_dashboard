@@ -17,7 +17,7 @@ class TradeRepository(TradeReadRepository, TradeWriteRepository):
             """
             SELECT pnl_net, fees
             FROM trades
-            ORDER BY entry_time ASC
+            ORDER BY exit_time ASC, entry_time ASC
             """
         )
         rows = cursor.fetchall()
@@ -80,8 +80,9 @@ class TradeRepository(TradeReadRepository, TradeWriteRepository):
             worst_loss_streak = min(worst_loss_streak, streak)
 
         max_single_loss = float(np.min(pnl_values))
-        running_peak = np.maximum.accumulate(np.array(equity_curve, dtype=float))
-        max_drawdown = float(np.min(np.array(equity_curve, dtype=float) - running_peak))
+        equity_values = np.asarray(equity_curve, dtype=float)
+        running_peak = np.maximum.accumulate(np.concatenate(([0.0], equity_values)))[1:]
+        max_drawdown = float(np.min(equity_values - running_peak))
         total_wins = float(np.sum(pnl_values[pnl_values > 0]))
         total_losses = abs(float(np.sum(pnl_values[pnl_values < 0])))
         profit_factor = total_wins / total_losses if total_losses else 0.0

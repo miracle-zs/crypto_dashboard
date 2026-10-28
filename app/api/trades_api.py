@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.async_utils import run_in_thread
 from app.core.deps import get_db
-from app.models import DailyStats, Trade, TradeAggregatesResponse, TradeSummary
+from app.models import DailyStats, FundingSummary, Trade, TradeAggregatesResponse, TradeSummary
 from app.security import require_admin_token
 from app.services import TradeQueryService
 from app.repositories import SyncRepository, TradeRepository
@@ -31,6 +31,11 @@ async def get_database_stats(db=Depends(get_db)):
 @router.get("/api/summary", response_model=TradeSummary)
 async def get_summary(db=Depends(get_db)):
     return await run_in_thread(_trade_queries(db).get_summary)
+
+
+@router.get("/api/funding-summary", response_model=FundingSummary)
+async def get_funding_summary(db=Depends(get_db)):
+    return await run_in_thread(TradeRepository(db).get_funding_summary)
 
 
 @router.get("/api/trades", response_model=list[Trade])

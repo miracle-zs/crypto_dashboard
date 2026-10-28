@@ -99,3 +99,24 @@ def test_init_database_schema_upgrades_legacy_db_when_user_version_zero(tmp_path
     assert {"event_time", "asset", "income_type", "source_uid"}.issubset(transfer_columns)
     open_columns = _get_table_columns(db_path, "open_positions")
     assert {"is_long_term", "profit_alerted", "reentry_alerted"}.issubset(open_columns)
+
+
+def test_trade_summary_metrics_are_invalidated_for_recalculation(tmp_path):
+    from app.core.db_migrations import LATEST_SCHEMA_VERSION
+
+    db_path = tmp_path / "schema_trade_summary.db"
+    conn = sqlite3.connect(db_path)
+    init_database_schema(conn, _FakeLogger())
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE trade_summary SET max_single_loss = -10, max_drawdown = -20 WHERE id = 1")
+    conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION - 1}")
+    conn.commit()
+    conn.close()
+
+    init_database_schema(sqlite3.connect(db_path), _FakeLogger())
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT max_single_loss, max_drawdown FROM trade_summary WHERE id = 1").fetchone()
+    conn.close()
+    assert row == (None, None)

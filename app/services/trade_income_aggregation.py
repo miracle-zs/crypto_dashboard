@@ -7,7 +7,7 @@ def _normalize_extra_loss_income_types(extra_loss_income_types: Optional[set[str
 
 def _build_tracked_cost_types(extra_loss_income_types: Optional[set[str]]) -> set[str]:
     extra_types = _normalize_extra_loss_income_types(extra_loss_income_types)
-    return {"COMMISSION", "FUNDING_FEE", *extra_types}
+    return {"COMMISSION", *(extra_types - {"FUNDING_FEE"})}
 
 
 def summarize_income_records(

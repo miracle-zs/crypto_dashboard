@@ -45,10 +45,14 @@ def build_and_save_all_market_snapshots_job(scheduler, utc8):
         leaderboard = result["leaderboard"]
         rebounds = result["rebounds"]
         scheduler.snapshot_repo.save_leaderboard_snapshot(leaderboard)
-        scheduler.snapshot_repo.save_rebound_7d_snapshot(rebounds[14])
-        scheduler.snapshot_repo.save_rebound_30d_snapshot(rebounds[30])
-        scheduler.snapshot_repo.save_rebound_60d_snapshot(rebounds[60])
-        scheduler.snapshot_repo.save_rebound_365d_snapshot(rebounds[365])
+        if scheduler.enable_rebound_7d_snapshot:
+            scheduler.snapshot_repo.save_rebound_7d_snapshot(rebounds[14])
+        if scheduler.enable_rebound_30d_snapshot:
+            scheduler.snapshot_repo.save_rebound_30d_snapshot(rebounds[30])
+        if scheduler.enable_rebound_60d_snapshot:
+            scheduler.snapshot_repo.save_rebound_60d_snapshot(rebounds[60])
+        if scheduler.enable_rebound_365d_snapshot:
+            scheduler.snapshot_repo.save_rebound_365d_snapshot(rebounds[365])
         scheduler.snapshot_repo.upsert_leaderboard_daily_metrics_for_date(
             str(leaderboard.get("snapshot_date"))
         )

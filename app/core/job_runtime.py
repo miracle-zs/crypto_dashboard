@@ -138,8 +138,5 @@ class JobRuntimeController:
 
 
 def try_enter_slot(scheduler, source: str, category: JobCategory) -> bool:
-    try:
-        return scheduler._try_enter_api_job_slot(source=source, category=category)
-    except TypeError:
-        return scheduler._try_enter_api_job_slot(source=source)
+    return scheduler._try_enter_api_job_slot(source=source, category=category)
 

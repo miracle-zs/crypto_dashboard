@@ -61,7 +61,11 @@ async def lifespan(app: FastAPI):
 
         enable_user_stream = os.getenv("ENABLE_USER_STREAM", "0").lower() in ("1", "true", "yes")
         if enable_user_stream:
-            user_stream = BinanceUserDataStream(api_key=api_key, db=context.db)
+            user_stream = BinanceUserDataStream(
+                api_key=api_key,
+                db=context.db,
+                processor=scheduler.processor,
+            )
             user_stream.start()
             app.state.user_stream = user_stream
         else:

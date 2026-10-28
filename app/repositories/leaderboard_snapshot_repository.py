@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from app.core.read_model import get_read_model
@@ -333,7 +333,7 @@ class LeaderboardSnapshotRepository:
 
         return {
             "snapshot_date": snapshot_date,
-            "computed_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "computed_at": datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
             "metric1": metric1,
             "metric2": metric2,
             "metric3": metric3,

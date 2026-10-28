@@ -36,12 +36,20 @@ class TradeSummary(BaseModel):
     best_win_streak: int
     worst_loss_streak: int
     max_single_loss: Optional[float] = None
-    max_drawdown: float
+    max_drawdown: Optional[float] = None
     profit_factor: float
     kelly_criterion: float
     sqn: float
     expected_value: float
     risk_reward_ratio: float
+
+
+class FundingSummary(BaseModel):
+    asset: str
+    amount: Optional[float]
+    record_count: int
+    first_record_ms: Optional[int]
+    last_record_ms: Optional[int]
 
 class BalanceHistoryItem(BaseModel):
     time: int
@@ -54,11 +62,13 @@ class BalanceHistoryItem(BaseModel):
 class DailyStats(BaseModel):
     date: str
     trade_count: int
+    closed_trade_count: int = 0
+    open_position_count: int = 0
     total_amount: float
     total_pnl: float
     win_count: int
     loss_count: int
-    win_rate: float
+    win_rate: Optional[float] = None
 
 
 class OpenPositionItem(BaseModel):
@@ -66,16 +76,18 @@ class OpenPositionItem(BaseModel):
     order_id: int
     side: str
     qty: float
-    entry_price: float
+    entry_price: Optional[float]
     mark_price: Optional[float] = None
-    entry_time: str
-    holding_minutes: int
+    price_as_of: Optional[str] = None
+    price_stale: bool = True
+    entry_time: Optional[str]
+    holding_minutes: Optional[int]
     holding_time: str
-    entry_amount: float
-    notional: float
+    entry_amount: Optional[float]
+    notional: Optional[float]
     unrealized_pnl: Optional[float] = None
     unrealized_pnl_pct: Optional[float] = None
-    weight: float
+    weight: Optional[float]
     is_long_term: bool = False
     profit_alerted: bool = False
     is_incomplete: bool = False
@@ -86,16 +98,16 @@ class OpenPositionsSummary(BaseModel):
     total_positions: int
     long_count: int
     short_count: int
-    total_notional: float
-    long_notional: float
-    short_notional: float
-    net_exposure: float
-    total_unrealized_pnl: float
-    avg_holding_minutes: float
-    avg_holding_time: str
-    concentration_top1: float
-    concentration_top3: float
-    concentration_hhi: float
+    total_notional: Optional[float]
+    long_notional: Optional[float]
+    short_notional: Optional[float]
+    net_exposure: Optional[float]
+    total_unrealized_pnl: Optional[float]
+    avg_holding_minutes: Optional[float]
+    avg_holding_time: Optional[str]
+    concentration_top1: Optional[float]
+    concentration_top3: Optional[float]
+    concentration_hhi: Optional[float]
     recent_loss_count: int = 0  # New field for risk protocol
     recent_loss_total_if_stop_now: float = 0.0
     recent_loss_pct_of_balance: float = 0.0
@@ -213,6 +225,7 @@ class CrashRiskSummary(BaseModel):
     high_risk: int = 0
     warning: int = 0
     watch: int = 0
+    unknown: int = 0
 
 
 class CrashRiskSourceSnapshot(BaseModel):
@@ -224,7 +237,7 @@ class CrashRiskSourceSnapshot(BaseModel):
 
 class CrashRiskRow(BaseModel):
     symbol: str
-    risk_score: int
+    risk_score: Optional[int]
     stage: str
     drivers: List[str] = Field(default_factory=list)
     component_scores: dict[str, int] = Field(default_factory=dict)
@@ -232,6 +245,7 @@ class CrashRiskRow(BaseModel):
 
 class CrashRiskResponse(BaseModel):
     as_of: Optional[str] = None
+    status: str = "complete"
     summary: CrashRiskSummary = Field(default_factory=CrashRiskSummary)
     rows: List[CrashRiskRow] = Field(default_factory=list)
     source_snapshot: Optional[CrashRiskSourceSnapshot] = None

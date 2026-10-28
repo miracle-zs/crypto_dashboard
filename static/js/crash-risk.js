@@ -62,6 +62,7 @@
     }
 
     function formatScore(value) {
+        if (value === null || value === undefined) return '--';
         const num = Number(value);
         if (!Number.isFinite(num)) return '--';
         return `${Math.round(num)}`;
@@ -87,11 +88,12 @@
 
     function stageClass(stage) {
         if (stage === '高危') return 'high';
-        if (stage === '警惕') return 'warn';
+        if (stage === '警惕' || stage === '数据不足') return 'warn';
         return 'watch';
     }
 
     function scoreClass(score) {
+        if (score === null || score === undefined) return 'warn';
         const num = Number(score);
         if (!Number.isFinite(num)) return 'watch';
         if (num >= 70) return 'high';
@@ -354,7 +356,7 @@
             renderSnapshotSummary(payload);
             renderSummary(payload);
             renderRows(payload);
-            setRefreshState('Ready', 'watch');
+            setRefreshState(payload.status === 'partial' ? '数据不足（未保存）' : 'Ready', payload.status === 'partial' ? 'warn' : 'watch');
             return payload;
         } catch (error) {
             console.error('Failed to load crash risk data', error);
@@ -375,7 +377,7 @@
         try {
             setRefreshState('Refreshing', 'warn');
             const payload = await loadCrashRisk('/api/crash-risk/refresh', {method: 'POST'});
-            setRefreshState('Updated', 'watch');
+            setRefreshState(payload.status === 'partial' ? '数据不足（未保存）' : 'Updated', payload.status === 'partial' ? 'warn' : 'watch');
             return payload;
         } catch (error) {
             setRefreshState('Refresh failed', 'high');

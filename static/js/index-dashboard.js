@@ -150,11 +150,35 @@
                 const dailyStatsData = await dailyStatsRes.json();
 
                 updateUI(summaryData, tradesData, dailyStatsData, aggregatesData);
+                loadFundingSummary();
                 updateLastUpdated();
 
             } catch (error) {
                 console.error("Error fetching data:", error);
                 document.getElementById('disp-balance').innerText = "Error";
+            }
+        }
+
+        async function loadFundingSummary() {
+            const amountEl = document.getElementById('disp-funding');
+            const rangeEl = document.getElementById('funding-range');
+            if (!amountEl || !rangeEl) return;
+            try {
+                const response = await fetch('/api/funding-summary');
+                if (!response.ok) throw new Error('funding summary request failed');
+                const data = await response.json();
+                if (!data.record_count || data.amount == null) {
+                    amountEl.textContent = '--';
+                    rangeEl.textContent = '暂无已记录流水；不代表资金费为零。';
+                    return;
+                }
+                const amount = Number(data.amount);
+                amountEl.textContent = `${amount > 0 ? '+' : ''}${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT`;
+                const date = ms => new Date(ms).toLocaleDateString('zh-CN', {timeZone: 'Asia/Shanghai'});
+                rangeEl.textContent = `已记录 ${data.record_count} 笔 · ${date(data.first_record_ms)} 至 ${date(data.last_record_ms)}（记录日期非完整性证明）`;
+            } catch (error) {
+                amountEl.textContent = '--';
+                rangeEl.textContent = '资金费读取失败';
             }
         }
 
@@ -232,10 +256,10 @@
                 }
             }
 
-            const maxSingleLoss = Number(
-                stats.max_single_loss !== undefined ? stats.max_single_loss : stats.max_drawdown
-            ) || 0;
-            document.getElementById('metric-mdd').innerText = `-$${Math.abs(maxSingleLoss)}`;
+            const singleLossEl = document.getElementById('metric-mdd');
+            singleLossEl.innerText = stats.max_single_loss == null
+                ? '--'
+                : `-$${Math.abs(Number(stats.max_single_loss) || 0)}`;
 
             renderChart(stats.equity_curve);
             renderDurationChart(tradeAggregates.duration_points || []);

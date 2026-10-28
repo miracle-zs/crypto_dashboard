@@ -86,3 +86,24 @@ def test_position_snapshot_persistence():
         assert btc["entry_price"] == 60000.0
         assert btc["unrealized_pnl"] == 3000.0
         assert btc["position_side"] == "LONG"
+
+
+def test_position_snapshot_keeps_both_hedge_sides_for_same_symbol():
+    with TemporaryDirectory() as tmp:
+        db = Database(str(Path(tmp) / "hedge_snapshot.db"))
+        repo = SyncWriteRepository(db)
+
+        saved = repo.save_position_snapshots(
+            "2026-09-26 10:00:00",
+            [
+                {"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "1", "entryPrice": "60000"},
+                {"symbol": "BTCUSDT", "positionSide": "SHORT", "positionAmt": "2", "entryPrice": "61000"},
+            ],
+        )
+
+        latest = repo.get_latest_position_snapshots()
+        assert saved == 2
+        assert {(row["symbol"], row["position_side"], row["qty"]) for row in latest} == {
+            ("BTCUSDT", "LONG", 1.0),
+            ("BTCUSDT", "SHORT", 2.0),
+        }

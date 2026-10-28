@@ -1378,6 +1378,8 @@
                 if (data.incremental === true && data.changed === true) {
                     latestOpenPositionsData = {
                         as_of: data.as_of,
+                        price_as_of: data.price_as_of,
+                        stale: data.stale,
                         positions: data.positions || [],
                         summary: data.summary || {},
                     };
@@ -1430,6 +1432,11 @@
             const summary = openData && openData.summary ? openData.summary : {};
             const positions = openData && openData.positions ? openData.positions : [];
             const profitAlertThresholdPct = Number(summary.profit_alert_threshold_pct || 20);
+            const priceStatus = document.getElementById('open-price-status');
+            if (priceStatus) {
+                priceStatus.textContent = openData?.stale ? '· 行情过期或缺失' : '';
+                priceStatus.title = openData?.price_as_of ? `最早行情时间：${openData.price_as_of}` : '';
+            }
 
             if (tbody) tbody.innerHTML = '';
             if (mobileContainer) mobileContainer.innerHTML = '';
@@ -1469,6 +1476,12 @@
                 // 检查持仓是否超过48小时 (2880分钟)
                 const isStale = (pos.holding_minutes || 0) > 2880;
                 const isLongTerm = pos.is_long_term === true;
+                const incompleteBadge = pos.is_incomplete
+                    ? '<span class="text-[10px] bg-amber-900/30 text-amber-300 px-1 rounded">明细不完整</span>'
+                    : '';
+                const priceBadge = pos.price_stale
+                    ? `<span class="text-[10px] bg-amber-900/30 text-amber-300 px-1 rounded" title="${escapeHtml(pos.price_as_of || '行情时间未知')}">${pos.mark_price == null ? '行情缺失' : '行情过期'}</span>`
+                    : '';
 
                 // 长期持仓行样式淡化
                 const rowOpacity = isLongTerm ? 'opacity-60' : '';
@@ -1481,13 +1494,15 @@
                         <tr class="table-row hover:bg-white/5 transition-colors border-b border-gray-800 ${rowOpacity}">
                             <td class="px-6 py-4 font-bold text-cyan-400">
                                 ${pos.symbol}
+                                ${incompleteBadge}
+                                ${priceBadge}
                                 ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded ml-1">LT</span>' : ''}
                                 ${notifiedBadge}
                             </td>
                             <td class="px-6 py-4">
                                 <span class="${sideClass} text-xs border px-1 rounded">${pos.side}</span>
                             </td>
-                            <td class="px-6 py-4 text-xs font-mono">${pos.entry_time}</td>
+                            <td class="px-6 py-4 text-xs font-mono">${pos.entry_time || '--'}</td>
                             <td class="px-6 py-4 ${holdingStyle}">
                                 ${holdingIcon}${pos.holding_time}
                             </td>
@@ -1518,10 +1533,12 @@
                                 <div>
                                     <div class="font-bold text-cyan-400 flex items-center gap-2">
                                         ${pos.symbol}
+                                        ${incompleteBadge}
+                                        ${priceBadge}
                                         ${isLongTerm ? '<span class="text-[10px] bg-cyan-900/40 text-cyan-400 px-1 rounded">LT</span>' : ''}
                                         ${notifiedBadge}
                                     </div>
-                                    <div class="text-[10px] text-gray-500 mt-1">${pos.entry_time}</div>
+                                    <div class="text-[10px] text-gray-500 mt-1">${pos.entry_time || '--'}</div>
                                 </div>
                                 <div class="flex flex-col items-end gap-1">
                                     <span class="${sideClass} text-[10px] border px-1.5 py-0.5 rounded font-bold">${pos.side}</span>
@@ -1578,9 +1595,9 @@
             lucide.createIcons();
 
             // Leverage
-            const totalNotional = Number(summary.total_notional || 0);
-            const totalUpnl = Number(summary.total_unrealized_pnl || 0);
-            const netExposure = Number(summary.net_exposure || 0);
+            const totalNotional = summary.total_notional;
+            const totalUpnl = summary.total_unrealized_pnl;
+            const netExposure = summary.net_exposure;
 
             // Use current wallet balance for leverage calc (more conservative/realistic than equity)
             // But usually Leverage = Notional / Equity. Let's use the displayed balance (Equity)
@@ -1591,7 +1608,7 @@
             const leverage = totalNotional / currentEquity;
             const levEl = document.getElementById('disp-leverage');
             if (levEl) {
-                levEl.innerText = `${leverage.toFixed(2)}x`;
+                levEl.innerText = totalNotional == null ? '--' : `${leverage.toFixed(2)}x`;
                 // Color coding for leverage
                 if (leverage > 5) levEl.className = "text-l3 font-bold text-red-500";
                 else if (leverage > 3) levEl.className = "text-l3 font-bold text-amber-400";
@@ -1615,8 +1632,8 @@
             const listEl = document.getElementById('open-concentration-list');
 
             if (totalNotionalEl) totalNotionalEl.innerText = formatMoney(totalNotional, 0);
-            if (longNotionalEl) longNotionalEl.innerText = formatMoney(summary.long_notional || 0, 0);
-            if (shortNotionalEl) shortNotionalEl.innerText = formatMoney(summary.short_notional || 0, 0);
+            if (longNotionalEl) longNotionalEl.innerText = formatMoney(summary.long_notional, 0);
+            if (shortNotionalEl) shortNotionalEl.innerText = formatMoney(summary.short_notional, 0);
             if (totalUpnlEl) {
                 totalUpnlEl.innerText = formatSignedMoney(totalUpnl, 0);
                 totalUpnlEl.className = `text-l3 font-bold ${totalUpnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
@@ -1650,13 +1667,15 @@
             if (longCountEl) longCountEl.innerText = summary.long_count || 0;
             if (shortCountEl) shortCountEl.innerText = summary.short_count || 0;
             if (avgHoldEl) avgHoldEl.innerText = summary.avg_holding_time || '--';
-            if (top1El) top1El.innerText = formatPct((summary.concentration_top1 || 0) * 100, 1);
-            if (top3El) top3El.innerText = formatPct((summary.concentration_top3 || 0) * 100, 1);
-            if (hhiEl) hhiEl.innerText = formatNumber(summary.concentration_hhi || 0, 3);
+            if (top1El) top1El.innerText = formatPct(summary.concentration_top1 == null ? null : summary.concentration_top1 * 100, 1);
+            if (top3El) top3El.innerText = formatPct(summary.concentration_top3 == null ? null : summary.concentration_top3 * 100, 1);
+            if (hhiEl) hhiEl.innerText = formatNumber(summary.concentration_hhi, 3);
 
             if (listEl) {
                 if (!positions.length) {
                     listEl.innerHTML = `<div class=\"text-[11px] text-gray-500\">暂无仓位</div>`;
+                } else if (totalNotional == null) {
+                    listEl.innerHTML = '<div class="text-[11px] text-gray-500">行情不完整</div>';
                 } else {
                     const symbolTotals = {};
                     positions.forEach(pos => {

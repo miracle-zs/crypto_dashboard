@@ -41,11 +41,6 @@ def _env_float(name: str, default: float, minimum: float | None = None) -> float
     return value
 
 
-# compatibility aliases used by scheduler refactor path
-read_int_env = _env_int
-read_float_env = _env_float
-
-
 @dataclass(frozen=True)
 class SchedulerConfig:
     scheduler_timezone: str
@@ -73,8 +68,6 @@ class SchedulerConfig:
     leaderboard_top_n: int
     leaderboard_min_quote_volume: float
     leaderboard_max_symbols: int
-    leaderboard_kline_workers: int
-    leaderboard_weight_budget_per_minute: int
     leaderboard_alert_hour: int
     leaderboard_alert_minute: int
     leaderboard_guard_before_minutes: int
@@ -90,28 +83,12 @@ class SchedulerConfig:
     history_validation_lookback_hours: int
     enable_rebound_7d_snapshot: bool
     rebound_7d_top_n: int
-    rebound_7d_kline_workers: int
-    rebound_7d_weight_budget_per_minute: int
-    rebound_7d_hour: int
-    rebound_7d_minute: int
     enable_rebound_30d_snapshot: bool
     rebound_30d_top_n: int
-    rebound_30d_kline_workers: int
-    rebound_30d_weight_budget_per_minute: int
-    rebound_30d_hour: int
-    rebound_30d_minute: int
     enable_rebound_60d_snapshot: bool
     rebound_60d_top_n: int
-    rebound_60d_kline_workers: int
-    rebound_60d_weight_budget_per_minute: int
-    rebound_60d_hour: int
-    rebound_60d_minute: int
     enable_rebound_365d_snapshot: bool
     rebound_365d_top_n: int
-    rebound_365d_kline_workers: int
-    rebound_365d_weight_budget_per_minute: int
-    rebound_365d_hour: int
-    rebound_365d_minute: int
     noon_loss_check_hour: int
     noon_loss_check_minute: int
     noon_review_hour: int
@@ -135,14 +112,6 @@ def load_scheduler_config() -> SchedulerConfig:
     daily_full_sync_hour = _env_int("DAILY_FULL_SYNC_HOUR", 3, minimum=0) % 24
     daily_full_sync_minute = _env_int("DAILY_FULL_SYNC_MINUTE", 30, minimum=0) % 60
     open_positions_full_default_minute = (daily_full_sync_minute + 20) % 60
-
-    rebound_7d_kline_workers = _env_int("REBOUND_7D_KLINE_WORKERS", 6, minimum=1)
-    rebound_7d_weight_budget_per_minute = min(
-        200,
-        _env_int("REBOUND_7D_WEIGHT_BUDGET_PER_MINUTE", 200, minimum=1),
-    )
-    rebound_7d_hour = _env_int("REBOUND_7D_HOUR", 7, minimum=0)
-    rebound_7d_minute = _env_int("REBOUND_7D_MINUTE", 30, minimum=0)
 
     return SchedulerConfig(
         scheduler_timezone=os.getenv("SCHEDULER_TIMEZONE", "Asia/Shanghai"),
@@ -186,11 +155,6 @@ def load_scheduler_config() -> SchedulerConfig:
         leaderboard_top_n=_env_int("LEADERBOARD_TOP_N", 10, minimum=1),
         leaderboard_min_quote_volume=_env_float("LEADERBOARD_MIN_QUOTE_VOLUME", 50_000_000, minimum=0.0),
         leaderboard_max_symbols=_env_int("LEADERBOARD_MAX_SYMBOLS", 120, minimum=0),
-        leaderboard_kline_workers=_env_int("LEADERBOARD_KLINE_WORKERS", 6, minimum=1),
-        leaderboard_weight_budget_per_minute=min(
-            200,
-            _env_int("LEADERBOARD_WEIGHT_BUDGET_PER_MINUTE", 200, minimum=1),
-        ),
         leaderboard_alert_hour=_env_int("LEADERBOARD_ALERT_HOUR", 7, minimum=0) % 24,
         leaderboard_alert_minute=_env_int("LEADERBOARD_ALERT_MINUTE", 30, minimum=0) % 60,
         leaderboard_guard_before_minutes=_env_int("LEADERBOARD_GUARD_BEFORE_MINUTES", 2, minimum=0),
@@ -214,49 +178,12 @@ def load_scheduler_config() -> SchedulerConfig:
         ),
         enable_rebound_7d_snapshot=_env_bool("ENABLE_REBOUND_7D_SNAPSHOT", True),
         rebound_7d_top_n=_env_int("REBOUND_7D_TOP_N", 10, minimum=1),
-        rebound_7d_kline_workers=rebound_7d_kline_workers,
-        rebound_7d_weight_budget_per_minute=rebound_7d_weight_budget_per_minute,
-        rebound_7d_hour=rebound_7d_hour % 24,
-        rebound_7d_minute=rebound_7d_minute % 60,
         enable_rebound_30d_snapshot=_env_bool("ENABLE_REBOUND_30D_SNAPSHOT", True),
         rebound_30d_top_n=_env_int("REBOUND_30D_TOP_N", 10, minimum=1),
-        rebound_30d_kline_workers=_env_int("REBOUND_30D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_30d_weight_budget_per_minute=min(
-            200,
-            _env_int(
-                "REBOUND_30D_WEIGHT_BUDGET_PER_MINUTE",
-                rebound_7d_weight_budget_per_minute,
-                minimum=1,
-            ),
-        ),
-        rebound_30d_hour=_env_int("REBOUND_30D_HOUR", rebound_7d_hour, minimum=0) % 24,
-        rebound_30d_minute=_env_int("REBOUND_30D_MINUTE", rebound_7d_minute + 2, minimum=0) % 60,
         enable_rebound_60d_snapshot=_env_bool("ENABLE_REBOUND_60D_SNAPSHOT", True),
         rebound_60d_top_n=_env_int("REBOUND_60D_TOP_N", 10, minimum=1),
-        rebound_60d_kline_workers=_env_int("REBOUND_60D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_60d_weight_budget_per_minute=min(
-            200,
-            _env_int(
-                "REBOUND_60D_WEIGHT_BUDGET_PER_MINUTE",
-                rebound_7d_weight_budget_per_minute,
-                minimum=1,
-            ),
-        ),
-        rebound_60d_hour=_env_int("REBOUND_60D_HOUR", rebound_7d_hour, minimum=0) % 24,
-        rebound_60d_minute=_env_int("REBOUND_60D_MINUTE", rebound_7d_minute + 4, minimum=0) % 60,
         enable_rebound_365d_snapshot=_env_bool("ENABLE_REBOUND_365D_SNAPSHOT", True),
         rebound_365d_top_n=_env_int("REBOUND_365D_TOP_N", 10, minimum=1),
-        rebound_365d_kline_workers=_env_int("REBOUND_365D_KLINE_WORKERS", rebound_7d_kline_workers, minimum=1),
-        rebound_365d_weight_budget_per_minute=min(
-            200,
-            _env_int(
-                "REBOUND_365D_WEIGHT_BUDGET_PER_MINUTE",
-                rebound_7d_weight_budget_per_minute,
-                minimum=1,
-            ),
-        ),
-        rebound_365d_hour=_env_int("REBOUND_365D_HOUR", rebound_7d_hour, minimum=0) % 24,
-        rebound_365d_minute=_env_int("REBOUND_365D_MINUTE", rebound_7d_minute + 6, minimum=0) % 60,
         noon_loss_check_hour=_env_int("NOON_LOSS_CHECK_HOUR", 11, minimum=0) % 24,
         noon_loss_check_minute=_env_int("NOON_LOSS_CHECK_MINUTE", 50, minimum=0) % 60,
         noon_review_hour=_env_int("NOON_REVIEW_HOUR", 23, minimum=0) % 24,

@@ -28,9 +28,11 @@ class BinanceUserDataStream:
         ws_base_url: Optional[str] = None,
         reconnect_delay_seconds: float = 2.0,
         max_reconnect_delay_seconds: float = 60.0,
+        processor=None,
     ):
         self.api_key = api_key
         self.db = db
+        self.processor = processor
         self.trade_repo = TradeRepository(self.db)
         self.rest_base_url = rest_base_url or os.getenv("BINANCE_FAPI_BASE_URL", "https://fapi.binance.com")
         self.ws_base_url = ws_base_url or os.getenv("BINANCE_FAPI_WS_BASE_URL", "wss://fstream.binance.com")
@@ -45,6 +47,7 @@ class BinanceUserDataStream:
         self._last_heartbeat_time_ms: int = 0
         self._last_event_time_ms: int = 0
         self._position_pnl_map: dict[tuple[str, str], float] = {}
+        self._position_cache_ready = processor is None
         self._ws_app: Optional[websocket.WebSocketApp] = None
         self._supervisor_thread: Optional[threading.Thread] = None
         self._keepalive_thread: Optional[threading.Thread] = None
@@ -194,6 +197,8 @@ class BinanceUserDataStream:
                 logger.error(f"User stream exception in supervisor loop: {exc}")
             finally:
                 self._is_connected = False
+                if self.processor is not None:
+                    self._position_cache_ready = False
 
             if not self._running:
                 break
@@ -211,7 +216,45 @@ class BinanceUserDataStream:
         self._is_connected = True
         self._connected_at_ms = now_ms
         self._last_heartbeat_time_ms = now_ms
+        if self.processor is not None and not self._refresh_position_pnl_snapshot():
+            logger.warning("User stream 未取得完整持仓快照，暂不写入增量余额记录")
         logger.info("User data stream WebSocket connection established")
+
+    def _refresh_position_pnl_snapshot(self) -> bool:
+        """Seed incremental ACCOUNT_UPDATE state from Binance's full position snapshot."""
+        if self.processor is None:
+            self._position_cache_ready = True
+            return True
+
+        self._position_cache_ready = False
+        try:
+            positions = self.processor.get_real_positions()
+            if positions is None:
+                return False
+            risk_positions = getattr(self.processor, "_latest_position_risk", None)
+            if risk_positions is None:
+                return False
+
+            pnl_by_position = {}
+            for position in risk_positions:
+                symbol = str(position.get("symbol") or "").upper()
+                if not symbol:
+                    raise ValueError("positionRisk 缺少 symbol")
+                qty = float(position["positionAmt"])
+                if abs(qty) < 1e-6:
+                    continue
+                side = str(position.get("positionSide") or "BOTH").upper()
+                if side not in ("BOTH", "LONG", "SHORT"):
+                    raise ValueError(f"positionRisk 持仓方向无效: {symbol} {side}")
+                pnl_by_position[(symbol, side)] = float(position["unRealizedProfit"])
+
+            self._position_pnl_map = pnl_by_position
+            self._last_unrealized_pnl = sum(pnl_by_position.values())
+            self._position_cache_ready = True
+            return True
+        except Exception as exc:
+            logger.warning(f"User stream 持仓快照同步失败: {exc}")
+            return False
 
     def _on_ping(self, _ws, message):
         self._last_heartbeat_time_ms = int(time.time() * 1000)
@@ -239,6 +282,8 @@ class BinanceUserDataStream:
             self._handle_account_update(payload)
 
     def _handle_account_update(self, payload: dict):
+        if not self._position_cache_ready:
+            return
         account_info = payload.get("a", {})
         balances = account_info.get("B", [])
 
@@ -258,26 +303,31 @@ class BinanceUserDataStream:
             return
 
         positions = account_info.get("P", [])
+        closed_known_position = False
         if positions:
             for p in positions:
                 sym = str(p.get("s", "")).upper()
                 ps = str(p.get("ps") or p.get("positionSide") or "BOTH").upper()
                 if p.get("ma") == "USDT" or sym.endswith("USDT"):
                     try:
-                        qty = float(p.get("pa", 0.0))
+                        qty = float(p["pa"])
                         up = float(p.get("up", 0.0))
                         if abs(qty) < 1e-6:
+                            closed_known_position = closed_known_position or (sym, ps) in self._position_pnl_map
                             self._position_pnl_map.pop((sym, ps), None)
                         else:
                             self._position_pnl_map[(sym, ps)] = up
-                    except (ValueError, TypeError):
+                    except (KeyError, ValueError, TypeError):
                         pass
 
         if self._position_pnl_map:
             total_up = sum(self._position_pnl_map.values())
             self._last_unrealized_pnl = total_up
             margin_balance = wallet_balance + total_up
-        elif hasattr(self, "_last_unrealized_pnl") and self._last_unrealized_pnl != 0.0:
+        elif closed_known_position:
+            self._last_unrealized_pnl = 0.0
+            margin_balance = wallet_balance
+        elif hasattr(self, "_last_unrealized_pnl"):
             margin_balance = wallet_balance + self._last_unrealized_pnl
         else:
             margin_balance = cross_wallet
@@ -295,4 +345,6 @@ class BinanceUserDataStream:
 
     def _on_close(self, _ws, status_code, msg):
         self._is_connected = False
+        if self.processor is not None:
+            self._position_cache_ready = False
         logger.warning(f"User stream websocket closed: status={status_code}, msg={msg}")

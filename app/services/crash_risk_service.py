@@ -159,7 +159,7 @@ class CrashRiskService:
             return self.build_empty_response()
 
         rows = []
-        stage_counts = {"高危": 0, "警惕": 0, "观察": 0}
+        stage_counts = {"高危": 0, "警惕": 0, "观察": 0, "数据不足": 0}
         source_symbols = snapshot.get("symbols")
         if source_symbols is None:
             source_rows = snapshot.get("rows", []) or []
@@ -185,15 +185,17 @@ class CrashRiskService:
             rows.append(row)
             stage_counts[row["stage"]] = stage_counts.get(row["stage"], 0) + 1
 
-        rows.sort(key=lambda item: item.get("risk_score", 0), reverse=True)
+        rows.sort(key=lambda item: (item["risk_score"] is not None, item["risk_score"] or 0), reverse=True)
         as_of = snapshot.get("snapshot_time") or snapshot.get("snapshot_date")
         return {
             "as_of": as_of,
+            "status": "partial" if stage_counts["数据不足"] else "complete",
             "summary": {
                 "total": len(rows),
                 "high_risk": stage_counts.get("高危", 0),
                 "warning": stage_counts.get("警惕", 0),
                 "watch": stage_counts.get("观察", 0),
+                "unknown": stage_counts.get("数据不足", 0),
             },
             "source_snapshot": {
                 "source": snapshot.get("source", "leaderboard_snapshot"),
@@ -215,7 +217,7 @@ class CrashRiskService:
 
     def refresh_from_leaderboard_snapshot(self, db) -> dict:
         result = self.build_from_leaderboard_snapshot(db)
-        if result and result.get("rows"):
+        if result and result.get("rows") and result.get("status") != "partial":
             repo = self.repository_cls(db)
             saver = getattr(repo, "save_crash_risk_snapshot", None)
             if callable(saver):
@@ -242,10 +244,10 @@ class CrashRiskService:
 
         if len(closes) < 2 or len(open_interests) < 2 or len(lows) < 2 or len(highs) < 2 or len(volumes) < 2:
             return {
-                "risk_score": 0,
-                "stage": "观察",
-                "drivers": [],
-                "component_scores": component_scores,
+                "risk_score": None,
+                "stage": "数据不足",
+                "drivers": ["行情数据不足，无法评分"],
+                "component_scores": {},
             }
 
         half_index = max(1, len(closes) // 2)

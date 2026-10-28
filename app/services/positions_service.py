@@ -85,8 +85,7 @@ class PositionsService:
         get_read_model().invalidate(prefix="positions:open:")
 
     async def build_open_positions_response(self, db, client=None, since_version: int | None = None):
-        # ``client`` remains as a compatibility argument, but page reads must never
-        # emit Binance requests. Prices come from the locally refreshed daily cache.
+        # Page reads do not emit Binance requests; prices come from the local cache.
         del client
         now = datetime.now(UTC8)
         today_snapshot_date = now.strftime("%Y-%m-%d")
@@ -194,15 +193,10 @@ class PositionsService:
 
         symbols_full = [self._normalize_symbol(pos["symbol"]) for pos in raw_positions]
         from app.services.market_price_service import MarketPriceService
-        cached_prices, price_as_of_ts = MarketPriceService.get_latest_cached_prices()
-
-        mark_prices = {}
-        missing_symbols = []
-        for symbol_full in symbols_full:
-            if symbol_full in cached_prices and cached_prices[symbol_full] > 0:
-                mark_prices[symbol_full] = cached_prices[symbol_full]
-            else:
-                missing_symbols.append(symbol_full)
+        cached_quotes = {
+            symbol: MarketPriceService.get_symbol_cached_price(symbol)
+            for symbol in set(symbols_full)
+        }
 
         positions = []
         per_symbol_notional = defaultdict(float)
@@ -211,49 +205,70 @@ class PositionsService:
         short_notional = 0.0
         total_unrealized_pnl = 0.0
         total_holding_minutes = 0
+        known_holding_count = 0
+        pnl_complete = True
+        notional_complete = True
 
         for pos in raw_positions:
             symbol = str(pos.get("symbol", "")).upper()
             side = str(pos.get("side", "")).upper()
             qty = float(pos.get("qty", 0.0))
-            entry_price = float(pos.get("entry_price", 0.0))
-            entry_amount = float(pos.get("entry_amount") or (entry_price * qty))
-            entry_time_str = str(pos.get("entry_time"))
+            raw_entry_price = pos.get("entry_price")
+            entry_price = float(raw_entry_price) if raw_entry_price is not None else None
+            raw_entry_amount = pos.get("entry_amount")
+            entry_amount = float(raw_entry_amount) if raw_entry_amount is not None else None
+            if entry_amount is None and entry_price is not None:
+                entry_amount = entry_price * qty
+            entry_time_str = pos.get("entry_time")
 
             symbol_full = self._normalize_symbol(symbol)
-            mark_price = mark_prices.get(symbol_full)
-            price_for_notional = mark_price if mark_price is not None else entry_price
-            notional = float(price_for_notional * qty)
+            mark_price, price_timestamp = cached_quotes[symbol_full]
+            if mark_price is None or mark_price <= 0:
+                mark_price, price_timestamp = None, None
+            price_stale = price_timestamp is None or now.timestamp() - price_timestamp > 900
+            position_price_as_of = (
+                datetime.fromtimestamp(price_timestamp, tz=UTC8).isoformat()
+                if price_timestamp is not None else None
+            )
+            notional = float(mark_price * qty) if mark_price is not None else None
+            if notional is None:
+                notional_complete = False
 
             unrealized_pnl = None
             unrealized_pnl_pct = None
-            if mark_price is not None and qty > 0:
+            if mark_price is not None and entry_price is not None and qty > 0 and side in ("LONG", "SHORT"):
                 if side == "SHORT":
                     unrealized_pnl = (entry_price - mark_price) * qty
                 else:
                     unrealized_pnl = (mark_price - entry_price) * qty
-                if entry_amount > 0:
+                if entry_amount is not None and entry_amount > 0:
                     unrealized_pnl_pct = (unrealized_pnl / entry_amount) * 100
+            if unrealized_pnl is None:
+                pnl_complete = False
 
             try:
                 entry_dt = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC8)
-            except ValueError:
-                entry_dt = now
+            except (TypeError, ValueError):
+                entry_dt = None
 
-            holding_minutes = max(0, int((now - entry_dt).total_seconds() // 60))
-            holding_time = self._format_holding_time(holding_minutes)
+            holding_minutes = max(0, int((now - entry_dt).total_seconds() // 60)) if entry_dt else None
+            holding_time = self._format_holding_time(holding_minutes) if holding_minutes is not None else "--"
 
-            total_notional += notional
-            total_holding_minutes += holding_minutes
+            total_notional += notional or 0.0
+            if holding_minutes is not None:
+                total_holding_minutes += holding_minutes
+                known_holding_count += 1
             if side == "SHORT":
-                short_notional += notional
+                short_notional += notional or 0.0
+            elif side == "LONG":
+                long_notional += notional or 0.0
             else:
-                long_notional += notional
+                notional_complete = False
 
             if unrealized_pnl is not None:
                 total_unrealized_pnl += unrealized_pnl
 
-            per_symbol_notional[symbol] += notional
+            per_symbol_notional[symbol] += notional or 0.0
 
             positions.append({
                 "symbol": symbol,
@@ -262,6 +277,8 @@ class PositionsService:
                 "qty": qty,
                 "entry_price": entry_price,
                 "mark_price": mark_price,
+                "price_as_of": position_price_as_of,
+                "price_stale": price_stale,
                 "entry_time": entry_time_str,
                 "holding_minutes": holding_minutes,
                 "holding_time": holding_time,
@@ -272,15 +289,15 @@ class PositionsService:
                 "is_long_term": pos.get("is_long_term", 0) == 1,
                 "profit_alerted": pos.get("profit_alerted", 0) == 1,
                 "is_incomplete": pos.get("is_incomplete", 0) in (1, True),
-                "weight": 0.0
+                "weight": None
 
             })
 
-        if total_notional > 0:
+        if notional_complete and total_notional > 0:
             for pos in positions:
-                pos["weight"] = pos["notional"] / total_notional
+                pos["weight"] = (pos["notional"] or 0.0) / total_notional
 
-        positions.sort(key=lambda item: item["notional"], reverse=True)
+        positions.sort(key=lambda item: item["notional"] or 0.0, reverse=True)
 
         shares = []
         if total_notional > 0:
@@ -290,23 +307,25 @@ class PositionsService:
         concentration_top3 = sum(shares[:3]) if shares else 0.0
         concentration_hhi = sum(share ** 2 for share in shares) if shares else 0.0
 
-        avg_holding_minutes = (total_holding_minutes / len(positions)) if positions else 0.0
-        avg_holding_time = self._format_holding_time(int(avg_holding_minutes))
+        avg_holding_minutes = (
+            total_holding_minutes / known_holding_count if known_holding_count == len(positions) else None
+        )
+        avg_holding_time = self._format_holding_time(int(avg_holding_minutes)) if avg_holding_minutes is not None else None
 
         summary = {
             "total_positions": len(positions),
             "long_count": sum(1 for p in positions if p["side"] == "LONG"),
             "short_count": sum(1 for p in positions if p["side"] == "SHORT"),
-            "total_notional": total_notional,
-            "long_notional": long_notional,
-            "short_notional": short_notional,
-            "net_exposure": long_notional - short_notional,
-            "total_unrealized_pnl": total_unrealized_pnl,
+            "total_notional": total_notional if notional_complete else None,
+            "long_notional": long_notional if notional_complete else None,
+            "short_notional": short_notional if notional_complete else None,
+            "net_exposure": long_notional - short_notional if notional_complete else None,
+            "total_unrealized_pnl": total_unrealized_pnl if pnl_complete else None,
             "avg_holding_minutes": avg_holding_minutes,
             "avg_holding_time": avg_holding_time,
-            "concentration_top1": concentration_top1,
-            "concentration_top3": concentration_top3,
-            "concentration_hhi": concentration_hhi,
+            "concentration_top1": concentration_top1 if notional_complete else None,
+            "concentration_top3": concentration_top3 if notional_complete else None,
+            "concentration_hhi": concentration_hhi if notional_complete else None,
             "recent_loss_count": noon_loss_count,
             "recent_loss_total_if_stop_now": noon_stop_loss_total,
             "recent_loss_pct_of_balance": noon_stop_loss_pct,
@@ -324,15 +343,12 @@ class PositionsService:
             "profit_alert_threshold_pct": profit_alert_threshold_pct
         }
 
-        price_as_of = (
-            datetime.fromtimestamp(price_as_of_ts, tz=UTC8).isoformat()
-            if price_as_of_ts > 0
-            else None
-        )
+        price_timestamps = [row["price_as_of"] for row in positions if row["price_as_of"] is not None]
+        price_as_of = min(price_timestamps) if price_timestamps else None
         return {
             "as_of": now.isoformat(),
             "price_as_of": price_as_of,
-            "stale": (now.timestamp() - price_as_of_ts > 900) if price_as_of_ts > 0 else True,
+            "stale": any(row["price_stale"] for row in positions),
             "positions": positions,
             "summary": summary,
         }

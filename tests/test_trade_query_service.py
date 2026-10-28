@@ -93,7 +93,7 @@ def test_get_summary_prefers_cached_total_count_fast_path():
                 "win_count": 1,
                 "loss_count": 1,
                 "total_trades": 2,
-                "equity_curve": [1.0],
+                "equity_curve": [0.5, 1.0],
                 "current_streak": 1,
                 "best_win_streak": 1,
                 "worst_loss_streak": -1,
@@ -120,3 +120,63 @@ def test_get_summary_prefers_cached_total_count_fast_path():
 
     summary = service.get_summary()
     assert summary.total_trades == 2
+
+
+def test_get_summary_recomputes_invalidated_metrics():
+    class FakeRepo:
+        recomputed = False
+
+        def get_trade_summary(self):
+            return {
+                "total_pnl": 1.0,
+                "total_fees": 0.1,
+                "win_rate": 100.0,
+                "win_count": 1,
+                "loss_count": 0,
+                "total_trades": 1,
+                "equity_curve": [1.0],
+                "current_streak": 1,
+                "best_win_streak": 1,
+                "worst_loss_streak": 0,
+                "max_single_loss": None,
+                "max_drawdown": None,
+                "profit_factor": 1.0,
+                "kelly_criterion": 0.1,
+                "sqn": 0.1,
+                "expected_value": 0.1,
+                "risk_reward_ratio": 1.0,
+            }
+
+        def get_cached_total_trades(self):
+            return 1
+
+        def recompute_trade_summary(self):
+            self.recomputed = True
+            return {
+                "total_pnl": -1.0,
+                "total_fees": 0.1,
+                "win_rate": 0.0,
+                "win_count": 0,
+                "loss_count": 1,
+                "total_trades": 1,
+                "equity_curve": [-1.0],
+                "current_streak": -1,
+                "best_win_streak": 0,
+                "worst_loss_streak": -1,
+                "max_single_loss": -1.0,
+                "max_drawdown": -1.0,
+                "profit_factor": 0.0,
+                "kelly_criterion": 0.0,
+                "sqn": 0.0,
+                "expected_value": -1.0,
+                "risk_reward_ratio": 0.0,
+            }
+
+    service = TradeQueryService.__new__(TradeQueryService)
+    service.repo = FakeRepo()
+
+    summary = service.get_summary()
+
+    assert service.repo.recomputed is True
+    assert summary.max_single_loss == -1.0
+    assert summary.max_drawdown == -1.0

@@ -7,7 +7,7 @@ from app.repositories import TradeRepository
 class BalanceService:
     async def build_balance_history_response(self, *, db, time_range: str):
         trade_repo = TradeRepository(db)
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc).replace(tzinfo=None)
         start_time = None
 
         if time_range == "1h":

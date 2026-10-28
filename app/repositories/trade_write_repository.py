@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class TradeWriteRepository:
@@ -11,7 +11,7 @@ class TradeWriteRepository:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO balance_history (timestamp, balance, wallet_balance) VALUES (?, ?, ?)",
-            (datetime.utcnow(), balance, wallet_balance),
+            (datetime.now(timezone.utc).replace(tzinfo=None), balance, wallet_balance),
         )
         conn.commit()
         conn.close()
@@ -86,8 +86,8 @@ class TradeWriteRepository:
                 int(summary.get("current_streak", 0)),
                 int(summary.get("best_win_streak", 0)),
                 int(summary.get("worst_loss_streak", 0)),
-                float(summary.get("max_single_loss", 0.0)),
-                float(summary.get("max_drawdown", summary.get("max_single_loss", 0.0))),
+                float(summary["max_single_loss"]) if summary.get("max_single_loss") is not None else None,
+                float(summary["max_drawdown"]) if summary.get("max_drawdown") is not None else None,
                 float(summary.get("profit_factor", 0.0)),
                 float(summary.get("kelly_criterion", 0.0)),
                 float(summary.get("sqn", 0.0)),

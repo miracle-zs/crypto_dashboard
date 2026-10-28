@@ -40,7 +40,7 @@ class _FakeScheduler:
     def _is_api_cooldown_active(self, source):
         return False
 
-    def _try_enter_api_job_slot(self, source):
+    def _try_enter_api_job_slot(self, source, category=None):
         return True
 
     def _release_api_job_slot(self):

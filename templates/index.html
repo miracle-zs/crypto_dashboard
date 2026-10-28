@@ -481,7 +481,7 @@
                 
                 <div class="flex gap-4">
                     <div>
-                        <div class="metric-label">Net PnL</div>
+                        <div class="metric-label">Trade PnL <span class="text-gray-600">交易盈亏</span></div>
                         <div class="text-l2 font-bold pulse-text" id="disp-pnl">--</div>
                     </div>
                     <div>
@@ -493,6 +493,14 @@
                 <div class="mt-4 pt-4 border-t border-gray-800 text-[11px] flex justify-between text-gray-400">
                     <span>Initial: $24,000</span>
                     <span>Fees Paid: <span class="text-red-400" id="disp-fees">--</span></span>
+                </div>
+                <div class="mt-3 text-[11px] text-gray-400">
+                    <div class="flex justify-between gap-2">
+                        <span>已记录资金费（USDT）</span>
+                        <span id="disp-funding" class="font-mono">--</span>
+                    </div>
+                    <div id="funding-range" class="mt-1 text-gray-500">--</div>
+                    <div class="mt-1 text-gray-500">独立统计；历史记录可能不完整，部分费用可能已计入交易盈亏，请勿直接相加。</div>
                 </div>
             </div>
 

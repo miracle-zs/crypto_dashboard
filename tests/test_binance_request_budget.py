@@ -106,12 +106,13 @@ def test_429_activates_cooldown_and_is_never_retried(monkeypatch):
         def json(self):
             return {"code": -1003, "msg": "too many requests"}
 
-    monkeypatch.setattr(
-        "app.binance_client.requests.request",
-        lambda **kwargs: calls.append(kwargs) or FakeResponse(),
-    )
     BinanceFuturesRestClient._cooldown_until_ms = 0
     client = BinanceFuturesRestClient(min_request_interval=0)
+    monkeypatch.setattr(
+        client._session,
+        "request",
+        lambda **kwargs: calls.append(kwargs) or FakeResponse(),
+    )
 
     try:
         assert client.public_get("/fapi/v1/klines", {"symbol": "BTCUSDT", "limit": 365}) is None

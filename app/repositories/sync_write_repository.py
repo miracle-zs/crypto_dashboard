@@ -353,7 +353,7 @@ class SyncWriteRepository:
                     (
                         str(snapshot_time),
                         str(p.get("symbol", "")),
-                        str(p.get("position_side") or p.get("side") or "BOTH"),
+                        str(p.get("position_side") or p.get("positionSide") or p.get("side") or "BOTH"),
                         float(p.get("qty") or p.get("positionAmt") or 0.0),
                         float(p.get("entry_price") or p.get("entryPrice") or 0.0),
                         float(p.get("mark_price") or p.get("markPrice") or 0.0),

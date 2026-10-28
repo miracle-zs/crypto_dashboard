@@ -26,7 +26,12 @@ class TradeQueryService:
                 stats = self.repo.get_statistics()
                 latest_total_trades = stats.get("total_trades", 0)
 
-            if cached.get('total_trades', 0) == latest_total_trades:
+            summary_is_complete = (
+                cached.get("max_single_loss") is not None
+                and cached.get("max_drawdown") is not None
+                and len(cached.get("equity_curve") or []) == int(cached.get("total_trades") or 0)
+            )
+            if cached.get('total_trades', 0) == latest_total_trades and summary_is_complete:
                 return TradeSummary(**cached)
 
         summary = self.repo.recompute_trade_summary()
