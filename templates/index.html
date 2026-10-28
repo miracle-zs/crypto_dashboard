@@ -473,7 +473,7 @@
                 <div class="flex justify-between items-start mb-4">
                     <div>
                         <div class="metric-label">Total Equity</div>
-                        <div class="text-l1 font-bold text-white mt-1 tracking-tight" id="disp-balance">$Loading</div>
+                        <div class="text-l1 font-bold text-white mt-1 tracking-tight" id="disp-balance">--</div>
                     </div>
                     <i data-lucide="wallet" class="text-gray-600"></i>
                 </div>
@@ -484,14 +484,13 @@
                         <div class="text-l2 font-bold pulse-text" id="disp-pnl">--</div>
                     </div>
                     <div>
-                        <div class="metric-label">ROI</div>
+                        <div class="metric-label">ROI ($24K basis)</div>
                         <div class="text-l2 font-bold" id="disp-roi">--%</div>
                     </div>
                 </div>
                 
                 <div class="mt-4 pt-4 border-t border-gray-800 text-[11px] flex justify-between text-gray-400">
-                    <span>Initial: $24,000</span>
-                    <span>Fees Paid: <span class="text-red-400" id="disp-fees">--</span></span>
+                    <span>Trading Fees: <span class="text-red-400" id="disp-fees">--</span></span>
                 </div>
                 <div class="mt-3 text-[11px] text-gray-400">
                     <div class="flex justify-between gap-2">
@@ -499,7 +498,7 @@
                         <span id="disp-funding" class="font-mono">--</span>
                     </div>
                     <div id="funding-range" class="mt-1 text-gray-500">--</div>
-                    <div class="mt-1 text-gray-500">独立统计；历史记录可能不完整，部分费用可能已计入交易盈亏，请勿直接相加。</div>
+                    <div class="mt-1 text-gray-500">交易盈亏已扣手续费；资金费单独统计，记录区间外未验证。</div>
                 </div>
             </div>
 
@@ -578,7 +577,7 @@
             <div class="cyber-panel rounded-xl p-6 flex flex-col panel-reveal">
             <div class="flex justify-between mb-4">
                 <h3 class="text-sm font-bold text-gray-300 flex items-center">
-                    <i data-lucide="activity" class="mr-2 w-4 h-4 text-cyan-400"></i> EQUITY CURVE
+                    <i data-lucide="activity" class="mr-2 w-4 h-4 text-cyan-400"></i> CUMULATIVE TRADE PNL
                 </h3>
                 <div class="flex gap-2 text-[11px]">
                     <span class="px-2 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded">WIN: <span id="disp-wins">0</span></span>

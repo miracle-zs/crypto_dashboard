@@ -7,6 +7,11 @@
         const DASHBOARD_UPDATE_INTERVAL = 60000;
         const TRADE_LOG_MOBILE_COLLAPSE_LIMIT = 6;
         const TRADE_PAGE_SIZE = 10;
+        const usdFormatter = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            maximumFractionDigits: 2
+        });
         let warnedConfig = false;
         let latestTrades = [];
         let tradeLogMobileExpanded = false;
@@ -14,6 +19,11 @@
         let lastValidTradePageOffset = 0;
         let tradePageHasNext = false;
         let totalTradePages = 1;
+
+        function formatUsd(value) {
+            const amount = Number(value);
+            return Number.isFinite(amount) ? usdFormatter.format(amount) : '--';
+        }
 
         async function adminFetch(url, options = {}) {
             let token = sessionStorage.getItem('dashboardAdminToken') || '';
@@ -150,12 +160,31 @@
                 const dailyStatsData = await dailyStatsRes.json();
 
                 updateUI(summaryData, tradesData, dailyStatsData, aggregatesData);
+                loadAccountBalance();
                 loadFundingSummary();
                 updateLastUpdated();
 
             } catch (error) {
                 console.error("Error fetching data:", error);
                 document.getElementById('disp-balance').innerText = "Error";
+            }
+        }
+
+        async function loadAccountBalance() {
+            const balanceEl = document.getElementById('disp-balance');
+            if (!balanceEl) return;
+
+            try {
+                const response = await fetch('/api/balance-history?time_range=1h', { cache: 'no-store' });
+                if (!response.ok) throw new Error('account balance request failed');
+                const history = await response.json();
+                const latest = Array.isArray(history) && history.length
+                    ? history[history.length - 1]
+                    : null;
+                balanceEl.textContent = latest ? formatUsd(latest.value) : '--';
+            } catch (error) {
+                console.error('Error fetching account balance:', error);
+                balanceEl.textContent = '--';
             }
         }
 
@@ -175,7 +204,7 @@
                 const amount = Number(data.amount);
                 amountEl.textContent = `${amount > 0 ? '+' : ''}${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT`;
                 const date = ms => new Date(ms).toLocaleDateString('zh-CN', {timeZone: 'Asia/Shanghai'});
-                rangeEl.textContent = `已记录 ${data.record_count} 笔 · ${date(data.first_record_ms)} 至 ${date(data.last_record_ms)}（记录日期非完整性证明）`;
+                rangeEl.textContent = `已记录 ${data.record_count} 笔 · ${date(data.first_record_ms)}–${date(data.last_record_ms)}`;
             } catch (error) {
                 amountEl.textContent = '--';
                 rangeEl.textContent = '资金费读取失败';
@@ -191,22 +220,18 @@
             totalTradePages = Math.max(1, Math.ceil((Number(stats.total_trades) || 0) / TRADE_PAGE_SIZE));
             applyMood(stats);
 
-            // 资金与盈亏
-            const equityCurve = Array.isArray(stats.equity_curve) ? stats.equity_curve : [];
-            const balance = Number(equityCurve.length ? equityCurve[equityCurve.length - 1] : 0) || 0;
-            document.getElementById('disp-balance').innerText = `$${balance.toLocaleString()}`;
-
+            // 交易盈亏与账户余额是不同口径。
             const pnlEl = document.getElementById('disp-pnl');
-            pnlEl.innerText = `${stats.total_pnl > 0 ? '+' : ''}$${stats.total_pnl.toLocaleString()}`;
+            pnlEl.innerText = formatUsd(stats.total_pnl);
             pnlEl.className = `text-l2 font-bold pulse-text ${stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
-            // ROI Calculation - uses a fixed initial capital based on the UI text
+            // This fixed capital is the displayed ROI basis.
             const initialCapital = 24000; 
             const roi = initialCapital > 0 ? (stats.total_pnl / initialCapital) * 100 : 0;
             document.getElementById('disp-roi').innerText = `${roi.toFixed(2)}%`;
             document.getElementById('disp-roi').className = `text-l2 font-bold ${roi >= 0 ? 'text-green-400' : 'text-red-500'}`;
 
-            document.getElementById('disp-fees').innerText = `$${stats.total_fees}`;
+            document.getElementById('disp-fees').innerText = formatUsd(stats.total_fees);
             document.getElementById('disp-wins').innerText = stats.win_count;
             document.getElementById('disp-losses').innerText = stats.loss_count;
 
@@ -306,7 +331,7 @@
                     background: 'transparent',
                     fontFamily: 'Share Tech Mono'
                 },
-                series: [{ name: 'Equity', data: dataPoints }],
+                series: [{ name: 'Cumulative Trade PnL', data: dataPoints }],
                 theme: { mode: document.body.classList.contains('dark-mode') ? 'dark' : 'light' },
                 stroke: { curve: 'smooth', width: 2.5, colors: ['#0ea5e9'] },
                 fill: {
