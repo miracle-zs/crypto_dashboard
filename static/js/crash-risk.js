@@ -16,7 +16,6 @@
         emptyStateBody: document.getElementById('crash-risk-empty-body'),
         detailRank: document.getElementById('crash-risk-detail-rank'),
         detailTitle: document.getElementById('crash-risk-detail-title'),
-        detailHint: document.getElementById('crash-risk-detail-hint'),
         detailStage: document.getElementById('crash-risk-detail-stage'),
         detailScore: document.getElementById('crash-risk-detail-score'),
         detailDriversCount: document.getElementById('crash-risk-detail-drivers-count'),
@@ -42,12 +41,12 @@
     };
     const emptyMessages = {
         empty: {
-            title: '暂无可展示的 crash-risk 结果',
-            body: '请点击“手动刷新”重新读取最新 leaderboard 快照。',
+            title: '暂无风险数据',
+            body: '点击“手动刷新”加载最新排行榜数据。',
         },
         error: {
-            title: '无法加载 crash-risk 数据',
-            body: '请稍后重试或检查 /api/crash-risk 是否可用。',
+            title: '风险数据加载失败',
+            body: '请稍后重试。',
         },
     };
 
@@ -152,10 +151,7 @@
 
         if (!row) {
             if (els.detailRank) els.detailRank.textContent = 'Rank --';
-            if (els.detailTitle) els.detailTitle.textContent = '点击左侧任意标的';
-            if (els.detailHint) {
-                els.detailHint.textContent = '这里会显示风险分数、驱动因子、分项评分和来源快照。';
-            }
+            if (els.detailTitle) els.detailTitle.textContent = '选择榜单中的标的';
             if (els.detailStage) {
                 els.detailStage.textContent = '观察';
                 els.detailStage.className = 'stage-pill watch';
@@ -175,9 +171,6 @@
 
         if (els.detailRank) els.detailRank.textContent = `Rank ${rank}`;
         if (els.detailTitle) els.detailTitle.textContent = row.symbol || '--';
-        if (els.detailHint) {
-            els.detailHint.textContent = `候选池内的 ${row.symbol || '--'} 当前处于 ${formatStage(row.stage)}，用于快速定位结构开始恶化的强势币。`;
-        }
         if (els.detailStage) {
             els.detailStage.textContent = formatStage(row.stage);
             els.detailStage.className = `stage-pill ${stageClass(row.stage)}`;
