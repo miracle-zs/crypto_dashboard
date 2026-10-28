@@ -6,6 +6,88 @@ from app.core.job_runtime import JobCategory, try_enter_slot
 from app.logger import logger
 
 UTC8 = ZoneInfo("Asia/Shanghai")
+DAY_MS = 24 * 60 * 60 * 1000
+
+
+def _retry_incomplete_open_positions(scheduler, rows, *, since: int, until: int):
+    """Retry only incomplete symbol/side groups with the configured full history window."""
+    if not rows:
+        return rows
+
+    full_lookback_days = int(scheduler.open_positions_full_lookback_days)
+    full_since = max(0, until - full_lookback_days * DAY_MS)
+    if full_since >= since:
+        return rows
+
+    extract_one = getattr(scheduler.processor, "_extract_open_positions_for_symbol", None)
+    normalize_symbol = getattr(scheduler, "_normalize_futures_symbol", None)
+    if not callable(extract_one) or not callable(normalize_symbol):
+        return rows
+
+    groups = {
+        (str(row.get("symbol") or "").upper(), str(row.get("side") or "").upper())
+        for row in rows
+        if row.get("is_incomplete") and row.get("symbol") and row.get("side")
+    }
+    if not groups:
+        return rows
+
+    resolved_rows = list(rows)
+    for symbol, side in sorted(groups):
+        group_rows = [
+            row
+            for row in resolved_rows
+            if str(row.get("symbol") or "").upper() == symbol
+            and str(row.get("side") or "").upper() == side
+        ]
+        target_qty = sum(abs(float(row.get("qty") or 0)) for row in group_rows)
+        if target_qty <= 0:
+            continue
+
+        signed_qty = target_qty if side == "LONG" else -target_qty
+        full_symbol = normalize_symbol(symbol)
+        try:
+            rebuilt_rows, _elapsed = extract_one(
+                symbol=full_symbol,
+                real_net_qty=signed_qty,
+                since=full_since,
+                until=until,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"扩大历史窗口重建未平仓明细失败，保留当前记录: {symbol} {side}: {exc}"
+            )
+            continue
+
+        if not rebuilt_rows:
+            continue
+        rebuilt_qty = sum(abs(float(row.get("qty") or 0)) for row in rebuilt_rows)
+        if abs(rebuilt_qty - target_qty) > 0.0001:
+            continue
+
+        old_incomplete_qty = sum(
+            abs(float(row.get("qty") or 0)) for row in group_rows if row.get("is_incomplete")
+        )
+        new_incomplete_qty = sum(
+            abs(float(row.get("qty") or 0)) for row in rebuilt_rows if row.get("is_incomplete")
+        )
+        if new_incomplete_qty + 0.0001 >= old_incomplete_qty:
+            continue
+
+        resolved_rows = [
+            row
+            for row in resolved_rows
+            if not (
+                str(row.get("symbol") or "").upper() == symbol
+                and str(row.get("side") or "").upper() == side
+            )
+        ]
+        resolved_rows.extend(rebuilt_rows)
+        logger.info(
+            f"未平仓明细已用 {full_lookback_days} 天历史补齐: {symbol} {side}"
+        )
+
+    return resolved_rows
 
 
 def run_sync_trades_incremental(scheduler):
@@ -61,6 +143,12 @@ def run_sync_open_positions(
                 error_message="position_risk_failed",
             )
             return
+        open_positions = _retry_incomplete_open_positions(
+            scheduler,
+            open_positions,
+            since=open_since,
+            until=until,
+        )
         if open_positions:
             open_count = scheduler.sync_repo.save_open_positions(open_positions)
             logger.info(f"保存 {open_count} 条未平仓订单")
